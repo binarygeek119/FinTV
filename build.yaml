@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.1.0.0"
+version: "0.0.1.0"
 targetAbi: "10.11.0.0"
 framework: "net9.0"
 owner: "binarygeek119"
@@ -14,4 +14,4 @@ category: "LiveTV"
 artifacts:
   - "Jellyfin.Plugin.FinTV.dll"
 changelog: |-
-  - Initial release
+  - Initial 0.0.1 release
