@@ -903,16 +903,16 @@
 
         click('btn-sync-commercials', () => api('/commercials/sync', { method: 'POST' })
             .then(() => { toast('Commercial sync started.', 'success'); return loadCommercials(); })
-            .catch((e) => toast(e.message, 'error'));
+            .catch((e) => toast(e.message, 'error')));
         click('btn-scan-blackframes', () => api('/commercials/scan-blackframes', { method: 'POST' })
             .then(() => { toast('Blackframe scan started.', 'success'); return loadCommercials(); })
-            .catch((e) => toast(e.message, 'error'));
+            .catch((e) => toast(e.message, 'error')));
         click('btn-sync-logos', () => api('/logos/sets/binarygeek119/sync', { method: 'POST' })
             .then(() => { toast('Logo set refreshed.', 'success'); return loadLogos(); })
-            .catch((e) => toast(e.message, 'error'));
+            .catch((e) => toast(e.message, 'error')));
         click('btn-rebuild-all', () => api('/tasks/rebuild-all', { method: 'POST' })
             .then(() => { toast('Rebuild all playouts started.', 'success'); $('task-status').textContent = 'Rebuild queued for all channels.'; })
-            .catch((e) => toast(e.message, 'error'));
+            .catch((e) => toast(e.message, 'error')));
 
         document.querySelectorAll('#FinTVConfigPage .btn-copy').forEach((btn) => btn.onclick = () => copyText(btn.dataset.copyTarget));
         click('btn-save-setup', saveSetupSettings);
