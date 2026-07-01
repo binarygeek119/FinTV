@@ -54,12 +54,15 @@ internal static class SchemaMigrator
 
         if (hasNumber && IsDecimalColumnType(numberType))
         {
+            await EnsureChannelNumberIndexAsync(db, cancellationToken);
             return;
         }
 
         if (hasNumberReal)
         {
             logger.LogInformation("Resuming Channels.Number decimal migration");
+            await DropChannelNumberIndexAsync(db, cancellationToken);
+
             if (hasNumber)
             {
                 await db.Database.ExecuteSqlRawAsync(
@@ -75,6 +78,7 @@ internal static class SchemaMigrator
                     cancellationToken);
             }
 
+            await EnsureChannelNumberIndexAsync(db, cancellationToken);
             return;
         }
 
@@ -85,6 +89,7 @@ internal static class SchemaMigrator
 
         logger.LogInformation("Migrating Channels.Number to REAL for sub-channel numbers");
 
+        await DropChannelNumberIndexAsync(db, cancellationToken);
         await db.Database.ExecuteSqlRawAsync(
             "ALTER TABLE \"Channels\" ADD COLUMN \"NumberReal\" REAL NOT NULL DEFAULT 1",
             cancellationToken);
@@ -94,6 +99,25 @@ internal static class SchemaMigrator
         await db.Database.ExecuteSqlRawAsync("ALTER TABLE \"Channels\" DROP COLUMN \"Number\"", cancellationToken);
         await db.Database.ExecuteSqlRawAsync(
             "ALTER TABLE \"Channels\" RENAME COLUMN \"NumberReal\" TO \"Number\"",
+            cancellationToken);
+        await EnsureChannelNumberIndexAsync(db, cancellationToken);
+    }
+
+    private static Task DropChannelNumberIndexAsync(FinTvDbContext db, CancellationToken cancellationToken)
+    {
+        return db.Database.ExecuteSqlRawAsync(
+            """
+            DROP INDEX IF EXISTS "IX_Channels_Number";
+            """,
+            cancellationToken);
+    }
+
+    private static Task EnsureChannelNumberIndexAsync(FinTvDbContext db, CancellationToken cancellationToken)
+    {
+        return db.Database.ExecuteSqlRawAsync(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_Channels_Number" ON "Channels" ("Number");
+            """,
             cancellationToken);
     }
 
@@ -148,6 +172,7 @@ internal static class SchemaMigrator
             VALUES ({0}, {1});
             """,
             MigrationKey,
-            DateTime.UtcNow.ToString("O"));
+            DateTime.UtcNow.ToString("O"),
+            cancellationToken);
     }
 }
