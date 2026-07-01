@@ -28,7 +28,7 @@ jobs:
           dotnet-version: '9.0.x'
 
       - name: Setup Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3c4c8cfc4a1268670 # v5.6.0
+        uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
@@ -50,7 +50,7 @@ jobs:
           echo "Built artifact: $zipfile"
 
       - name: Attach zip to GitHub Release
-        uses: softprops/action-gh-release@7c73fc4035990a0b7ce985e9cbbee4791472c3b8 # v2.2.1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.release.tag_name || inputs.tag }}
           files: ${{ steps.build.outputs.zipfile }}
