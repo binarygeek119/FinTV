@@ -1,0 +1,21 @@
+body { font-family: system-ui, sans-serif; margin: 0; background: #101820; color: #eee; }
+#fintv-app { max-width: 1200px; margin: 0 auto; padding: 1rem; }
+.fintv-header h1 { margin: 0; }
+.fintv-tabs { display: flex; gap: .5rem; flex-wrap: wrap; margin: 1rem 0; }
+.fintv-tabs .tab { background: #1f2937; color: #eee; border: 0; padding: .6rem 1rem; cursor: pointer; border-radius: 6px; }
+.fintv-tabs .tab.active { background: #2563eb; }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+.toolbar { display: flex; gap: .75rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
+.card { background: #1f2937; padding: 1rem; border-radius: 8px; margin-bottom: 1rem; }
+.card label { display: block; margin-bottom: .75rem; }
+.card input, .card select { width: 100%; max-width: 420px; padding: .4rem; }
+.hidden { display: none; }
+.lineup-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: .5rem; }
+.slot-card { background: #111827; border: 1px solid #374151; border-radius: 6px; padding: .5rem; min-height: 90px; cursor: pointer; }
+.slot-card .time { font-size: .8rem; color: #93c5fd; }
+.actions { display: flex; gap: .5rem; }
+button { background: #2563eb; color: white; border: 0; padding: .5rem 1rem; border-radius: 6px; cursor: pointer; }
+table { width: 100%; border-collapse: collapse; }
+td, th { border-bottom: 1px solid #374151; padding: .5rem; text-align: left; }
+code { background: #111827; padding: .2rem .4rem; border-radius: 4px; }

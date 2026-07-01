@@ -1,0 +1,12 @@
+name: FinTV
+guid: f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b
+targetAbi: "10.11.0.0"
+owner: binarygeek119
+overview: Simulated live TV channels with lineups, commercials, and IPTV streaming
+description: |
+  FinTV turns your Jellyfin library into always-on broadcast channels with
+  30-minute lineup grids, smart scheduling, commercial breaks, channel logos,
+  WeatherStar weather channel, and M3U/XMLTV Live TV integration.
+category: LiveTV
+artifacts:
+  - Jellyfin.Plugin.FinTV/Jellyfin.Plugin.FinTV.csproj

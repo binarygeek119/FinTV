@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>FinTV</title>
+    <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+    <div id="FinTVConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select">
+        <div id="fintv-app">
+            <header class="fintv-header">
+                <h1>FinTV</h1>
+                <p>Simulated live TV channels for Jellyfin</p>
+            </header>
+
+            <nav class="fintv-tabs">
+                <button class="tab active" data-tab="channels">Channels</button>
+                <button class="tab" data-tab="lineups">Lineups</button>
+                <button class="tab" data-tab="commercials">Commercials</button>
+                <button class="tab" data-tab="logos">Logo Sets</button>
+                <button class="tab" data-tab="setup">Live TV Setup</button>
+                <button class="tab" data-tab="tasks">Tasks</button>
+            </nav>
+
+            <section id="tab-channels" class="tab-panel active">
+                <div class="toolbar">
+                    <button id="btn-new-channel" class="raised button-submit emby-button">New Channel</button>
+                </div>
+                <div id="channels-list"></div>
+                <form id="channel-form" class="card hidden">
+                    <h2>Channel</h2>
+                    <label>Number <input id="ch-number" type="number" min="1" class="emby-input"></label>
+                    <label>Name <input id="ch-name" type="text" class="emby-input"></label>
+                    <label>Content Type
+                        <select id="ch-content-type" class="emby-select">
+                            <option value="0">TV Show</option>
+                            <option value="1">Movie</option>
+                            <option value="2">Music Video</option>
+                            <option value="3">Music</option>
+                            <option value="4">Weather</option>
+                        </select>
+                    </label>
+                    <label>Aspect Ratio
+                        <select id="ch-aspect" class="emby-select">
+                            <option value="0">16:9</option>
+                            <option value="1">4:3</option>
+                        </select>
+                    </label>
+                    <label><input id="ch-scanlines" type="checkbox"> Scanlines (4:3)</label>
+                    <label>Bug Placement
+                        <select id="ch-bug" class="emby-select">
+                            <option value="0">Auto</option>
+                            <option value="1">Top Left</option>
+                            <option value="2">Top Right</option>
+                            <option value="3">Bottom Left</option>
+                            <option value="4">Bottom Right</option>
+                        </select>
+                    </label>
+                    <label>Audio Language <input id="ch-audio" value="eng" class="emby-input"></label>
+                    <label>Weather Lat <input id="ch-lat" type="number" step="0.0001" class="emby-input"></label>
+                    <label>Weather Lon <input id="ch-lon" type="number" step="0.0001" class="emby-input"></label>
+                    <label><input id="ch-enabled" type="checkbox" checked> Enabled</label>
+                    <div class="actions">
+                        <button type="submit" class="raised button-submit emby-button">Save</button>
+                        <button type="button" id="btn-cancel-channel" class="emby-button">Cancel</button>
+                    </div>
+                </form>
+            </section>
+
+            <section id="tab-lineups" class="tab-panel">
+                <div class="toolbar">
+                    <label>Channel
+                        <select id="lineup-channel-select" class="emby-select"></select>
+                    </label>
+                    <button id="btn-save-lineup" class="raised button-submit emby-button">Save Lineup</button>
+                    <button id="btn-rebuild-lineup" class="emby-button">Rebuild Playout</button>
+                </div>
+                <div id="lineup-grid" class="lineup-grid"></div>
+                <div class="card">
+                    <h3>Override Lineups</h3>
+                    <button id="btn-add-override" class="emby-button">Add Friday / Special Day Override</button>
+                    <div id="override-list"></div>
+                </div>
+            </section>
+
+            <section id="tab-commercials" class="tab-panel">
+                <p>Tag commercial files in Jellyfin with <code>fintv-commercial</code>.</p>
+                <div class="toolbar">
+                    <button id="btn-sync-commercials" class="emby-button">Sync Commercial Library</button>
+                    <button id="btn-scan-blackframes" class="raised button-submit emby-button">Run Blackframe Scan</button>
+                </div>
+                <pre id="commercial-status"></pre>
+                <div id="commercial-list"></div>
+            </section>
+
+            <section id="tab-logos" class="tab-panel">
+                <p>Import the <a href="https://github.com/binarygeek119/open-channel-logos/tree/master/Binarygeek119%20Set" target="_blank">Binarygeek119 Set</a>.</p>
+                <p>Copy PNG logos into your FinTV data folder under <code>logos/binarygeek119/</code>, then click refresh.</p>
+                <button id="btn-sync-logos" class="emby-button">Import / Refresh Logo Set</button>
+                <div id="logo-set-info"></div>
+            </section>
+
+            <section id="tab-setup" class="tab-panel">
+                <div class="card">
+                    <h2>Jellyfin Live TV URLs</h2>
+                    <p><strong>M3U Tuner URL</strong><br><code id="setup-m3u"></code></p>
+                    <p><strong>XMLTV Guide URL</strong><br><code id="setup-epg"></code></p>
+                    <ol id="setup-steps"></ol>
+                </div>
+            </section>
+
+            <section id="tab-tasks" class="tab-panel">
+                <button id="btn-rebuild-all" class="raised button-submit emby-button">Rebuild All Playouts</button>
+                <pre id="task-status"></pre>
+            </section>
+        </div>
+    </div>
+    <script src="admin.js"></script>
+    <script>
+        var FinTVConfig = { pluginUniqueId: 'f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b' };
+        document.querySelector('#FinTVConfigPage').addEventListener('pageshow', function () {
+            if (typeof loadSetup === 'function') loadSetup();
+            if (typeof loadChannels === 'function') loadChannels().catch(console.error);
+        });
+    </script>
+</body>
+</html>
