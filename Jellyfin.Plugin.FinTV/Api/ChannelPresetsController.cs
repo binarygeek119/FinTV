@@ -49,6 +49,13 @@ public class ChannelPresetsController : ControllerBase
         [FromBody] ApplyChannelPresetsRequest request,
         CancellationToken cancellationToken)
     {
-        return Ok(await _presets.ApplyAsync(request, cancellationToken));
+        try
+        {
+            return Ok(await _presets.ApplyAsync(request, cancellationToken));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
     }
 }

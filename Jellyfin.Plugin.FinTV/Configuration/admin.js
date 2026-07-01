@@ -33,31 +33,59 @@
 
         if (typeof ApiClient !== 'undefined' && typeof ApiClient.ajax === 'function') {
             return new Promise((resolve, reject) => {
-                ApiClient.ajax({
+                const ajaxOptions = {
                     url: url,
                     type: method,
-                    data: options.body ? JSON.parse(options.body) : null,
-                    contentType: options.body ? 'application/json' : undefined,
                     dataType: 'json',
                     success: function (data) {
                         resolve(data);
                     },
                     error: function (xhr) {
-                        reject(new Error(xhr.responseText || xhr.statusText || 'Request failed'));
+                        let message = xhr.responseText || xhr.statusText || 'Request failed';
+                        try {
+                            const parsed = JSON.parse(message);
+                            if (parsed.title) {
+                                message = parsed.title;
+                            } else if (parsed.errors) {
+                                message = Object.values(parsed.errors).flat().join(' ');
+                            }
+                        } catch (ignore) {
+                            // Keep raw response text.
+                        }
+
+                        reject(new Error(message));
                     }
-                });
+                };
+
+                if (options.body) {
+                    ajaxOptions.contentType = 'application/json';
+                    ajaxOptions.data = options.body;
+                    ajaxOptions.processData = false;
+                }
+
+                ApiClient.ajax(ajaxOptions);
             });
         }
 
-        return fetch(url, Object.assign({
-            headers: { 'Content-Type': 'application/json' },
+        const fetchOptions = {
+            method: method,
             credentials: 'same-origin'
-        }, options)).then(async (res) => {
+        };
+
+        if (options.body) {
+            fetchOptions.headers = { 'Content-Type': 'application/json' };
+            fetchOptions.body = options.body;
+        }
+
+        return fetch(url, fetchOptions).then(async (res) => {
             if (!res.ok) {
                 const text = await res.text();
                 throw new Error(text || res.statusText);
             }
-            if (res.status === 204) return null;
+            if (res.status === 204) {
+                return null;
+            }
+
             const text = await res.text();
             return text ? JSON.parse(text) : null;
         });
