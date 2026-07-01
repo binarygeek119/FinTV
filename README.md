@@ -33,9 +33,21 @@ Inspired by [ErsatzTV/legacy](https://github.com/ErsatzTV/legacy) scheduling con
 
 ### Manual install
 
-1. Download `Jellyfin.Plugin.FinTV.zip` from [Releases](https://github.com/binarygeek119/FinTV/releases)
+1. Download `fintv_<version>.zip` from [Releases](https://github.com/binarygeek119/FinTV/releases) (for example `fintv_0.0.1.0.zip`)
 2. Extract to `{JellyfinData}/plugins/FinTV/`
 3. Restart Jellyfin
+
+## Releasing
+
+1. Bump `version` and `changelog` in [`build.yaml`](build.yaml)
+2. Commit and push to `master`
+3. Create a GitHub Release from a tag like `v0.0.1.0`
+4. The **Publish Plugin** workflow will:
+   - Build the plugin zip with JPRM
+   - Attach `fintv_<version>.zip` to the release
+   - Update [`manifest.json`](manifest.json) with the MD5 checksum and download URL
+
+The **Build Plugin** workflow on push only validates the build and stores a temporary Actions artifact. Release zips come from the publish workflow.
 
 ## Live TV setup
 
