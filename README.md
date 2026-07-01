@@ -24,12 +24,36 @@ Inspired by [ErsatzTV/legacy](https://github.com/ErsatzTV/legacy) scheduling con
 
 ## Install from GitHub
 
-1. Open Jellyfin **Dashboard → Plugins → Repositories**
-2. Add repository URL:
-   ```
-   https://raw.githubusercontent.com/binarygeek119/FinTV/master/manifest.json
-   ```
-3. Open **Catalog**, install **FinTV**, restart Jellyfin
+FinTV is **not** in Jellyfin’s official plugin repository. You must add this repo manually, then browse **Available** plugins (not Installed).
+
+### 1. Add the plugin repository
+
+1. Open **Dashboard → Plugins → Repositories**
+2. Click **+** (New Repository)
+3. Set:
+   - **Name:** `FinTV` (any name is fine)
+   - **URL:** `https://raw.githubusercontent.com/binarygeek119/FinTV/master/manifest.json`
+4. Save. Ensure the new repository is **enabled**.
+
+### 2. Install from the catalog
+
+1. Open **Dashboard → Plugins**
+2. Click **Available** (Jellyfin 10.11 defaults to **Installed**, which hides catalog plugins)
+3. Optional: filter category **Live TV**, or search **FinTV**
+4. Install **FinTV 0.0.1.0**, then restart Jellyfin when prompted
+
+**Requirements:** Jellyfin **10.11.0** or newer. Older servers hide this plugin because `targetAbi` is `10.11.0.0`.
+
+### Troubleshooting
+
+| Symptom | Fix |
+|--------|-----|
+| Plugin not listed at all | Confirm Jellyfin is **10.11+** and the custom repository URL is exact (must end in `/manifest.json`) |
+| Only see installed plugins | Switch the filter from **Installed** to **Available** |
+| Repository added but still empty | Check **Dashboard → Plugins → Repositories** — repo must be enabled. Restart Jellyfin after adding it |
+| Install fails checksum error | Re-run the [Publish Plugin](https://github.com/binarygeek119/FinTV/actions/workflows/publish.yaml) workflow for your release tag |
+| Server cannot reach GitHub | Jellyfin must download the manifest and zip from the internet; check server logs for `An error occurred while accessing the plugin manifest` |
+
 
 ### Manual install
 
