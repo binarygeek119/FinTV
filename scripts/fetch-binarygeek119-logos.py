@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""Download Binarygeek119 Set/English logos for bundling with the FinTV plugin."""
+
+from __future__ import annotations
+
+import json
+import sys
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+REPO = "binarygeek119/open-channel-logos"
+TREE_URL = f"https://api.github.com/repos/{REPO}/git/trees/master?recursive=1"
+RAW_BASE = f"https://raw.githubusercontent.com/{REPO}/master/"
+PREFIX = "Binarygeek119 Set/English/"
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
+
+
+def is_image(path: str) -> bool:
+    return Path(path).suffix.lower() in IMAGE_SUFFIXES
+
+
+def fetch_tree() -> list[dict]:
+    request = urllib.request.Request(
+        TREE_URL,
+        headers={
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "FinTV-Jellyfin-Plugin",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=120) as response:
+        payload = json.load(response)
+    return payload.get("tree") or []
+
+
+def download_file(repo_path: str, destination: Path) -> None:
+    encoded = "/".join(urllib.parse.quote(part) for part in repo_path.split("/"))
+    url = RAW_BASE + encoded
+    request = urllib.request.Request(url, headers={"User-Agent": "FinTV-Jellyfin-Plugin"})
+    with urllib.request.urlopen(request, timeout=120) as response:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(response.read())
+
+
+def main() -> int:
+    output_dir = Path(sys.argv[1] if len(sys.argv) > 1 else "Jellyfin.Plugin.FinTV/Assets/logos/binarygeek119")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    files = [
+        item
+        for item in fetch_tree()
+        if item.get("type") == "blob"
+        and item.get("path", "").startswith(PREFIX)
+        and is_image(item["path"])
+    ]
+
+    print(f"Bundling {len(files)} Binarygeek119 logos into {output_dir}")
+    for item in files:
+        relative = item["path"][len(PREFIX) :]
+        destination = output_dir / relative.replace("/", "\\") if sys.platform == "win32" else output_dir / relative
+        if destination.exists():
+            continue
+        download_file(item["path"], destination)
+        print(f"  {relative}")
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

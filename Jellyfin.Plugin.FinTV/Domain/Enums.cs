@@ -58,3 +58,16 @@ public enum VirtualContentSource
     WeatherStar = 1,
     MusicArtSlide = 2
 }
+
+public enum EbsBackgroundMusicSource
+{
+    /// <summary>
+    /// Pick random tracks from all Jellyfin music libraries.
+    /// </summary>
+    AllMusicLibraries = 0,
+
+    /// <summary>
+    /// Pick random tracks from one selected music library.
+    /// </summary>
+    NamedLibrary = 1
+}

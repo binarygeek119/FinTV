@@ -48,3 +48,7 @@ msbuild.wrn
 *.db
 *.db-shm
 *.db-wal
+
+# Bundled logos fetched at build time
+Jellyfin.Plugin.FinTV/Assets/logos/
+release-artifact/

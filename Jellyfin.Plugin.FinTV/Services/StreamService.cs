@@ -36,6 +36,7 @@ public class StreamService
         var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
         var catalog = scope.ServiceProvider.GetRequiredService<JellyfinCatalogService>();
         var weather = scope.ServiceProvider.GetRequiredService<WeatherStarChannelService>();
+        var ebs = scope.ServiceProvider.GetRequiredService<EbsService>();
 
         var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
         if (channel is null)
@@ -49,49 +50,39 @@ public class StreamService
             return;
         }
 
-        var now = DateTime.UtcNow;
-        var batch = await db.PlayoutItems
-            .Where(p => p.ChannelId == channelId && p.Finish > now)
-            .OrderBy(p => p.Start)
-            .Take(5)
-            .AsNoTracking()
-            .ToListAsync(cancellationToken);
-
-        if (batch.Count == 0)
-        {
-            await WriteOfflineSlateAsync(channel, output, cancellationToken);
-            return;
-        }
-
         var ffmpegPath = _mediaEncoder.EncoderPath;
 
-        foreach (var item in batch)
+        while (!cancellationToken.IsCancellationRequested)
         {
-            if (cancellationToken.IsCancellationRequested)
+            var current = await GetCurrentItemAsync(channelId, cancellationToken);
+            if (current is not null)
             {
-                break;
+                try
+                {
+                    if (current.IsVirtual && current.VirtualSource == VirtualContentSource.MusicArtSlide)
+                    {
+                        await StreamMusicItemAsync(channel, current, catalog, ffmpegPath, output, cancellationToken);
+                    }
+                    else if (current.JellyfinItemId.HasValue)
+                    {
+                        await StreamMediaItemAsync(channel, current, catalog, ffmpegPath, output, cancellationToken);
+                    }
+                    else
+                    {
+                        await WriteEbsAsync(channel, ebs, catalog, ffmpegPath, output, 180, cancellationToken);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed streaming item {Title}", current.Title);
+                    await WriteEbsAsync(channel, ebs, catalog, ffmpegPath, output, 120, cancellationToken);
+                }
+
+                continue;
             }
 
-            if (item.Start > DateTime.UtcNow.AddMinutes(5))
-            {
-                break;
-            }
-
-            try
-            {
-                if (item.IsVirtual && item.VirtualSource == VirtualContentSource.MusicArtSlide)
-                {
-                    await StreamMusicItemAsync(channel, item, catalog, ffmpegPath, output, cancellationToken);
-                }
-                else if (item.JellyfinItemId.HasValue)
-                {
-                    await StreamMediaItemAsync(channel, item, catalog, ffmpegPath, output, cancellationToken);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed streaming item {Title}", item.Title);
-            }
+            var ebsDuration = await GetEbsDurationSecondsAsync(channelId, cancellationToken);
+            await WriteEbsAsync(channel, ebs, catalog, ffmpegPath, output, ebsDuration, cancellationToken);
         }
     }
 
@@ -107,6 +98,26 @@ public class StreamService
             .FirstOrDefaultAsync(cancellationToken);
     }
 
+    private async Task<double> GetEbsDurationSecondsAsync(Guid channelId, CancellationToken cancellationToken)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
+        var now = DateTime.UtcNow;
+        var nextStart = await db.PlayoutItems
+            .AsNoTracking()
+            .Where(p => p.ChannelId == channelId && p.Start > now)
+            .OrderBy(p => p.Start)
+            .Select(p => p.Start)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (nextStart == default)
+        {
+            return 600;
+        }
+
+        return Math.Clamp((nextStart - now).TotalSeconds, 30, 600);
+    }
+
     private async Task StreamMediaItemAsync(
         Channel channel,
         PlayoutItem item,
@@ -120,13 +131,13 @@ public class StreamService
         var mediaItem = libraryManager.GetItemById(item.JellyfinItemId!.Value);
         if (mediaItem is null)
         {
-            return;
+            throw new InvalidOperationException($"Media item {item.JellyfinItemId} not found.");
         }
 
         var inputPath = catalog.GetMediaPath(mediaItem);
         if (string.IsNullOrWhiteSpace(inputPath) || !File.Exists(inputPath))
         {
-            return;
+            throw new FileNotFoundException($"Media path missing for {item.Title}.");
         }
 
         var offset = Math.Max(0, (DateTime.UtcNow - item.Start).TotalSeconds + item.InPoint.TotalSeconds);
@@ -149,13 +160,13 @@ public class StreamService
         var mediaItem = libraryManager.GetItemById(item.JellyfinItemId!.Value);
         if (mediaItem is null)
         {
-            return;
+            throw new InvalidOperationException($"Music item {item.JellyfinItemId} not found.");
         }
 
         var inputPath = catalog.GetMediaPath(mediaItem);
         if (string.IsNullOrWhiteSpace(inputPath) || !File.Exists(inputPath))
         {
-            return;
+            throw new FileNotFoundException($"Music path missing for {item.Title}.");
         }
 
         var albumArt = catalog.GetPrimaryImagePath(mediaItem);
@@ -163,10 +174,32 @@ public class StreamService
         await RunFfmpegToStreamAsync(ffmpegPath, args, output, cancellationToken);
     }
 
-    private async Task WriteOfflineSlateAsync(Channel channel, Stream output, CancellationToken cancellationToken)
+    private async Task WriteEbsAsync(
+        Channel channel,
+        EbsService ebs,
+        JellyfinCatalogService catalog,
+        string ffmpegPath,
+        Stream output,
+        double durationSeconds,
+        CancellationToken cancellationToken)
     {
-        var ffmpegPath = _mediaEncoder.EncoderPath;
-        var args = _ffmpeg.BuildOfflineSlateCommand(channel);
+        var slatePath = ebs.ResolveRandomSlatePath();
+        if (string.IsNullOrWhiteSpace(slatePath))
+        {
+            _logger.LogWarning("No EBS slate found for channel {Channel}; using text slate", channel.Name);
+            var fallback = _ffmpeg.BuildOfflineSlateCommand(channel);
+            await RunFfmpegToStreamAsync(ffmpegPath, fallback, output, cancellationToken);
+            return;
+        }
+
+        string? audioPath = null;
+        var track = ebs.PickBackgroundMusicTrack();
+        if (track is not null)
+        {
+            audioPath = catalog.GetMediaPath(track);
+        }
+
+        var args = _ffmpeg.BuildEbsCommand(channel, slatePath, audioPath, durationSeconds);
         await RunFfmpegToStreamAsync(ffmpegPath, args, output, cancellationToken);
     }
 

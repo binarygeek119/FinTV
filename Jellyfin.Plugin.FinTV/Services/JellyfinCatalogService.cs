@@ -106,6 +106,83 @@ public class JellyfinCatalogService
         return _libraryManager.GetItemsResult(query).Items.ToList();
     }
 
+    public IReadOnlyList<BaseItem> QueryAllMusicAudio()
+    {
+        var query = new InternalItemsQuery
+        {
+            Recursive = true,
+            IsVirtualItem = false,
+            IncludeItemTypes = new[] { BaseItemKind.Audio },
+            OrderBy = new[] { (ItemSortBy.SortName, Jellyfin.Database.Implementations.Enums.SortOrder.Ascending) }
+        };
+
+        return _libraryManager.GetItemsResult(query).Items.ToList();
+    }
+
+    public IReadOnlyList<BaseItem> QueryMusicAudioFromLibrary(string? libraryId, string? libraryName)
+    {
+        var library = ResolveMusicLibrary(libraryId, libraryName);
+        if (library is null)
+        {
+            return Array.Empty<BaseItem>();
+        }
+
+        var query = new InternalItemsQuery
+        {
+            ParentId = library.Id,
+            Recursive = true,
+            IsVirtualItem = false,
+            IncludeItemTypes = new[] { BaseItemKind.Audio },
+            OrderBy = new[] { (ItemSortBy.SortName, Jellyfin.Database.Implementations.Enums.SortOrder.Ascending) }
+        };
+
+        return _libraryManager.GetItemsResult(query).Items.ToList();
+    }
+
+    public IReadOnlyList<MusicLibraryInfo> GetMusicLibraries()
+    {
+        return EnumerateMusicLibraries()
+            .Select(folder => new MusicLibraryInfo
+            {
+                Id = folder.Id,
+                Name = folder.Name
+            })
+            .OrderBy(l => l.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private CollectionFolder? ResolveMusicLibrary(string? libraryId, string? libraryName)
+    {
+        if (!string.IsNullOrWhiteSpace(libraryId) && Guid.TryParse(libraryId, out var parsedId))
+        {
+            if (_libraryManager.GetItemById(parsedId) is CollectionFolder folderById
+                && folderById.CollectionType == CollectionType.music)
+            {
+                return folderById;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(libraryName))
+        {
+            return null;
+        }
+
+        return EnumerateMusicLibraries()
+            .FirstOrDefault(folder => folder.Name.Equals(libraryName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private IEnumerable<CollectionFolder> EnumerateMusicLibraries()
+    {
+        var root = _libraryManager.GetUserRootFolder();
+        foreach (var child in root.Children)
+        {
+            if (child is CollectionFolder folder && folder.CollectionType == CollectionType.music)
+            {
+                yield return folder;
+            }
+        }
+    }
+
     public TimeSpan GetRuntime(BaseItem item)
     {
         if (item.RunTimeTicks.HasValue)
@@ -197,4 +274,11 @@ public class FilterDefinition
     public List<string>? Tags { get; set; }
 
     public string? TitleContains { get; set; }
+}
+
+public class MusicLibraryInfo
+{
+    public Guid Id { get; set; }
+
+    public string Name { get; set; } = string.Empty;
 }

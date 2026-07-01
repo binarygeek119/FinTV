@@ -28,10 +28,43 @@
     <PackageReference Include="Microsoft.Playwright" Version="1.49.0" />
   </ItemGroup>
 
+  <PropertyGroup>
+    <SkipLogoFetch>false</SkipLogoFetch>
+  </PropertyGroup>
+
   <ItemGroup>
     <EmbeddedResource Include="Configuration\configPage.html" />
     <EmbeddedResource Include="Configuration\admin.js" />
     <EmbeddedResource Include="Configuration\admin.css" />
   </ItemGroup>
+
+  <Target Name="FetchBinarygeek119Logos" BeforeTargets="PrepareForBuild" Condition="'$(SkipLogoFetch)' != 'true'">
+    <Exec Condition="'$(OS)' == 'Windows_NT'" Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)..\scripts\fetch-binarygeek119-logos.ps1&quot; -OutputDir &quot;$(MSBuildThisFileDirectory)Assets\logos\binarygeek119&quot;" />
+    <Exec Condition="'$(OS)' != 'Windows_NT'" Command="python3 &quot;$(MSBuildThisFileDirectory)..\scripts\fetch-binarygeek119-logos.py&quot; &quot;$(MSBuildThisFileDirectory)Assets\logos\binarygeek119&quot;" />
+  </Target>
+
+  <Target Name="AddBundledLogosToPublish" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <BundledLogo Include="$(MSBuildThisFileDirectory)Assets\logos\binarygeek119\**\*.*" Condition="Exists('$(MSBuildThisFileDirectory)Assets\logos\binarygeek119')" />
+      <ResolvedFileToPublish Include="@(BundledLogo)">
+        <RelativePath>logos\binarygeek119\%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+
+  <Target Name="CopyBundledLogosToOutput" AfterTargets="Build" Condition="Exists('$(MSBuildThisFileDirectory)Assets\logos\binarygeek119')">
+    <ItemGroup>
+      <BundledLogoOutput Include="$(MSBuildThisFileDirectory)Assets\logos\binarygeek119\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(BundledLogoOutput)" DestinationFiles="@(BundledLogoOutput->'$(OutputPath)logos\binarygeek119\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyBundledLogosToPublishDir" AfterTargets="Publish" Condition="Exists('$(MSBuildThisFileDirectory)Assets\logos\binarygeek119')">
+    <ItemGroup>
+      <BundledLogoPublish Include="$(MSBuildThisFileDirectory)Assets\logos\binarygeek119\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(BundledLogoPublish)" DestinationFiles="@(BundledLogoPublish->'$(PublishDir)logos\binarygeek119\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

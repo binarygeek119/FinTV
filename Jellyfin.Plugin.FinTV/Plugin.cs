@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Reflection;
 using Jellyfin.Plugin.FinTV.Configuration;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
@@ -48,6 +49,14 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     /// Gets the cached logo storage folder.
     /// </summary>
     public string LogosFolder => Path.Combine(DataFolder, "logos");
+
+    /// <summary>
+    /// Gets logos shipped inside the plugin install folder.
+    /// </summary>
+    public string BundledLogosFolder => Path.Combine(
+        Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location) ?? ApplicationPaths.PluginsPath,
+        "logos",
+        "binarygeek119");
 
     /// <summary>
     /// Gets the WeatherStar asset folder.

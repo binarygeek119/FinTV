@@ -35,6 +35,12 @@ jobs:
       - name: Install JPRM
         run: python -m pip install --upgrade jprm
 
+      - name: Fetch bundled Binarygeek119 logos
+        run: python3 scripts/fetch-binarygeek119-logos.py Jellyfin.Plugin.FinTV/Assets/logos/binarygeek119
+
+      - name: Update build.yaml logo artifacts
+        run: python3 scripts/update-build-artifacts.py
+
       - name: Build plugin zip
         id: build
         run: |

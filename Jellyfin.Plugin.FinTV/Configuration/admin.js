@@ -768,6 +768,32 @@
         if ($('setup-base-url')) $('setup-base-url').textContent = data.baseUrl || '';
     }
 
+    function updateEbsLibraryFieldVisibility() {
+        const source = Number($('setup-ebs-music-source')?.value || '1');
+        const field = $('setup-ebs-library-field');
+        if (field) field.style.display = source === 1 ? '' : 'none';
+    }
+
+    function populateEbsMusicLibraries(libraries, selectedId, selectedName) {
+        const select = $('setup-ebs-music-library');
+        if (!select) return;
+
+        const options = (libraries || []).map((lib) =>
+            `<option value="${escapeHtml(String(lib.id))}">${escapeHtml(lib.name)}</option>`
+        );
+        select.innerHTML = options.join('');
+
+        if (selectedId && [...select.options].some((opt) => opt.value === selectedId)) {
+            select.value = selectedId;
+            return;
+        }
+
+        const byName = [...select.options].find((opt) => opt.textContent === selectedName);
+        if (byName) {
+            select.value = byName.value;
+        }
+    }
+
     async function loadSetup() {
         try {
             const data = await api('/setup/urls');
@@ -775,6 +801,13 @@
             try {
                 const settings = await api('/setup/settings');
                 if ($('setup-public-base')) $('setup-public-base').value = settings.publicBaseUrl || '';
+                if ($('setup-ebs-music-source')) $('setup-ebs-music-source').value = String(settings.ebsBackgroundMusicSource ?? 1);
+                populateEbsMusicLibraries(
+                    settings.musicLibraries,
+                    settings.ebsBackgroundMusicLibraryId || '',
+                    settings.ebsBackgroundMusicLibraryName || 'Background Music'
+                );
+                updateEbsLibraryFieldVisibility();
             } catch (settingsErr) {
                 console.warn('Could not load setup settings', settingsErr);
             }
@@ -786,13 +819,24 @@
 
     async function saveSetupSettings() {
         const publicBaseUrl = $('setup-public-base').value.trim();
+        const ebsBackgroundMusicSource = Number($('setup-ebs-music-source')?.value || '1');
+        const librarySelect = $('setup-ebs-music-library');
+        const selectedOption = librarySelect?.selectedOptions?.[0];
+        const ebsBackgroundMusicLibraryId = selectedOption?.value || null;
+        const ebsBackgroundMusicLibraryName = selectedOption?.textContent?.trim() || 'Background Music';
         try {
             const data = await api('/setup/settings', {
                 method: 'PUT',
-                body: JSON.stringify({ publicBaseUrl: publicBaseUrl || null })
+                body: JSON.stringify({
+                    publicBaseUrl: publicBaseUrl || null,
+                    ebsBackgroundMusicSource,
+                    ebsBackgroundMusicLibraryId,
+                    ebsBackgroundMusicLibraryName
+                })
             });
             applySetupData(data);
             if ($('setup-public-base')) $('setup-public-base').value = publicBaseUrl;
+            updateEbsLibraryFieldVisibility();
             toast('Live TV URLs updated.', 'success');
         } catch (err) {
             toast(err.message, 'error');
@@ -852,6 +896,7 @@
 
         document.querySelectorAll('.btn-copy').forEach((btn) => btn.onclick = () => copyText(btn.dataset.copyTarget));
         if ($('btn-save-setup')) $('btn-save-setup').onclick = saveSetupSettings;
+        if ($('setup-ebs-music-source')) $('setup-ebs-music-source').onchange = updateEbsLibraryFieldVisibility;
         if ($('btn-apply-presets')) $('btn-apply-presets').onclick = applyPresets;
         if ($('preset-numbering-mode')) $('preset-numbering-mode').onchange = loadPresets;
         $('modal-close').onclick = closeModal;

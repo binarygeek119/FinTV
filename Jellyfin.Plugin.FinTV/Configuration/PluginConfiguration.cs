@@ -1,3 +1,4 @@
+using Jellyfin.Plugin.FinTV.Domain;
 using MediaBrowser.Model.Plugins;
 
 namespace Jellyfin.Plugin.FinTV.Configuration;
@@ -15,6 +16,21 @@ public class PluginConfiguration : BasePluginConfiguration
     public int HistoryDaysToConsider { get; set; } = 7;
 
     public string? PublicBaseUrl { get; set; }
+
+    /// <summary>
+    /// Where EBS off-air background music is selected from.
+    /// </summary>
+    public EbsBackgroundMusicSource EbsBackgroundMusicSource { get; set; } = EbsBackgroundMusicSource.NamedLibrary;
+
+    /// <summary>
+    /// Music library name used when <see cref="EbsBackgroundMusicSource"/> is <see cref="EbsBackgroundMusicSource.NamedLibrary"/>.
+    /// </summary>
+    public string EbsBackgroundMusicLibraryName { get; set; } = "Background Music";
+
+    /// <summary>
+    /// Optional Jellyfin library identifier for EBS background music.
+    /// </summary>
+    public string? EbsBackgroundMusicLibraryId { get; set; }
 
     public bool AutoRegisterLiveTv { get; set; }
 

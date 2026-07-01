@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.3"
+version: "0.0.2.4"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -51,10 +51,39 @@ artifacts:
   - "runtimes/linux-musl-arm/native/libe_sqlite3.so"
   - "runtimes/osx-x64/native/libe_sqlite3.dylib"
   - "runtimes/osx-arm64/native/libe_sqlite3.dylib"
+  - "logos/binarygeek119/EBS/offline.jpg"
+  - "logos/binarygeek119/EBS/offline2.jpg"
+  - "logos/binarygeek119/EBS/offlineusa.jpg"
+  - "logos/binarygeek119/Movies/Creature_Double_Feature.png"
+  - "logos/binarygeek119/Movies/Hero_TV.png"
+  - "logos/binarygeek119/Movies/The Holiday Channel/christmas-marry.png"
+  - "logos/binarygeek119/Movies/The Holiday Channel/christmas.png"
+  - "logos/binarygeek119/Movies/The Holiday Channel/easter.png"
+  - "logos/binarygeek119/Movies/The Holiday Channel/halloween.png"
+  - "logos/binarygeek119/Movies/The Holiday Channel/halloween_alt-happy.png"
+  - "logos/binarygeek119/Movies/The Holiday Channel/halloween_alt.png"
+  - "logos/binarygeek119/Movies/The Holiday Channel/October.png"
+  - "logos/binarygeek119/Movies/The Holiday Channel/The Holiday Channel - Independence Day.png"
+  - "logos/binarygeek119/Movies/The Holiday Channel/The Holiday Channel -Thanksgiving Day.png"
+  - "logos/binarygeek119/Movies/The Holiday Channel/The Holiday Channel-plane.png"
+  - "logos/binarygeek119/Movies/The Holiday Channel/The Holiday Channel-Valentine's Day.png"
+  - "logos/binarygeek119/Music Videos Channels/Rap-On-Tap.png"
+  - "logos/binarygeek119/Music Videos Channels/The-Parody-Channel.png"
+  - "logos/binarygeek119/Shows/cops_and_robbers.png"
+  - "logos/binarygeek119/Shows/FlashBack_TV.png"
+  - "logos/binarygeek119/Shows/Flip_Television.png"
+  - "logos/binarygeek119/Shows/GET_LEARNEDED.png"
+  - "logos/binarygeek119/Shows/HeadPhone_Jack.png"
+  - "logos/binarygeek119/Shows/Retro_TV.png"
+  - "logos/binarygeek119/Shows/Slappy.png"
+  - "logos/binarygeek119/Shows/winning.png"
+  - "logos/binarygeek119/Shows/[open_swim].png"
 changelog: |-
+  - Bundle Binarygeek119 Set/English logos inside the plugin zip (no GitHub required on first run)
+  - Play EBS off-air slates with background music when a channel has no scheduled media
   - Add Binarygeek119 ready-made channel presets with legacy or subchannel numbering
-  - Download channel logos and on-screen bugs from open-channel-logos on GitHub
   - Redesign admin UI with lineup editor, presets tab, modals, and toasts
   - Support decimal channel numbers (e.g. 1.1–4.3) with SQLite schema migration
   - Fix Live TV M3U/XMLTV URLs with anonymous IPTV endpoints and public base URL setting
+  - Fix GitHub Actions build workflow to target net10.0 for Jellyfin 12
   - Add Jellyfin library catalog search for lineup item picker

@@ -127,7 +127,7 @@
                             <button id="btn-apply-presets" class="raised button-submit emby-button">Create Missing Channels</button>
                         </div>
                     </div>
-                    <p class="hint">Creates the standard Binarygeek119 TV lineup with channel numbers, names, library tags, and logos downloaded from <a href="https://github.com/binarygeek119/open-channel-logos/tree/master/Binarygeek119%20Set/English" target="_blank" rel="noopener">open-channel-logos</a> for both the Live TV guide icon and on-screen channel bug.</p>
+                    <p class="hint">Creates the standard Binarygeek119 TV lineup with channel numbers, names, library tags, and bundled logos from <a href="https://github.com/binarygeek119/open-channel-logos/tree/master/Binarygeek119%20Set" target="_blank" rel="noopener">open-channel-logos</a> for both the Live TV guide icon and on-screen channel bug.</p>
                     <label class="field">
                         <span>Channel numbering</span>
                         <select id="preset-numbering-mode" class="emby-select">
@@ -184,7 +184,7 @@
 
             <section id="tab-logos" class="tab-panel">
                 <p>Import the <a href="https://github.com/binarygeek119/open-channel-logos/tree/master/Binarygeek119%20Set" target="_blank" rel="noopener">Binarygeek119 Set</a>.</p>
-                <p class="hint">Logos are downloaded automatically from <a href="https://github.com/binarygeek119/open-channel-logos" target="_blank" rel="noopener">binarygeek119/open-channel-logos</a> when you create preset channels or click refresh below.</p>
+                <p class="hint">Channel bugs live under Shows, Movies, and Music Videos Channels. The <code>EBS/</code> folder is separate: those full-screen slates play when a channel has no scheduled media, with background music from your Jellyfin music libraries (configured in Live TV Setup).</p>
                 <button id="btn-sync-logos" class="emby-button">Import / Refresh Logo Set</button>
                 <div id="logo-set-info"></div>
             </section>
@@ -197,6 +197,18 @@
                         <span>Public server URL (optional override)</span>
                         <input id="setup-public-base" type="url" class="emby-input" placeholder="http://192.168.1.50:8096">
                     </label>
+                    <label class="field">
+                        <span>EBS background music source</span>
+                        <select id="setup-ebs-music-source" class="emby-input">
+                            <option value="0">All music libraries</option>
+                            <option value="1">Specific music library</option>
+                        </select>
+                    </label>
+                    <label class="field" id="setup-ebs-library-field">
+                        <span>Background music library</span>
+                        <select id="setup-ebs-music-library" class="emby-input"></select>
+                    </label>
+                    <p class="hint">When a viewer tunes in and the channel has no media scheduled, FinTV shows an EBS slate and plays random audio from the selected source. Create a library named <code>Background Music</code> or choose any music library.</p>
                     <div class="actions" style="margin-bottom:1rem">
                         <button type="button" id="btn-save-setup" class="raised button-submit emby-button">Save &amp; Refresh URLs</button>
                     </div>

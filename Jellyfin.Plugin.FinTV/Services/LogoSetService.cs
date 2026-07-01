@@ -64,6 +64,11 @@ public class LogoSetService
 
         if (localCount == 0)
         {
+            localCount = SeedBundledLogos(storagePath);
+        }
+
+        if (localCount == 0)
+        {
             await DownloadBinarygeek119SetFromGitHubAsync(storagePath, cancellationToken);
         }
 
@@ -80,6 +85,34 @@ public class LogoSetService
         Directory.CreateDirectory(storagePath);
         await DownloadBinarygeek119SetFromGitHubAsync(storagePath, cancellationToken);
         return await EnsureBinarygeek119SetAsync(cancellationToken);
+    }
+
+    private static int SeedBundledLogos(string storagePath)
+    {
+        var plugin = Plugin.Instance;
+        var bundledPath = plugin?.BundledLogosFolder;
+        if (string.IsNullOrWhiteSpace(bundledPath) || !Directory.Exists(bundledPath))
+        {
+            return 0;
+        }
+
+        foreach (var source in Directory.EnumerateFiles(bundledPath, "*.*", SearchOption.AllDirectories).Where(IsImageFile))
+        {
+            var relative = Path.GetRelativePath(bundledPath, source);
+            var destination = Path.Combine(storagePath, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+
+            if (File.Exists(destination))
+            {
+                continue;
+            }
+
+            File.Copy(source, destination);
+        }
+
+        return Directory.Exists(storagePath)
+            ? Directory.EnumerateFiles(storagePath, "*.*", SearchOption.AllDirectories).Count(IsImageFile)
+            : 0;
     }
 
     public async Task ScanLocalLogoFolderAsync(LogoSet set, string folder, CancellationToken cancellationToken = default)

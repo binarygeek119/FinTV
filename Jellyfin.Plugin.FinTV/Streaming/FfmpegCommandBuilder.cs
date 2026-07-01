@@ -1,6 +1,6 @@
 using Jellyfin.Plugin.FinTV.Domain;
+using MediaBrowser.Controller.Entities;
 using System.Globalization;
-
 namespace Jellyfin.Plugin.FinTV.Streaming;
 
 public class FfmpegCommandBuilder
@@ -80,6 +80,66 @@ public class FfmpegCommandBuilder
         });
 
         return args;
+    }
+
+    public IReadOnlyList<string> BuildEbsCommand(
+        Channel channel,
+        string slateImagePath,
+        string? audioPath,
+        double durationSeconds)
+    {
+        var (width, height) = GetResolution(channel);
+        var duration = Math.Max(30, durationSeconds).ToString("F0", CultureInfo.InvariantCulture);
+        var filter =
+            $"[1:v]scale={width}:{height}:force_original_aspect_ratio=decrease," +
+            $"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,format=yuv420p[vout]";
+
+        if (!string.IsNullOrWhiteSpace(audioPath) && File.Exists(audioPath))
+        {
+            return new List<string>
+            {
+                "-hide_banner",
+                "-loglevel", "warning",
+                "-stream_loop", "-1",
+                "-i", audioPath,
+                "-loop", "1",
+                "-i", slateImagePath,
+                "-filter_complex", filter,
+                "-map", "[vout]",
+                "-map", "0:a",
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-tune", "stillimage",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-t", duration,
+                "-shortest",
+                "-f", "mpegts",
+                "pipe:1"
+            };
+        }
+
+        return new List<string>
+        {
+            "-hide_banner",
+            "-loglevel", "warning",
+            "-f", "lavfi",
+            "-i", $"anullsrc=channel_layout=stereo:sample_rate=48000",
+            "-loop", "1",
+            "-i", slateImagePath,
+            "-filter_complex", filter,
+            "-map", "[vout]",
+            "-map", "0:a",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-tune", "stillimage",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-t", duration,
+            "-shortest",
+            "-f", "mpegts",
+            "pipe:1"
+        };
     }
 
     public IReadOnlyList<string> BuildOfflineSlateCommand(Channel channel)
@@ -193,8 +253,11 @@ public class FfmpegCommandBuilder
 
         if (channel.LogoSetId.HasValue && !string.IsNullOrWhiteSpace(channel.LogoFileName))
         {
-            var logosRoot = Path.Combine(Plugin.Instance?.LogosFolder ?? string.Empty, "binarygeek119");
-            if (Directory.Exists(logosRoot))
+            foreach (var logosRoot in new[]
+                     {
+                         Path.Combine(Plugin.Instance?.LogosFolder ?? string.Empty, "binarygeek119"),
+                         Plugin.Instance?.BundledLogosFolder ?? string.Empty
+                     }.Where(path => !string.IsNullOrWhiteSpace(path) && Directory.Exists(path)))
             {
                 var found = Directory.EnumerateFiles(logosRoot, channel.LogoFileName, SearchOption.AllDirectories)
                     .FirstOrDefault();
