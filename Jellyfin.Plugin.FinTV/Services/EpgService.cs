@@ -81,7 +81,7 @@ public class EpgService
                 .Append("\",")
                 .AppendLine(channel.Name);
 
-            sb.AppendLine($"{baseUrl.TrimEnd('/')}/FinTV/iptv/stream/{channel.Id:N}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"{baseUrl.TrimEnd('/')}/FinTV/iptv/stream/{channel.Id:N}");
         }
 
         return sb.ToString();

@@ -5,6 +5,8 @@
     <RootNamespace>Jellyfin.Plugin.FinTV</RootNamespace>
     <AssemblyName>Jellyfin.Plugin.FinTV</AssemblyName>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <CodeAnalysisRuleSet>..\jellyfin.ruleset</CodeAnalysisRuleSet>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>

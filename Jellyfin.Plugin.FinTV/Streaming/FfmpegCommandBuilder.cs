@@ -1,4 +1,5 @@
 using Jellyfin.Plugin.FinTV.Domain;
+using System.Globalization;
 
 namespace Jellyfin.Plugin.FinTV.Streaming;
 
@@ -18,8 +19,8 @@ public class FfmpegCommandBuilder
         {
             "-hide_banner",
             "-loglevel", "warning",
-            "-ss", startSeconds.ToString("F3"),
-            "-t", durationSeconds.ToString("F3"),
+            "-ss", startSeconds.ToString("F3", CultureInfo.InvariantCulture),
+            "-t", durationSeconds.ToString("F3", CultureInfo.InvariantCulture),
             "-i", inputPath,
             "-vf", vf,
             "-c:v", "libx264",

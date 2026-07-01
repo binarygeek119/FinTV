@@ -4,6 +4,9 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Jellyfin.Plugin.FinTV.Api;
 
+/// <summary>
+/// IPTV endpoints for M3U, XMLTV, and live MPEG-TS streams.
+/// </summary>
 [ApiController]
 [Route("FinTV/iptv")]
 public class IptvController : ControllerBase
@@ -11,12 +14,22 @@ public class IptvController : ControllerBase
     private readonly EpgService _epg;
     private readonly StreamService _stream;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="IptvController"/> class.
+    /// </summary>
+    /// <param name="epg">EPG service.</param>
+    /// <param name="stream">Stream service.</param>
     public IptvController(EpgService epg, StreamService stream)
     {
         _epg = epg;
         _stream = stream;
     }
 
+    /// <summary>
+    /// Gets the M3U playlist for all enabled channels.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>M3U playlist content.</returns>
     [HttpGet("channels.m3u")]
     public async Task<IActionResult> GetM3u(CancellationToken cancellationToken)
     {
@@ -25,6 +38,11 @@ public class IptvController : ControllerBase
         return Content(content, "audio/x-mpegurl");
     }
 
+    /// <summary>
+    /// Gets the XMLTV electronic program guide.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>XMLTV guide content.</returns>
     [HttpGet("epg.xml")]
     public async Task<IActionResult> GetEpg(CancellationToken cancellationToken)
     {
@@ -32,6 +50,12 @@ public class IptvController : ControllerBase
         return Content(content, "application/xml");
     }
 
+    /// <summary>
+    /// Streams the current MPEG-TS output for a channel.
+    /// </summary>
+    /// <param name="channelId">Channel identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Live transport stream.</returns>
     [HttpHead("stream/{channelId}")]
     [HttpGet("stream/{channelId}")]
     public async Task Stream(string channelId, CancellationToken cancellationToken)
@@ -54,6 +78,12 @@ public class IptvController : ControllerBase
         await _stream.StreamChannelAsync(id, Response.Body, cancellationToken);
     }
 
+    /// <summary>
+    /// Gets the playout item currently airing on a channel.
+    /// </summary>
+    /// <param name="channelId">Channel identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Current playout item.</returns>
     [HttpGet("now/{channelId}")]
     public async Task<IActionResult> GetNow(string channelId, CancellationToken cancellationToken)
     {

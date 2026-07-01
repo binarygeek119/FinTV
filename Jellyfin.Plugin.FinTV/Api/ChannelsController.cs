@@ -6,6 +6,9 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Jellyfin.Plugin.FinTV.Api;
 
+/// <summary>
+/// REST endpoints for FinTV channel management.
+/// </summary>
 [ApiController]
 [Route("FinTV/api/channels")]
 [Authorize(Policy = Policies.RequiresElevation)]
@@ -13,17 +16,32 @@ public class ChannelsController : ControllerBase
 {
     private readonly ChannelService _channels;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="ChannelsController"/> class.
+    /// </summary>
+    /// <param name="channels">Channel service.</param>
     public ChannelsController(ChannelService channels)
     {
         _channels = channels;
     }
 
+    /// <summary>
+    /// Gets all configured channels.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>List of channels.</returns>
     [HttpGet]
     public async Task<ActionResult<List<Channel>>> GetAll(CancellationToken cancellationToken)
     {
         return await _channels.GetAllAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// Gets a channel by identifier.
+    /// </summary>
+    /// <param name="id">Channel identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The channel, if found.</returns>
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<Channel>> Get(Guid id, CancellationToken cancellationToken)
     {
@@ -31,6 +49,12 @@ public class ChannelsController : ControllerBase
         return channel is null ? NotFound() : channel;
     }
 
+    /// <summary>
+    /// Creates a new channel with a default 48-slot lineup.
+    /// </summary>
+    /// <param name="channel">Channel definition.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The created channel.</returns>
     [HttpPost]
     public async Task<ActionResult<Channel>> Create([FromBody] Channel channel, CancellationToken cancellationToken)
     {
@@ -38,6 +62,13 @@ public class ChannelsController : ControllerBase
         return CreatedAtAction(nameof(Get), new { id = created.Id }, created);
     }
 
+    /// <summary>
+    /// Updates an existing channel.
+    /// </summary>
+    /// <param name="id">Channel identifier.</param>
+    /// <param name="channel">Updated channel values.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The updated channel.</returns>
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<Channel>> Update(Guid id, [FromBody] Channel channel, CancellationToken cancellationToken)
     {
@@ -45,6 +76,12 @@ public class ChannelsController : ControllerBase
         return updated is null ? NotFound() : updated;
     }
 
+    /// <summary>
+    /// Deletes a channel.
+    /// </summary>
+    /// <param name="id">Channel identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>No content when deleted.</returns>
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {

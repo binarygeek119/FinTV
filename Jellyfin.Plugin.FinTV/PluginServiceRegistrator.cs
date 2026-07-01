@@ -8,33 +8,37 @@ using Microsoft.Extensions.Hosting;
 
 namespace Jellyfin.Plugin.FinTV;
 
+/// <summary>
+/// Registers FinTV services with the Jellyfin DI container.
+/// </summary>
 public class PluginServiceRegistrator : IPluginServiceRegistrator
 {
-    public void RegisterServices(IServiceCollection services, IServerApplicationHost applicationHost)
+    /// <inheritdoc />
+    public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
         _ = applicationHost;
 
-        services.AddDbContext<FinTvDbContext>((sp, options) =>
+        serviceCollection.AddDbContext<FinTvDbContext>((sp, options) =>
         {
             var plugin = Plugin.Instance ?? throw new InvalidOperationException("FinTV plugin not initialized.");
             Directory.CreateDirectory(plugin.DataFolder);
             options.UseSqlite($"Data Source={plugin.DatabasePath}");
         });
 
-        services.AddHttpClient();
-        services.AddScoped<ChannelService>();
-        services.AddScoped<LineupService>();
-        services.AddScoped<SmartSelectionService>();
-        services.AddScoped<LineupGeneratorService>();
-        services.AddScoped<CommercialService>();
-        services.AddScoped<EpgService>();
-        services.AddScoped<LogoSetService>();
-        services.AddScoped<JellyfinCatalogService>();
-        services.AddScoped<WeatherStarChannelService>();
-        services.AddSingleton<StreamService>();
-        services.AddSingleton<Streaming.FfmpegCommandBuilder>();
-        services.AddHostedService<DatabaseInitializer>();
-        services.AddHostedService<PlayoutBuilderService>();
-        services.AddSingleton<BlackframeChapterTask>();
+        serviceCollection.AddHttpClient();
+        serviceCollection.AddScoped<ChannelService>();
+        serviceCollection.AddScoped<LineupService>();
+        serviceCollection.AddScoped<SmartSelectionService>();
+        serviceCollection.AddScoped<LineupGeneratorService>();
+        serviceCollection.AddScoped<CommercialService>();
+        serviceCollection.AddScoped<EpgService>();
+        serviceCollection.AddScoped<LogoSetService>();
+        serviceCollection.AddScoped<JellyfinCatalogService>();
+        serviceCollection.AddScoped<WeatherStarChannelService>();
+        serviceCollection.AddSingleton<StreamService>();
+        serviceCollection.AddSingleton<Streaming.FfmpegCommandBuilder>();
+        serviceCollection.AddHostedService<DatabaseInitializer>();
+        serviceCollection.AddHostedService<PlayoutBuilderService>();
+        serviceCollection.AddSingleton<BlackframeChapterTask>();
     }
 }
