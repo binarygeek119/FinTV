@@ -10,13 +10,13 @@
             </header>
 
             <nav class="fintv-tabs" role="tablist">
-                <button class="tab active" data-tab="channels" role="tab">Channels</button>
-                <button class="tab" data-tab="presets" role="tab">Presets</button>
-                <button class="tab" data-tab="lineups" role="tab">Lineups</button>
-                <button class="tab" data-tab="commercials" role="tab">Commercials</button>
-                <button class="tab" data-tab="logos" role="tab">Logo Sets</button>
-                <button class="tab" data-tab="setup" role="tab">Live TV Setup</button>
-                <button class="tab" data-tab="tasks" role="tab">Tasks</button>
+                <button type="button" class="tab active" data-tab="channels" role="tab">Channels</button>
+                <button type="button" class="tab" data-tab="presets" role="tab">Presets</button>
+                <button type="button" class="tab" data-tab="lineups" role="tab">Lineups</button>
+                <button type="button" class="tab" data-tab="commercials" role="tab">Commercials</button>
+                <button type="button" class="tab" data-tab="logos" role="tab">Logo Sets</button>
+                <button type="button" class="tab" data-tab="setup" role="tab">Live TV Setup</button>
+                <button type="button" class="tab" data-tab="tasks" role="tab">Tasks</button>
             </nav>
 
             <div id="toast-container" class="toast-container" aria-live="polite"></div>
@@ -25,7 +25,7 @@
                 <div class="split-layout">
                     <div class="split-main">
                         <div class="toolbar">
-                            <button id="btn-new-channel" class="raised button-submit emby-button">New Channel</button>
+                            <button type="button" id="btn-new-channel" class="raised button-submit emby-button">New Channel</button>
                             <input id="channel-filter" type="search" class="emby-input search-input" placeholder="Filter channels…">
                         </div>
                         <div id="channels-list" class="data-table-wrap"></div>
@@ -247,11 +247,64 @@
             </div>
         </div>
 
-    <script src="/web/configurationpage?name=FinTV_admin.js"></script>
-    <script>
-        var FinTVConfig = { pluginUniqueId: 'f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b' };
-        document.querySelector('#FinTVConfigPage').addEventListener('pageshow', function () {
-            if (typeof FinTV !== 'undefined' && FinTV.refresh) FinTV.refresh();
-        });
+    <script type="text/javascript">
+        (function () {
+            var scriptPromise;
+
+            function ensureCss() {
+                if (document.getElementById('fintv-admin-css')) {
+                    return;
+                }
+
+                var link = document.createElement('link');
+                link.id = 'fintv-admin-css';
+                link.rel = 'stylesheet';
+                link.href = '/web/configurationpage?name=FinTV_admin.css';
+                document.head.appendChild(link);
+            }
+
+            function ensureScript() {
+                if (window.FinTV && window.FinTV.init) {
+                    return Promise.resolve();
+                }
+
+                if (scriptPromise) {
+                    return scriptPromise;
+                }
+
+                scriptPromise = new Promise(function (resolve, reject) {
+                    var script = document.createElement('script');
+                    script.src = '/web/configurationpage?name=FinTV_admin.js';
+                    script.onload = function () { resolve(); };
+                    script.onerror = function () {
+                        scriptPromise = null;
+                        reject(new Error('FinTV admin.js failed to load'));
+                    };
+                    document.head.appendChild(script);
+                });
+
+                return scriptPromise;
+            }
+
+            function start() {
+                ensureCss();
+                ensureScript()
+                    .then(function () {
+                        if (window.FinTV && window.FinTV.init) {
+                            return window.FinTV.init();
+                        }
+                    })
+                    .catch(function (err) {
+                        console.error('[FinTV]', err);
+                    });
+            }
+
+            var page = document.getElementById('FinTVConfigPage');
+            if (page) {
+                page.addEventListener('pageshow', start);
+            }
+
+            start();
+        })();
     </script>
 </div>

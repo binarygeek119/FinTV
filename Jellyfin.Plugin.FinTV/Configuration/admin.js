@@ -861,48 +861,74 @@
     }
 
     function bindEvents() {
-        document.querySelectorAll('.tab').forEach((tab) => tab.onclick = () => switchTab(tab.dataset.tab));
-        $('btn-new-channel').onclick = async () => {
+        function click(id, handler) {
+            const el = $(id);
+            if (el) {
+                el.onclick = handler;
+            }
+        }
+
+        function change(id, handler) {
+            const el = $(id);
+            if (el) {
+                el.onchange = handler;
+            }
+        }
+
+        document.querySelectorAll('#FinTVConfigPage .tab').forEach((tab) => tab.onclick = () => switchTab(tab.dataset.tab));
+        click('btn-new-channel', async () => {
             resetChannelForm();
             await loadLogoSetsForForm();
             showChannelForm(true);
-        };
-        $('btn-close-channel').onclick = () => showChannelForm(false);
-        $('btn-cancel-channel').onclick = () => showChannelForm(false);
-        $('btn-delete-channel').onclick = deleteChannel;
-        $('channel-form').onsubmit = saveChannel;
-        $('ch-content-type').onchange = toggleWeatherFields;
-        $('ch-logo-set').onchange = () => populateLogoSelectors({ logoSetId: $('ch-logo-set').value, logoFileName: '' });
-        $('channel-filter').oninput = (e) => { channelFilter = e.target.value.trim(); renderChannelsList(); };
+        });
+        click('btn-close-channel', () => showChannelForm(false));
+        click('btn-cancel-channel', () => showChannelForm(false));
+        click('btn-delete-channel', deleteChannel);
+        const channelForm = $('channel-form');
+        if (channelForm) {
+            channelForm.onsubmit = saveChannel;
+        }
+        change('ch-content-type', toggleWeatherFields);
+        change('ch-logo-set', () => populateLogoSelectors({ logoSetId: $('ch-logo-set').value, logoFileName: '' }));
+        const channelFilterEl = $('channel-filter');
+        if (channelFilterEl) {
+            channelFilterEl.oninput = (e) => { channelFilter = e.target.value.trim(); renderChannelsList(); };
+        }
 
-        $('lineup-channel-select').onchange = loadLineups;
-        $('btn-save-lineup').onclick = saveLineup;
-        $('btn-rebuild-lineup').onclick = rebuildLineup;
-        $('btn-preview-lineup').onclick = previewLineup;
-        $('btn-add-override').onclick = openOverrideForm;
+        change('lineup-channel-select', loadLineups);
+        click('btn-save-lineup', saveLineup);
+        click('btn-rebuild-lineup', rebuildLineup);
+        click('btn-preview-lineup', previewLineup);
+        click('btn-add-override', openOverrideForm);
 
-        $('btn-sync-commercials').onclick = () => api('/commercials/sync', { method: 'POST' })
+        click('btn-sync-commercials', () => api('/commercials/sync', { method: 'POST' })
             .then(() => { toast('Commercial sync started.', 'success'); return loadCommercials(); })
             .catch((e) => toast(e.message, 'error'));
-        $('btn-scan-blackframes').onclick = () => api('/commercials/scan-blackframes', { method: 'POST' })
+        click('btn-scan-blackframes', () => api('/commercials/scan-blackframes', { method: 'POST' })
             .then(() => { toast('Blackframe scan started.', 'success'); return loadCommercials(); })
             .catch((e) => toast(e.message, 'error'));
-        $('btn-sync-logos').onclick = () => api('/logos/sets/binarygeek119/sync', { method: 'POST' })
+        click('btn-sync-logos', () => api('/logos/sets/binarygeek119/sync', { method: 'POST' })
             .then(() => { toast('Logo set refreshed.', 'success'); return loadLogos(); })
             .catch((e) => toast(e.message, 'error'));
-        $('btn-rebuild-all').onclick = () => api('/tasks/rebuild-all', { method: 'POST' })
+        click('btn-rebuild-all', () => api('/tasks/rebuild-all', { method: 'POST' })
             .then(() => { toast('Rebuild all playouts started.', 'success'); $('task-status').textContent = 'Rebuild queued for all channels.'; })
             .catch((e) => toast(e.message, 'error'));
 
-        document.querySelectorAll('.btn-copy').forEach((btn) => btn.onclick = () => copyText(btn.dataset.copyTarget));
-        if ($('btn-save-setup')) $('btn-save-setup').onclick = saveSetupSettings;
-        if ($('setup-ebs-music-source')) $('setup-ebs-music-source').onchange = updateEbsLibraryFieldVisibility;
-        if ($('btn-apply-presets')) $('btn-apply-presets').onclick = applyPresets;
-        if ($('preset-numbering-mode')) $('preset-numbering-mode').onchange = loadPresets;
-        $('modal-close').onclick = closeModal;
-        $('modal-backdrop').onclick = (e) => { if (e.target === $('modal-backdrop')) closeModal(); };
+        document.querySelectorAll('#FinTVConfigPage .btn-copy').forEach((btn) => btn.onclick = () => copyText(btn.dataset.copyTarget));
+        click('btn-save-setup', saveSetupSettings);
+        change('setup-ebs-music-source', updateEbsLibraryFieldVisibility);
+        click('btn-apply-presets', applyPresets);
+        change('preset-numbering-mode', loadPresets);
+        click('modal-close', closeModal);
+        const modalBackdrop = $('modal-backdrop');
+        if (modalBackdrop) {
+            modalBackdrop.onclick = (e) => { if (e.target === modalBackdrop) closeModal(); };
+        }
 
-        if (!$('lineup-preview-date').value) $('lineup-preview-date').value = todayIsoDate();
+        const previewDate = $('lineup-preview-date');
+        if (previewDate && !previewDate.value) {
+            previewDate.value = todayIsoDate();
+        }
     }
 
     async function refresh() {
@@ -910,7 +936,10 @@
         await loadSetup();
     }
 
-    bindEvents();
-    window.FinTV = { refresh, loadChannels, loadSetup };
-    refresh().catch((err) => toast(err.message, 'error'));
+    function init() {
+        bindEvents();
+        return refresh().catch((err) => toast(err.message, 'error'));
+    }
+
+    window.FinTV = { init, refresh, loadChannels, loadSetup };
 })();

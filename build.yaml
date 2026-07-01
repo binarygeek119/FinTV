@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.9"
+version: "0.0.2.10"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -76,6 +76,7 @@ artifacts:
   - "logos/binarygeek119/The Holiday Channel/The Holiday Channel-plane.png"
   - "logos/binarygeek119/The Holiday Channel/The Holiday Channel-Valentine's Day.png"
 changelog: |-
+  - Fix FinTV admin buttons by dynamically loading admin.js on each page show
   - Fix FinTV admin page not loading CSS/JS on Jellyfin 12 dashboard
   - Fix migration crash from CancellationToken passed as SQL parameter
   - Fix SQLite channel number migration when IX_Channels_Number blocks DROP COLUMN
