@@ -1050,10 +1050,73 @@
     }
 
     function init(page) {
-        configPage = page || document.getElementById('FinTVConfigPage');
+        configPage = resolveConfigPage(page);
+        if (!configPage) {
+            return Promise.resolve();
+        }
+
         bindEvents();
         return refresh().catch((err) => toast(err.message, 'error'));
     }
 
+    function resolveConfigPage(preferred) {
+        if (preferred && document.contains(preferred)) {
+            return preferred;
+        }
+
+        const pages = document.querySelectorAll('#FinTVConfigPage');
+        for (let i = pages.length - 1; i >= 0; i--) {
+            const candidate = pages[i];
+            if (candidate.classList.contains('hidden') || candidate.getAttribute('aria-hidden') === 'true') {
+                continue;
+            }
+
+            const rect = candidate.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+                return candidate;
+            }
+
+            if (candidate.classList.contains('active') || candidate.classList.contains('mainAnimatedPage')) {
+                return candidate;
+            }
+        }
+
+        return pages.length ? pages[pages.length - 1] : null;
+    }
+
+    function bootFinTvAdmin(page) {
+        page = resolveConfigPage(page);
+        if (!page || !window.FinTV || !window.FinTV.init) {
+            return false;
+        }
+
+        window.FinTV.init(page);
+        return true;
+    }
+
     window.FinTV = { init, refresh, loadChannels, loadSetup };
+
+    (function registerFinTvPageLifecycle() {
+        if (!window.__FinTVListenersRegistered) {
+            window.__FinTVListenersRegistered = true;
+
+            if (typeof jQuery !== 'undefined') {
+                jQuery(document).on('pageshow', '#FinTVConfigPage', function () {
+                    bootFinTvAdmin(this);
+                });
+            }
+
+            document.addEventListener('pageshow', (event) => {
+                if (event.target && event.target.id === 'FinTVConfigPage') {
+                    bootFinTvAdmin(event.target);
+                }
+            }, true);
+        }
+
+        if (!bootFinTvAdmin()) {
+            [100, 500, 1500, 3000].forEach((delay) => {
+                setTimeout(() => bootFinTvAdmin(), delay);
+            });
+        }
+    })();
 })();
