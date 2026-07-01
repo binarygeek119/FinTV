@@ -1,4 +1,6 @@
 using Jellyfin.Plugin.FinTV.Services;
+using MediaBrowser.Controller;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
@@ -8,21 +10,25 @@ namespace Jellyfin.Plugin.FinTV.Api;
 /// IPTV endpoints for M3U, XMLTV, and live MPEG-TS streams.
 /// </summary>
 [ApiController]
+[AllowAnonymous]
 [Route("FinTV/iptv")]
 public class IptvController : ControllerBase
 {
     private readonly EpgService _epg;
     private readonly StreamService _stream;
+    private readonly IServerApplicationHost _appHost;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="IptvController"/> class.
     /// </summary>
     /// <param name="epg">EPG service.</param>
     /// <param name="stream">Stream service.</param>
-    public IptvController(EpgService epg, StreamService stream)
+    /// <param name="appHost">Server application host.</param>
+    public IptvController(EpgService epg, StreamService stream, IServerApplicationHost appHost)
     {
         _epg = epg;
         _stream = stream;
+        _appHost = appHost;
     }
 
     /// <summary>
@@ -33,7 +39,7 @@ public class IptvController : ControllerBase
     [HttpGet("channels.m3u")]
     public async Task<IActionResult> GetM3u(CancellationToken cancellationToken)
     {
-        var baseUrl = EpgService.GetPublicBaseUrl(Request);
+        var baseUrl = EpgService.GetPublicBaseUrl(Request, _appHost);
         var content = await _epg.GenerateM3uAsync(baseUrl, cancellationToken);
         return Content(content, "audio/x-mpegurl");
     }

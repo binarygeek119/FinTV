@@ -3,6 +3,7 @@ using System.Text;
 using System.Xml.Linq;
 using Jellyfin.Plugin.FinTV.Data;
 using Jellyfin.Plugin.FinTV.Domain;
+using MediaBrowser.Controller;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 
@@ -73,7 +74,7 @@ public class EpgService
             sb.Append("#EXTINF:-1 tvg-id=\"")
                 .Append(channel.Id.ToString("N"))
                 .Append("\" tvg-chno=\"")
-                .Append(channel.Number)
+                .Append(ChannelNumbers.Format(channel.Number))
                 .Append("\" tvg-name=\"")
                 .Append(EscapeM3u(channel.Name))
                 .Append("\" tvg-logo=\"")
@@ -87,7 +88,7 @@ public class EpgService
         return sb.ToString();
     }
 
-    public static string GetPublicBaseUrl(HttpRequest? request)
+    public static string GetPublicBaseUrl(HttpRequest? request, IServerApplicationHost? appHost = null)
     {
         var configured = Plugin.Instance?.Configuration.PublicBaseUrl;
         if (!string.IsNullOrWhiteSpace(configured))
@@ -95,12 +96,25 @@ public class EpgService
             return configured.TrimEnd('/');
         }
 
-        if (request is null)
+        if (request is not null && appHost is not null)
         {
-            return "http://localhost:8096";
+            return appHost.GetSmartApiUrl(request).TrimEnd('/');
         }
 
-        return $"{request.Scheme}://{request.Host}";
+        if (request is not null)
+        {
+            var forwardedProto = request.Headers["X-Forwarded-Proto"].FirstOrDefault();
+            var forwardedHost = request.Headers["X-Forwarded-Host"].FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(forwardedHost))
+            {
+                var scheme = !string.IsNullOrWhiteSpace(forwardedProto) ? forwardedProto : request.Scheme;
+                return $"{scheme}://{forwardedHost}".TrimEnd('/');
+            }
+
+            return $"{request.Scheme}://{request.Host}".TrimEnd('/');
+        }
+
+        return "http://localhost:8096";
     }
 
     private static string GetLogoUrl(Channel channel, string? baseUrl = null)

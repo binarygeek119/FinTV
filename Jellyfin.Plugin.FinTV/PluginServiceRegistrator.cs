@@ -27,6 +27,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
 
         serviceCollection.AddHttpClient();
         serviceCollection.AddScoped<ChannelService>();
+        serviceCollection.AddScoped<ChannelPresetService>();
         serviceCollection.AddScoped<LineupService>();
         serviceCollection.AddScoped<SmartSelectionService>();
         serviceCollection.AddScoped<LineupGeneratorService>();

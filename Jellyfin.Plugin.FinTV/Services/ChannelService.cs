@@ -37,13 +37,19 @@ public class ChannelService
             .FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
     }
 
-    public async Task<Channel?> GetByNumberAsync(int number, CancellationToken cancellationToken = default)
+    public async Task<Channel?> GetByNumberAsync(decimal number, CancellationToken cancellationToken = default)
     {
-        return await _db.Channels.FirstOrDefaultAsync(c => c.Number == number && c.Enabled, cancellationToken);
+        if (!ChannelNumbers.TryNormalize(number, out var normalized))
+        {
+            return null;
+        }
+
+        return await _db.Channels.FirstOrDefaultAsync(c => c.Number == normalized && c.Enabled, cancellationToken);
     }
 
     public async Task<Channel> CreateAsync(Channel channel, CancellationToken cancellationToken = default)
     {
+        channel.Number = NormalizeChannelNumber(channel.Number);
         channel.DefaultLineup = new Lineup
         {
             ChannelId = channel.Id,
@@ -65,7 +71,7 @@ public class ChannelService
             return null;
         }
 
-        existing.Number = updated.Number;
+        existing.Number = NormalizeChannelNumber(updated.Number);
         existing.Name = updated.Name;
         existing.Enabled = updated.Enabled;
         existing.ContentType = updated.ContentType;
@@ -127,5 +133,15 @@ public class ChannelService
         }
 
         return JsonSerializer.Deserialize<T>(channel.PlayoutAnchorJson);
+    }
+
+    private static decimal NormalizeChannelNumber(decimal number)
+    {
+        if (!ChannelNumbers.TryNormalize(number, out var normalized))
+        {
+            throw new ArgumentException("Channel number must be at least 1 and use at most one decimal digit (.0 through .9).");
+        }
+
+        return normalized;
     }
 }

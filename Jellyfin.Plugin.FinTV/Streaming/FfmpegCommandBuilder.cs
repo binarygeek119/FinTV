@@ -193,10 +193,15 @@ public class FfmpegCommandBuilder
 
         if (channel.LogoSetId.HasValue && !string.IsNullOrWhiteSpace(channel.LogoFileName))
         {
-            var path = Path.Combine(Plugin.Instance?.LogosFolder ?? string.Empty, channel.LogoFileName);
-            if (File.Exists(path))
+            var logosRoot = Path.Combine(Plugin.Instance?.LogosFolder ?? string.Empty, "binarygeek119");
+            if (Directory.Exists(logosRoot))
             {
-                return path;
+                var found = Directory.EnumerateFiles(logosRoot, channel.LogoFileName, SearchOption.AllDirectories)
+                    .FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(found))
+                {
+                    return found;
+                }
             }
         }
 

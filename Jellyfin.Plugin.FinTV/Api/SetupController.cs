@@ -1,5 +1,6 @@
 using Jellyfin.Plugin.FinTV.Services;
 using MediaBrowser.Common.Api;
+using MediaBrowser.Controller;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,18 +11,71 @@ namespace Jellyfin.Plugin.FinTV.Api;
 /// </summary>
 [ApiController]
 [Route("FinTV/api/setup")]
-[AllowAnonymous]
 public class SetupController : ControllerBase
 {
+    private readonly IServerApplicationHost _appHost;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SetupController"/> class.
+    /// </summary>
+    /// <param name="appHost">Server application host.</param>
+    public SetupController(IServerApplicationHost appHost)
+    {
+        _appHost = appHost;
+    }
+
     /// <summary>
     /// Gets M3U and XMLTV URLs for Jellyfin Live TV configuration.
     /// </summary>
     /// <returns>Setup URLs and instructions.</returns>
     [HttpGet("urls")]
+    [AllowAnonymous]
     public ActionResult<object> GetUrls()
     {
-        var baseUrl = EpgService.GetPublicBaseUrl(Request);
+        return Ok(BuildUrlResponse());
+    }
+
+    /// <summary>
+    /// Gets FinTV setup settings for the admin UI.
+    /// </summary>
+    /// <returns>Setup settings.</returns>
+    [HttpGet("settings")]
+    [Authorize(Policy = Policies.RequiresElevation)]
+    public ActionResult<object> GetSettings()
+    {
         return Ok(new
+        {
+            publicBaseUrl = Plugin.Instance?.Configuration.PublicBaseUrl ?? string.Empty
+        });
+    }
+
+    /// <summary>
+    /// Updates FinTV setup settings and returns refreshed Live TV URLs.
+    /// </summary>
+    /// <param name="request">Setup settings.</param>
+    /// <returns>Updated setup URLs.</returns>
+    [HttpPut("settings")]
+    [Authorize(Policy = Policies.RequiresElevation)]
+    public ActionResult<object> UpdateSettings([FromBody] SetupSettingsRequest request)
+    {
+        var plugin = Plugin.Instance;
+        if (plugin is null)
+        {
+            return NotFound();
+        }
+
+        plugin.Configuration.PublicBaseUrl = string.IsNullOrWhiteSpace(request.PublicBaseUrl)
+            ? null
+            : request.PublicBaseUrl.Trim().TrimEnd('/');
+        plugin.SaveConfiguration();
+
+        return Ok(BuildUrlResponse());
+    }
+
+    private object BuildUrlResponse()
+    {
+        var baseUrl = EpgService.GetPublicBaseUrl(Request, _appHost);
+        return new
         {
             baseUrl,
             m3u = $"{baseUrl}/FinTV/iptv/channels.m3u",
@@ -29,11 +83,23 @@ public class SetupController : ControllerBase
             instructions = new[]
             {
                 "Dashboard → Live TV → Add Tuner → M3U Tuner",
+                "Paste the M3U Tuner URL above (must be reachable by the Jellyfin server)",
                 "Dashboard → Live TV → Add Guide Provider → XMLTV",
-                "Run Refresh Channels, then Refresh Guide"
+                "Paste the XMLTV Guide URL above, then Refresh Channels and Refresh Guide"
             }
-        });
+        };
     }
+}
+
+/// <summary>
+/// Setup settings payload.
+/// </summary>
+public class SetupSettingsRequest
+{
+    /// <summary>
+    /// Gets or sets the public base URL used in generated M3U/XMLTV links.
+    /// </summary>
+    public string? PublicBaseUrl { get; set; }
 }
 
 /// <summary>

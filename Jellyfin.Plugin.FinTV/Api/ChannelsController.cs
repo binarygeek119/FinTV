@@ -58,8 +58,15 @@ public class ChannelsController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<Channel>> Create([FromBody] Channel channel, CancellationToken cancellationToken)
     {
-        var created = await _channels.CreateAsync(channel, cancellationToken);
-        return CreatedAtAction(nameof(Get), new { id = created.Id }, created);
+        try
+        {
+            var created = await _channels.CreateAsync(channel, cancellationToken);
+            return CreatedAtAction(nameof(Get), new { id = created.Id }, created);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
     }
 
     /// <summary>
@@ -72,8 +79,15 @@ public class ChannelsController : ControllerBase
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<Channel>> Update(Guid id, [FromBody] Channel channel, CancellationToken cancellationToken)
     {
-        var updated = await _channels.UpdateAsync(id, channel, cancellationToken);
-        return updated is null ? NotFound() : updated;
+        try
+        {
+            var updated = await _channels.UpdateAsync(id, channel, cancellationToken);
+            return updated is null ? NotFound() : updated;
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
     }
 
     /// <summary>

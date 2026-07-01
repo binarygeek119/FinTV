@@ -40,6 +40,7 @@ public class FinTvDbContext : DbContext
 
         modelBuilder.Entity<Channel>(entity =>
         {
+            entity.Property(e => e.Number).HasColumnType("REAL");
             entity.HasIndex(e => e.Number).IsUnique();
             entity.HasOne(e => e.LogoSet).WithMany().HasForeignKey(e => e.LogoSetId);
             entity.HasOne(e => e.CommercialPreset).WithMany(e => e.Channels).HasForeignKey(e => e.CommercialPresetId);

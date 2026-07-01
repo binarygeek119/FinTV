@@ -4,7 +4,7 @@ public class Channel
 {
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    public int Number { get; set; }
+    public decimal Number { get; set; }
 
     public string Name { get; set; } = string.Empty;
 
