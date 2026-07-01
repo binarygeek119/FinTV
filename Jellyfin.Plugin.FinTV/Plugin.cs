@@ -1,6 +1,8 @@
+using System.Globalization;
 using Jellyfin.Plugin.FinTV.Configuration;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
+using MediaBrowser.Model.Plugins;
 using MediaBrowser.Model.Serialization;
 
 namespace Jellyfin.Plugin.FinTV;
@@ -8,7 +10,7 @@ namespace Jellyfin.Plugin.FinTV;
 /// <summary>
 /// FinTV Jellyfin plugin entry point.
 /// </summary>
-public class Plugin : BasePlugin<PluginConfiguration>
+public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="Plugin"/> class.
@@ -51,4 +53,31 @@ public class Plugin : BasePlugin<PluginConfiguration>
     /// Gets the WeatherStar asset folder.
     /// </summary>
     public string WeatherStarFolder => Path.Combine(DataFolder, "weatherstar");
+
+    /// <inheritdoc />
+    public IEnumerable<PluginPageInfo> GetPages()
+    {
+        var resourcePrefix = string.Format(CultureInfo.InvariantCulture, "{0}.Configuration.", GetType().Namespace);
+
+        return
+        [
+            new PluginPageInfo
+            {
+                Name = Name,
+                DisplayName = Name,
+                EnableInMainMenu = true,
+                EmbeddedResourcePath = resourcePrefix + "configPage.html"
+            },
+            new PluginPageInfo
+            {
+                Name = "FinTV_admin.css",
+                EmbeddedResourcePath = resourcePrefix + "admin.css"
+            },
+            new PluginPageInfo
+            {
+                Name = "FinTV_admin.js",
+                EmbeddedResourcePath = resourcePrefix + "admin.js"
+            }
+        ];
+    }
 }
