@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.1"
+version: "0.0.2.2"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -37,9 +37,6 @@ artifacts:
   - "SQLitePCLRaw.batteries_v2.dll"
   - "SQLitePCLRaw.core.dll"
   - "SQLitePCLRaw.provider.e_sqlite3.dll"
-  - "Configuration/configPage.html"
-  - "Configuration/admin.js"
-  - "Configuration/admin.css"
   - "runtimes/win-x64/native/e_sqlite3.dll"
   - "runtimes/win-x86/native/e_sqlite3.dll"
   - "runtimes/win-arm64/native/e_sqlite3.dll"
@@ -54,6 +51,7 @@ artifacts:
   - "runtimes/osx-x64/native/libe_sqlite3.dylib"
   - "runtimes/osx-arm64/native/libe_sqlite3.dylib"
 changelog: |-
+  - Register FinTV dashboard settings page via IHasWebPages with embedded admin UI
   - Bundle Microsoft.Bcl.AsyncInterfaces required by Playwright at runtime
   - Target Jellyfin 12.0 (.NET 10); required for Jellyfin 12.0 RC and later
   - Stop bundling Microsoft.Extensions.* assemblies that conflict with Jellyfin host DI types

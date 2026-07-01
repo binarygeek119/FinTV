@@ -29,15 +29,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="Configuration\configPage.html">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="Configuration\admin.js">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="Configuration\admin.css">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
+    <EmbeddedResource Include="Configuration\configPage.html" />
+    <EmbeddedResource Include="Configuration\admin.js" />
+    <EmbeddedResource Include="Configuration\admin.css" />
   </ItemGroup>
 
 </Project>
