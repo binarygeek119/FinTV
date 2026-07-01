@@ -6,6 +6,7 @@
         "overview": "Simulated live TV channels with lineups, commercials, and IPTV streaming",
         "owner": "binarygeek119",
         "category": "LiveTV",
+        "imageUrl": "https://raw.githubusercontent.com/binarygeek119/FinTV/master/logo.png",
         "versions": [
             {
                 "version": "0.0.2.2",
