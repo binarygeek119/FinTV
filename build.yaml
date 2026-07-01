@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.7"
+version: "0.0.2.8"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -76,8 +76,8 @@ artifacts:
   - "logos/binarygeek119/The Holiday Channel/The Holiday Channel-plane.png"
   - "logos/binarygeek119/The Holiday Channel/The Holiday Channel-Valentine's Day.png"
 changelog: |-
+  - Fix migration crash from CancellationToken passed as SQL parameter
   - Fix SQLite channel number migration when IX_Channels_Number blocks DROP COLUMN
-  - Fix SQLite migration crash when Channels.NumberReal already exists from a partial upgrade
   - Bundle Binarygeek119 Set/English logos inside the plugin zip (no GitHub required on first run)
   - Play EBS off-air slates with background music when a channel has no scheduled media
   - Add Binarygeek119 ready-made channel presets with legacy or subchannel numbering

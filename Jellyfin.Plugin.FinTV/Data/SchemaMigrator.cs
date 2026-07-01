@@ -171,8 +171,7 @@ internal static class SchemaMigrator
             INSERT OR IGNORE INTO "__FinTvSchema" ("Key", "AppliedAt")
             VALUES ({0}, {1});
             """,
-            MigrationKey,
-            DateTime.UtcNow.ToString("O"),
+            new object[] { MigrationKey, DateTime.UtcNow.ToString("O") },
             cancellationToken);
     }
 }
