@@ -18,9 +18,11 @@ Inspired by [ErsatzTV/legacy](https://github.com/ErsatzTV/legacy) scheduling con
 
 ## Requirements
 
-- Jellyfin **10.11+**
+- Jellyfin **12.0+** (including 12.0 RC builds)
 - FFmpeg (bundled with Jellyfin)
 - For WeatherStar channel: Playwright Chromium (installed on first use)
+
+> **Jellyfin 10.11 users:** use [FinTV v0.0.1.3](https://github.com/binarygeek119/FinTV/releases/tag/v0.0.1.3) instead. v0.0.2.0+ targets Jellyfin 12 on .NET 10.
 
 ## Install from GitHub
 
@@ -42,7 +44,7 @@ FinTV is **not** in Jellyfin’s official plugin repository. You must add this r
 3. Optional: filter category **Live TV**, or search **FinTV**
 4. Install **FinTV 0.0.1.0**, then restart Jellyfin when prompted
 
-**Requirements:** Jellyfin **10.11.0** or newer. Older servers hide this plugin because `targetAbi` is `10.11.0.0`.
+**Requirements:** Jellyfin **12.0.0** or newer (including RC builds). For Jellyfin 10.11, install [v0.0.1.3](https://github.com/binarygeek119/FinTV/releases/tag/v0.0.1.3).
 
 ### Troubleshooting
 
