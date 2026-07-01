@@ -8,6 +8,14 @@
         "category": "LiveTV",
         "versions": [
             {
+                "version": "0.0.1.1",
+                "changelog": "- Fix plugin packaging to include dependency assemblies required at runtime",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/binarygeek119/FinTV/releases/download/v0.0.1.1/fintv_0.0.1.1.zip",
+                "checksum": "88e641b830a953085f2778110213df62",
+                "timestamp": "2026-07-01T10:06:35Z"
+            },
+            {
                 "version": "0.0.1.0",
                 "changelog": "- Initial 0.0.1 release",
                 "targetAbi": "10.11.0.0",
