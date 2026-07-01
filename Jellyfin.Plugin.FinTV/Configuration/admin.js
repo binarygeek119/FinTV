@@ -15,8 +15,23 @@
     let channelFilter = '';
     let channelPresets = [];
     let presetNumberingMode = 0;
+    let configPage = null;
 
-    const $ = (id) => document.getElementById(id);
+    function $(id) {
+        if (configPage) {
+            return configPage.querySelector('#' + id);
+        }
+
+        return document.getElementById(id);
+    }
+
+    function q(selector) {
+        return configPage ? configPage.querySelector(selector) : document.querySelector(selector);
+    }
+
+    function qa(selector) {
+        return configPage ? configPage.querySelectorAll(selector) : document.querySelectorAll(selector);
+    }
 
     function resolveUrl(path) {
         const normalized = path.startsWith('/') ? path.slice(1) : path;
@@ -26,62 +41,85 @@
         return '/' + normalized;
     }
 
+    function parseErrorMessage(message) {
+        if (!message) {
+            return 'Request failed';
+        }
+
+        try {
+            const parsed = JSON.parse(message);
+            if (parsed.title) {
+                return parsed.title;
+            }
+
+            if (parsed.errors) {
+                return Object.values(parsed.errors).flat().join(' ');
+            }
+        } catch (ignore) {
+            // Keep raw response text.
+        }
+
+        return message;
+    }
+
+    async function readApiFailure(err) {
+        if (err instanceof Response) {
+            const text = await err.text();
+            throw new Error(parseErrorMessage(text || err.statusText));
+        }
+
+        if (err && typeof err.responseText === 'string' && err.responseText) {
+            throw new Error(parseErrorMessage(err.responseText));
+        }
+
+        throw new Error((err && err.message) || 'Request failed');
+    }
+
     function api(path, options) {
         options = options || {};
         const url = resolveUrl('FinTV/api' + (path.startsWith('/') ? path : '/' + path));
         const method = options.method || 'GET';
+        const body = options.body == null
+            ? undefined
+            : (typeof options.body === 'string' ? options.body : JSON.stringify(options.body));
 
         if (typeof ApiClient !== 'undefined' && typeof ApiClient.ajax === 'function') {
-            return new Promise((resolve, reject) => {
-                const ajaxOptions = {
-                    url: url,
-                    type: method,
-                    dataType: 'json',
-                    success: function (data) {
-                        resolve(data);
-                    },
-                    error: function (xhr) {
-                        let message = xhr.responseText || xhr.statusText || 'Request failed';
-                        try {
-                            const parsed = JSON.parse(message);
-                            if (parsed.title) {
-                                message = parsed.title;
-                            } else if (parsed.errors) {
-                                message = Object.values(parsed.errors).flat().join(' ');
-                            }
-                        } catch (ignore) {
-                            // Keep raw response text.
-                        }
-
-                        reject(new Error(message));
-                    }
-                };
-
-                if (options.body) {
-                    ajaxOptions.contentType = 'application/json';
-                    ajaxOptions.data = options.body;
-                    ajaxOptions.processData = false;
+            const ajaxOptions = {
+                url: url,
+                type: method,
+                dataType: 'json',
+                headers: {
+                    accept: 'application/json'
                 }
+            };
 
-                ApiClient.ajax(ajaxOptions);
-            });
+            if (body) {
+                ajaxOptions.contentType = 'application/json';
+                ajaxOptions.data = body;
+            }
+
+            return ApiClient.ajax(ajaxOptions).catch(readApiFailure);
         }
 
         const fetchOptions = {
             method: method,
-            credentials: 'same-origin'
+            credentials: 'same-origin',
+            headers: {
+                accept: 'application/json'
+            }
         };
 
-        if (options.body) {
-            fetchOptions.headers = { 'Content-Type': 'application/json' };
-            fetchOptions.body = options.body;
+        if (body) {
+            fetchOptions.headers['Content-Type'] = 'application/json';
+            fetchOptions.body = body;
         }
 
         return fetch(url, fetchOptions).then(async (res) => {
             if (!res.ok) {
                 const text = await res.text();
-                throw new Error(text || res.statusText);
+                throw new Error(parseErrorMessage(text || res.statusText));
             }
+
             if (res.status === 204) {
                 return null;
             }
@@ -187,13 +225,21 @@
     }
 
     function updateSplitLayout() {
-        const layout = document.querySelector('.split-layout');
-        if (layout) layout.classList.toggle('has-panel', !$('channel-form-panel').classList.contains('hidden'));
+        const layout = q('.split-layout');
+        const panel = $('channel-form-panel');
+        if (layout && panel) {
+            layout.classList.toggle('has-panel', !panel.classList.contains('hidden'));
+        }
     }
 
     function toggleWeatherFields() {
-        const isWeather = $('ch-content-type').value === '4';
-        $('weather-fields').classList.toggle('hidden', !isWeather);
+        const contentType = $('ch-content-type');
+        const weatherFields = $('weather-fields');
+        if (!contentType || !weatherFields) {
+            return;
+        }
+
+        weatherFields.classList.toggle('hidden', contentType.value !== '4');
     }
 
     function populateLogoSelectors(channel) {
@@ -289,20 +335,63 @@
 
     function resetChannelForm() {
         editingChannelId = null;
-        $('channel-form').reset();
-        $('ch-audio').value = 'eng';
-        $('ch-enabled').checked = true;
-        $('channel-form-title').textContent = 'New Channel';
-        $('btn-delete-channel').classList.add('hidden');
-        $('channel-now-playing').classList.add('hidden');
+        const form = $('channel-form');
+        if (form) {
+            form.reset();
+        }
+
+        const audio = $('ch-audio');
+        if (audio) {
+            audio.value = 'eng';
+        }
+
+        const enabled = $('ch-enabled');
+        if (enabled) {
+            enabled.checked = true;
+        }
+
+        const title = $('channel-form-title');
+        if (title) {
+            title.textContent = 'New Channel';
+        }
+
+        const deleteBtn = $('btn-delete-channel');
+        if (deleteBtn) {
+            deleteBtn.classList.add('hidden');
+        }
+
+        const nowPlaying = $('channel-now-playing');
+        if (nowPlaying) {
+            nowPlaying.classList.add('hidden');
+        }
+
         populateLogoSelectors(null);
         toggleWeatherFields();
     }
 
+    async function openNewChannelForm() {
+        resetChannelForm();
+        showChannelForm(true);
+
+        try {
+            await loadLogoSetsForForm();
+            populateLogoSelectors(null);
+        } catch (err) {
+            toast(err.message || 'Could not load logo sets.', 'error');
+        }
+    }
+
     function showChannelForm(show) {
-        $('channel-form-panel').classList.toggle('hidden', !show);
+        const panel = $('channel-form-panel');
+        if (!panel) {
+            return;
+        }
+
+        panel.classList.toggle('hidden', !show);
         updateSplitLayout();
-        if (!show) resetChannelForm();
+        if (!show) {
+            resetChannelForm();
+        }
     }
 
     async function editChannel(id) {
@@ -363,10 +452,10 @@
 
         try {
             if (editingChannelId) {
-                await api('/channels/' + editingChannelId, { method: 'PUT', body: JSON.stringify(payload) });
+                await api('/channels/' + editingChannelId, { method: 'PUT', body: payload });
                 toast('Channel updated.', 'success');
             } else {
-                await api('/channels', { method: 'POST', body: JSON.stringify(payload) });
+                await api('/channels', { method: 'POST', body: payload });
                 toast('Channel created.', 'success');
             }
             showChannelForm(false);
@@ -761,11 +850,11 @@
         try {
             const result = await api('/channels/presets/apply', {
                 method: 'POST',
-                body: JSON.stringify({
+                body: {
                     numberingMode: presetNumberingMode,
                     skipExisting: !updateExisting,
                     updateExisting: updateExisting
-                })
+                }
             });
             const lines = [];
             if (result.created && result.created.length) {
@@ -872,8 +961,8 @@
     }
 
     function switchTab(name) {
-        document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
-        document.querySelectorAll('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + name));
+        qa('.fintv-tabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
+        qa('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + name));
         if (name === 'setup') loadSetup();
         if (name === 'presets') loadPresets();
         if (name === 'lineups') loadLineups();
@@ -903,12 +992,8 @@
             }
         }
 
-        document.querySelectorAll('#FinTVConfigPage .tab').forEach((tab) => tab.onclick = () => switchTab(tab.dataset.tab));
-        click('btn-new-channel', async () => {
-            resetChannelForm();
-            await loadLogoSetsForForm();
-            showChannelForm(true);
-        });
+        qa('.fintv-tabs .tab').forEach((tab) => tab.onclick = () => switchTab(tab.dataset.tab));
+        click('btn-new-channel', () => openNewChannelForm());
         click('btn-close-channel', () => showChannelForm(false));
         click('btn-cancel-channel', () => showChannelForm(false));
         click('btn-delete-channel', deleteChannel);
@@ -942,7 +1027,7 @@
             .then(() => { toast('Rebuild all playouts started.', 'success'); $('task-status').textContent = 'Rebuild queued for all channels.'; })
             .catch((e) => toast(e.message, 'error')));
 
-        document.querySelectorAll('#FinTVConfigPage .btn-copy').forEach((btn) => btn.onclick = () => copyText(btn.dataset.copyTarget));
+        qa('.btn-copy').forEach((btn) => btn.onclick = () => copyText(btn.dataset.copyTarget));
         click('btn-save-setup', saveSetupSettings);
         change('setup-ebs-music-source', updateEbsLibraryFieldVisibility);
         click('btn-apply-presets', applyPresets);
@@ -964,7 +1049,8 @@
         await loadSetup();
     }
 
-    function init() {
+    function init(page) {
+        configPage = page || document.getElementById('FinTVConfigPage');
         bindEvents();
         return refresh().catch((err) => toast(err.message, 'error'));
     }

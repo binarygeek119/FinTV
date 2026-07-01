@@ -286,12 +286,12 @@
                 return scriptPromise;
             }
 
-            function start() {
+            function start(page) {
                 ensureCss();
                 ensureScript()
                     .then(function () {
                         if (window.FinTV && window.FinTV.init) {
-                            return window.FinTV.init();
+                            return window.FinTV.init(page);
                         }
                     })
                     .catch(function (err) {
@@ -299,12 +299,15 @@
                     });
             }
 
-            var page = document.getElementById('FinTVConfigPage');
+            var page = document.currentScript
+                ? document.currentScript.closest('[data-role="page"]')
+                : document.getElementById('FinTVConfigPage');
             if (page) {
-                page.addEventListener('pageshow', start);
+                page.addEventListener('pageshow', function () {
+                    start(this);
+                });
+                start(page);
             }
-
-            start();
         })();
     </script>
 </div>

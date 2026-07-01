@@ -39,8 +39,9 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddScoped<WeatherStarChannelService>();
         serviceCollection.AddSingleton<StreamService>();
         serviceCollection.AddSingleton<Streaming.FfmpegCommandBuilder>();
+        serviceCollection.AddSingleton<PlayoutBuilderService>();
+        serviceCollection.AddHostedService(sp => sp.GetRequiredService<PlayoutBuilderService>());
         serviceCollection.AddHostedService<DatabaseInitializer>();
-        serviceCollection.AddHostedService<PlayoutBuilderService>();
         serviceCollection.AddSingleton<BlackframeChapterTask>();
     }
 }

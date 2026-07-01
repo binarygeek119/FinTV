@@ -45,10 +45,13 @@ public class ChannelPresetsController : ControllerBase
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Created, updated, and skipped rows.</returns>
     [HttpPost("apply")]
+    [Consumes("application/json")]
     public async Task<ActionResult<ApplyChannelPresetsResult>> Apply(
-        [FromBody] ApplyChannelPresetsRequest request,
+        [FromBody] ApplyChannelPresetsRequest? request,
         CancellationToken cancellationToken)
     {
+        request ??= new ApplyChannelPresetsRequest();
+
         try
         {
             return Ok(await _presets.ApplyAsync(request, cancellationToken));

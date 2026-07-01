@@ -49,6 +49,7 @@ public class LogoSetService
     {
         const string setName = ChannelPresets.Binarygeek119LogoSetName;
         var existing = await _db.LogoSets.Include(s => s.Entries).FirstOrDefaultAsync(s => s.Name == setName, cancellationToken);
+        var isNew = existing is null;
 
         var plugin = Plugin.Instance ?? throw new InvalidOperationException("Plugin not initialized.");
         Directory.CreateDirectory(plugin.LogosFolder);
@@ -62,7 +63,7 @@ public class LogoSetService
             StoragePath = storagePath
         };
 
-        if (existing.Id == Guid.Empty)
+        if (isNew)
         {
             _db.LogoSets.Add(existing);
         }
