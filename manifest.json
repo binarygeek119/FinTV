@@ -1,20 +1,20 @@
 [
-  {
-    "guid": "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b",
-    "name": "FinTV",
-    "description": "Simulated live TV channels with lineups, commercials, EPG, and IPTV streaming for Jellyfin.",
-    "overview": "Turn your Jellyfin library into 24/7 live TV channels with 30-minute lineup grids, smart scheduling, commercial breaks, channel logos, WeatherStar weather channel, and M3U/XMLTV integration.",
-    "owner": "binarygeek119",
-    "category": "LiveTV",
-    "versions": [
-      {
-        "version": "0.0.1.0",
-        "changelog": "Initial 0.0.1 release",
-        "targetAbi": "10.11.0.0",
-        "sourceUrl": "https://github.com/binarygeek119/FinTV/releases/download/v0.0.1.0/fintv_0.0.1.0.zip",
-        "checksum": "cf3571db05a376eaf93db6d4258fa79d",
-        "timestamp": "2026-07-01T09:32:24Z"
-      }
-    ]
-  }
+    {
+        "guid": "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b",
+        "name": "FinTV",
+        "description": "FinTV turns your Jellyfin library into always-on broadcast channels with 30-minute lineup grids, smart scheduling, commercial breaks, channel logos, WeatherStar weather channel, and M3U/XMLTV Live TV integration.\n",
+        "overview": "Simulated live TV channels with lineups, commercials, and IPTV streaming",
+        "owner": "binarygeek119",
+        "category": "LiveTV",
+        "versions": [
+            {
+                "version": "0.0.1.0",
+                "changelog": "- Initial 0.0.1 release",
+                "targetAbi": "10.11.0.0",
+                "sourceUrl": "https://github.com/binarygeek119/FinTV/releases/download/v0.0.1.0/fintv/fintv_0.0.1.0.zip",
+                "checksum": "709f9d8fb1b96dde475cda7405a79123",
+                "timestamp": "2026-07-01T09:41:54Z"
+            }
+        ]
+    }
 ]
