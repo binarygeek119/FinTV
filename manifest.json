@@ -13,8 +13,8 @@
                 "changelog": "- Fix FinTV admin buttons by dynamically loading admin.js on each page show\n- Fix FinTV admin page not loading CSS/JS on Jellyfin 12 dashboard\n- Fix migration crash from CancellationToken passed as SQL parameter\n- Fix SQLite channel number migration when IX_Channels_Number blocks DROP COLUMN\n- Bundle Binarygeek119 Set/English logos inside the plugin zip (no GitHub required on first run)\n- Play EBS off-air slates with background music when a channel has no scheduled media\n- Add Binarygeek119 ready-made channel presets with legacy or subchannel numbering\n- Redesign admin UI with lineup editor, presets tab, modals, and toasts\n- Support decimal channel numbers (e.g. 1.1\u20134.3) with SQLite schema migration\n- Fix Live TV M3U/XMLTV URLs with anonymous IPTV endpoints and public base URL setting\n- Fix GitHub Actions build workflow to target net10.0 for Jellyfin 12\n- Add Jellyfin library catalog search for lineup item picker",
                 "targetAbi": "12.0.0.0",
                 "sourceUrl": "https://github.com/binarygeek119/FinTV/releases/download/v0.0.2.10/fintv_0.0.2.10.zip",
-                "checksum": "874c214194c2f934fcde3ee4229d315e",
-                "timestamp": "2026-07-01T14:27:22Z"
+                "checksum": "854119e9aaadbae0aee71fb998dfc6bf",
+                "timestamp": "2026-07-01T14:34:43Z"
             },
             {
                 "version": "0.0.2.9",
