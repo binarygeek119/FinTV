@@ -44,10 +44,10 @@ public static class ChannelPresets
         Preset(203, 3.1m, "Creature Double Feature", ChannelContentType.Movie, "Movies", "Creature and monster movies", "fintv-creature", "Movies/Creature_Double_Feature.png"),
         Preset(204, 3.2m, "Hero TV", ChannelContentType.Movie, "Movies", "Super hero movies", "fintv-hero", "Movies/Hero_TV.png"),
         Preset(205, 3.3m, "That's Funny", ChannelContentType.Movie, "Movies", "Comedian movies and TV shows", "fintv-funny", logoPath: null, useLogo: false),
-        Preset(207, 3.4m, "The Holiday Channel", ChannelContentType.Movie, "Movies", "Holiday themed TV shows and movies", "fintv-holiday", "Movies/The Holiday Channel/christmas.png"),
+        Preset(207, 3.4m, "The Holiday Channel", ChannelContentType.Movie, "Movies", "Holiday themed TV shows and movies", "fintv-holiday", "The Holiday Channel/christmas-marry.png"),
         Preset(312, 4.1m, "The Parody Channel", ChannelContentType.MusicVideo, "Music Videos", "Parody music videos", "fintv-parody", "Music Videos Channels/The-Parody-Channel.png"),
         Preset(313, 4.2m, "Rap On Tap", ChannelContentType.MusicVideo, "Music Videos", "Rap and hip hop music videos", "fintv-rap", "Music Videos Channels/Rap-On-Tap.png"),
-        Preset(314, 4.3m, "HeadPhone Jack", ChannelContentType.MusicVideo, "Music Videos", "All other music videos", "fintv-music-video", "Shows/HeadPhone_Jack.png"),
+        Preset(314, 4.3m, "HeadPhone Jack", ChannelContentType.MusicVideo, "Music Videos", "All other music videos", "fintv-music-video", "Music Videos Channels/HeadPhone_Jack.png"),
     ];
 
     /// <summary>

@@ -35,7 +35,7 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool AutoRegisterLiveTv { get; set; }
 
     public string Binarygeek119LogoSetUrl { get; set; } =
-        "https://github.com/binarygeek119/open-channel-logos/tree/master/Binarygeek119%20Set";
+        "https://github.com/binarygeek119/open-channel-logos/tree/fintv2";
 
     public BlackframeTaskState BlackframeTaskState { get; set; } = new();
 }

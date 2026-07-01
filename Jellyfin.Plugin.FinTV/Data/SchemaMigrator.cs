@@ -39,24 +39,97 @@ internal static class SchemaMigrator
             return;
         }
 
-        var numberType = await db.Database
-            .SqlQueryRaw<string>("SELECT type AS \"Value\" FROM pragma_table_info('Channels') WHERE name = 'Number'")
-            .FirstOrDefaultAsync(cancellationToken);
+        await MigrateChannelNumberColumnAsync(db, logger, cancellationToken);
+        await MarkMigrationAppliedAsync(db, cancellationToken);
+    }
 
-        if (IsDecimalColumnType(numberType))
+    private static async Task MigrateChannelNumberColumnAsync(
+        FinTvDbContext db,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        var numberType = await GetColumnTypeAsync(db, "Channels", "Number", cancellationToken);
+        var hasNumber = await ColumnExistsAsync(db, "Channels", "Number", cancellationToken);
+        var hasNumberReal = await ColumnExistsAsync(db, "Channels", "NumberReal", cancellationToken);
+
+        if (hasNumber && IsDecimalColumnType(numberType))
         {
-            await MarkMigrationAppliedAsync(db, cancellationToken);
+            return;
+        }
+
+        if (hasNumberReal)
+        {
+            logger.LogInformation("Resuming Channels.Number decimal migration");
+            if (hasNumber)
+            {
+                await db.Database.ExecuteSqlRawAsync(
+                    "UPDATE \"Channels\" SET \"NumberReal\" = CAST(\"Number\" AS REAL)",
+                    cancellationToken);
+                await db.Database.ExecuteSqlRawAsync("ALTER TABLE \"Channels\" DROP COLUMN \"Number\"", cancellationToken);
+            }
+
+            if (await ColumnExistsAsync(db, "Channels", "NumberReal", cancellationToken))
+            {
+                await db.Database.ExecuteSqlRawAsync(
+                    "ALTER TABLE \"Channels\" RENAME COLUMN \"NumberReal\" TO \"Number\"",
+                    cancellationToken);
+            }
+
+            return;
+        }
+
+        if (!hasNumber)
+        {
             return;
         }
 
         logger.LogInformation("Migrating Channels.Number to REAL for sub-channel numbers");
 
-        await db.Database.ExecuteSqlRawAsync("ALTER TABLE \"Channels\" ADD COLUMN \"NumberReal\" REAL NOT NULL DEFAULT 1", cancellationToken);
-        await db.Database.ExecuteSqlRawAsync("UPDATE \"Channels\" SET \"NumberReal\" = \"Number\"", cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(
+            "ALTER TABLE \"Channels\" ADD COLUMN \"NumberReal\" REAL NOT NULL DEFAULT 1",
+            cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(
+            "UPDATE \"Channels\" SET \"NumberReal\" = CAST(\"Number\" AS REAL)",
+            cancellationToken);
         await db.Database.ExecuteSqlRawAsync("ALTER TABLE \"Channels\" DROP COLUMN \"Number\"", cancellationToken);
-        await db.Database.ExecuteSqlRawAsync("ALTER TABLE \"Channels\" RENAME COLUMN \"NumberReal\" TO \"Number\"", cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(
+            "ALTER TABLE \"Channels\" RENAME COLUMN \"NumberReal\" TO \"Number\"",
+            cancellationToken);
+    }
 
-        await MarkMigrationAppliedAsync(db, cancellationToken);
+    private static async Task<bool> ColumnExistsAsync(
+        FinTvDbContext db,
+        string table,
+        string column,
+        CancellationToken cancellationToken)
+    {
+        var count = await db.Database
+            .SqlQueryRaw<long>(
+                "SELECT COUNT(*) AS \"Value\" FROM pragma_table_info({0}) WHERE name = {1}",
+                table,
+                column)
+            .FirstAsync(cancellationToken);
+
+        return count > 0;
+    }
+
+    private static async Task<string?> GetColumnTypeAsync(
+        FinTvDbContext db,
+        string table,
+        string column,
+        CancellationToken cancellationToken)
+    {
+        if (!await ColumnExistsAsync(db, table, column, cancellationToken))
+        {
+            return null;
+        }
+
+        return await db.Database
+            .SqlQueryRaw<string>(
+                "SELECT type AS \"Value\" FROM pragma_table_info({0}) WHERE name = {1} LIMIT 1",
+                table,
+                column)
+            .FirstAsync(cancellationToken);
     }
 
     private static bool IsDecimalColumnType(string? columnType)

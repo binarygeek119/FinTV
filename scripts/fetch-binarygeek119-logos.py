@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download Binarygeek119 Set/English logos for bundling with the FinTV plugin."""
+"""Download FinTV channel logos from the open-channel-logos fintv2 branch."""
 
 from __future__ import annotations
 
@@ -10,14 +10,25 @@ import urllib.request
 from pathlib import Path
 
 REPO = "binarygeek119/open-channel-logos"
-TREE_URL = f"https://api.github.com/repos/{REPO}/git/trees/master?recursive=1"
-RAW_BASE = f"https://raw.githubusercontent.com/{REPO}/master/"
-PREFIX = "Binarygeek119 Set/English/"
+GIT_REF = "fintv2"
+TREE_URL = f"https://api.github.com/repos/{REPO}/git/trees/{GIT_REF}?recursive=1"
+RAW_BASE = f"https://raw.githubusercontent.com/{REPO}/{GIT_REF}/"
+LOGO_PREFIXES = (
+    "EBS/",
+    "Movies/",
+    "Shows/",
+    "Music Videos Channels/",
+    "The Holiday Channel/",
+)
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 
 
 def is_image(path: str) -> bool:
     return Path(path).suffix.lower() in IMAGE_SUFFIXES
+
+
+def is_logo_path(path: str) -> bool:
+    return any(path.startswith(prefix) for prefix in LOGO_PREFIXES)
 
 
 def fetch_tree() -> list[dict]:
@@ -50,13 +61,13 @@ def main() -> int:
         item
         for item in fetch_tree()
         if item.get("type") == "blob"
-        and item.get("path", "").startswith(PREFIX)
+        and is_logo_path(item.get("path", ""))
         and is_image(item["path"])
     ]
 
-    print(f"Bundling {len(files)} Binarygeek119 logos into {output_dir}")
+    print(f"Bundling {len(files)} logos from {REPO}@{GIT_REF} into {output_dir}")
     for item in files:
-        relative = item["path"][len(PREFIX) :]
+        relative = item["path"]
         destination = output_dir / relative.replace("/", "\\") if sys.platform == "win32" else output_dir / relative
         if destination.exists():
             continue

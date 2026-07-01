@@ -5,9 +5,16 @@ param(
 $ErrorActionPreference = "Stop"
 
 $Repo = "binarygeek119/open-channel-logos"
-$TreeUrl = "https://api.github.com/repos/$Repo/git/trees/master?recursive=1"
-$RawBase = "https://raw.githubusercontent.com/$Repo/master/"
-$Prefix = "Binarygeek119 Set/English/"
+$GitRef = "fintv2"
+$TreeUrl = "https://api.github.com/repos/$Repo/git/trees/$GitRef`?recursive=1"
+$RawBase = "https://raw.githubusercontent.com/$Repo/$GitRef/"
+$LogoPrefixes = @(
+    "EBS/",
+    "Movies/",
+    "Shows/",
+    "Music Videos Channels/",
+    "The Holiday Channel/"
+)
 $ImageSuffixes = @(".png", ".jpg", ".jpeg", ".webp")
 
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
@@ -19,18 +26,19 @@ $headers = @{
 
 $tree = Invoke-RestMethod -Uri $TreeUrl -Headers $headers
 $files = $tree.tree | Where-Object {
+    $path = $_.path
     $_.type -eq "blob" -and
-    $_.path.StartsWith($Prefix) -and
-    ($ImageSuffixes -contains [IO.Path]::GetExtension($_.path).ToLowerInvariant())
+    ($LogoPrefixes | Where-Object { $path.StartsWith($_) }) -and
+    ($ImageSuffixes -contains [IO.Path]::GetExtension($path).ToLowerInvariant())
 }
 
-Write-Host "Bundling $($files.Count) Binarygeek119 logos into $OutputDir"
+Write-Host "Bundling $($files.Count) logos from ${Repo}@${GitRef} into $OutputDir"
 
 $client = New-Object System.Net.WebClient
 $client.Headers.Add("User-Agent", "FinTV-Jellyfin-Plugin")
 
 foreach ($file in $files) {
-    $relative = $file.path.Substring($Prefix.Length)
+    $relative = $file.path
     $destination = Join-Path $OutputDir ($relative -replace '/', [IO.Path]::DirectorySeparatorChar)
     if (Test-Path -LiteralPath $destination) {
         continue

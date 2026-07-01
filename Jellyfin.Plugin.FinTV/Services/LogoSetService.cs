@@ -9,13 +9,22 @@ namespace Jellyfin.Plugin.FinTV.Services;
 
 public class LogoSetService
 {
+    public const string Binarygeek119GitHubRef = "fintv2";
+
     public const string Binarygeek119GitHubTreeUrl =
-        "https://api.github.com/repos/binarygeek119/open-channel-logos/git/trees/master?recursive=1";
+        "https://api.github.com/repos/binarygeek119/open-channel-logos/git/trees/fintv2?recursive=1";
 
     public const string Binarygeek119GitHubRawBase =
-        "https://raw.githubusercontent.com/binarygeek119/open-channel-logos/master/";
+        "https://raw.githubusercontent.com/binarygeek119/open-channel-logos/fintv2/";
 
-    public const string Binarygeek119EnglishPrefix = "Binarygeek119 Set/English/";
+    private static readonly string[] Binarygeek119LogoPathPrefixes =
+    [
+        "EBS/",
+        "Movies/",
+        "Shows/",
+        "Music Videos Channels/",
+        "The Holiday Channel/"
+    ];
 
     private readonly FinTvDbContext _db;
     private readonly IHttpClientFactory _httpClientFactory;
@@ -49,7 +58,7 @@ public class LogoSetService
         existing ??= new LogoSet
         {
             Name = setName,
-            SourceUrl = Binarygeek119GitHubRawBase + Binarygeek119EnglishPrefix,
+            SourceUrl = Binarygeek119GitHubRawBase,
             StoragePath = storagePath
         };
 
@@ -82,6 +91,11 @@ public class LogoSetService
     {
         var plugin = Plugin.Instance ?? throw new InvalidOperationException("Plugin not initialized.");
         var storagePath = Path.Combine(plugin.LogosFolder, "binarygeek119");
+        if (Directory.Exists(storagePath))
+        {
+            Directory.Delete(storagePath, true);
+        }
+
         Directory.CreateDirectory(storagePath);
         await DownloadBinarygeek119SetFromGitHubAsync(storagePath, cancellationToken);
         return await EnsureBinarygeek119SetAsync(cancellationToken);
@@ -219,16 +233,16 @@ public class LogoSetService
         var files = tree.Tree
             .Where(item =>
                 item.Type == "blob"
-                && item.Path.StartsWith(Binarygeek119EnglishPrefix, StringComparison.OrdinalIgnoreCase)
+                && IsBundledLogoPath(item.Path)
                 && IsImageFile(item.Path))
             .ToList();
 
-        _logger.LogInformation("Downloading {Count} Binarygeek119 logos from GitHub", files.Count);
+        _logger.LogInformation("Downloading {Count} Binarygeek119 logos from GitHub ({Ref})", files.Count, Binarygeek119GitHubRef);
 
         foreach (var file in files)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var relative = file.Path[Binarygeek119EnglishPrefix.Length..];
+            var relative = file.Path;
             var destination = Path.Combine(storagePath, relative.Replace('/', Path.DirectorySeparatorChar));
             Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
 
@@ -268,6 +282,10 @@ public class LogoSetService
 
     private static string ToRawGitHubUrl(string repoPath)
         => Binarygeek119GitHubRawBase + string.Join("/", repoPath.Split('/').Select(Uri.EscapeDataString));
+
+    private static bool IsBundledLogoPath(string path)
+        => Binarygeek119LogoPathPrefixes.Any(prefix =>
+            path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsImageFile(string path)
         => path.EndsWith(".png", StringComparison.OrdinalIgnoreCase)
