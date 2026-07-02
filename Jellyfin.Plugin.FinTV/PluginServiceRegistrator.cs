@@ -22,6 +22,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         {
             var plugin = Plugin.Instance ?? throw new InvalidOperationException("FinTV plugin not initialized.");
             Directory.CreateDirectory(plugin.DataFolder);
+            Directory.CreateDirectory(plugin.EbsCustomSlatesFolder);
             options.UseSqlite($"Data Source={plugin.DatabasePath}");
         });
 

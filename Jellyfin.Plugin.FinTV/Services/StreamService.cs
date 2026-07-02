@@ -89,20 +89,20 @@ public class StreamService
                     }
                     else
                     {
-                        await WriteEbsAsync(channel, ebs, catalog, ffmpegPath, output, 180, cancellationToken);
+                        await WriteEbsAsync(channel, ebs, ffmpegPath, output, 180, cancellationToken);
                     }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed streaming item {Title}", current.Title);
-                    await WriteEbsAsync(channel, ebs, catalog, ffmpegPath, output, 120, cancellationToken);
+                    await WriteEbsAsync(channel, ebs, ffmpegPath, output, 120, cancellationToken);
                 }
 
                 continue;
             }
 
             var ebsDuration = await GetEbsDurationSecondsAsync(channelId, cancellationToken);
-            await WriteEbsAsync(channel, ebs, catalog, ffmpegPath, output, ebsDuration, cancellationToken);
+            await WriteEbsAsync(channel, ebs, ffmpegPath, output, ebsDuration, cancellationToken);
         }
     }
 
@@ -304,29 +304,13 @@ public class StreamService
     private async Task WriteEbsAsync(
         Channel channel,
         EbsService ebs,
-        JellyfinCatalogService catalog,
         string ffmpegPath,
         Stream output,
         double durationSeconds,
         CancellationToken cancellationToken)
     {
-        var slatePath = ebs.ResolveRandomSlatePath();
-        if (string.IsNullOrWhiteSpace(slatePath))
-        {
-            _logger.LogWarning("No EBS slate found for channel {Channel}; using text slate", channel.Name);
-            var fallback = _ffmpeg.BuildOfflineSlateCommand(channel);
-            await RunFfmpegToStreamAsync(ffmpegPath, fallback, output, cancellationToken);
-            return;
-        }
-
-        string? audioPath = null;
-        var track = ebs.PickBackgroundMusicTrack();
-        if (track is not null)
-        {
-            audioPath = catalog.GetMediaPath(track);
-        }
-
-        var args = _ffmpeg.BuildEbsCommand(channel, slatePath, audioPath, durationSeconds);
+        var plan = ebs.CreatePlaybackPlan(channel, durationSeconds);
+        var args = _ffmpeg.BuildEbsCommand(channel, plan);
         await RunFfmpegToStreamAsync(ffmpegPath, args, output, cancellationToken);
     }
 

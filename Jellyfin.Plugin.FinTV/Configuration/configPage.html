@@ -15,6 +15,7 @@
                 <button type="button" class="tab" data-tab="lineups" role="tab">Lineups</button>
                 <button type="button" class="tab" data-tab="commercials" role="tab">Commercials</button>
                 <button type="button" class="tab" data-tab="logos" role="tab">Logo Sets</button>
+                <button type="button" class="tab" data-tab="ebs" role="tab">EBS</button>
                 <button type="button" class="tab" data-tab="weather" role="tab">Weather</button>
                 <button type="button" class="tab" data-tab="setup" role="tab">Live TV Setup</button>
                 <button type="button" class="tab" data-tab="tasks" role="tab">Tasks</button>
@@ -226,7 +227,7 @@
 
             <section id="tab-logos" class="tab-panel">
                 <p>Import the <a href="https://github.com/binarygeek119/open-channel-logos/tree/fintv2" target="_blank" rel="noopener">Binarygeek119 Set (fintv2 branch)</a>, or create your own custom logo set.</p>
-                <p class="hint">Channel bugs live under Shows, Movies, and Music Videos Channels. The <code>EBS/</code> folder is separate: those full-screen slates play when a channel has no scheduled media, with background music from your Jellyfin music libraries (configured in Live TV Setup).</p>
+                <p class="hint">Channel bugs live under Shows, Movies, and Music Videos Channels. Off-air Emergency Broadcast System slates are configured on the <strong>EBS</strong> tab.</p>
                 <div class="toolbar">
                     <button id="btn-sync-logos" class="emby-button">Import / Refresh Binarygeek119 Set</button>
                     <button id="btn-repair-logos" class="emby-button">Apply Logos to Channels</button>
@@ -234,6 +235,83 @@
                 </div>
                 <div id="logo-repair-status" class="status-card hidden"></div>
                 <div id="logo-set-info"></div>
+            </section>
+
+            <section id="tab-ebs" class="tab-panel">
+                <div class="card section-card">
+                    <h2>Emergency Broadcast System</h2>
+                    <p class="hint">EBS plays when a channel has no scheduled media, when playback fails, or when a weather capture error occurs. Viewers see your chosen video source with optional background music, white noise, or silence.</p>
+                    <label class="field">
+                        <span>Off-air video</span>
+                        <select id="ebs-display-mode" class="emby-input">
+                            <option value="0">Slate image (stock or custom upload)</option>
+                            <option value="1">Color bars</option>
+                            <option value="2">TV static with white noise</option>
+                        </select>
+                    </label>
+                    <label class="field" id="ebs-slate-variant-field">
+                        <span>Stock slate variant</span>
+                        <select id="ebs-slate-variant" class="emby-input">
+                            <option value="0">USA (offlineusa.jpg)</option>
+                            <option value="1">International (offline.jpg)</option>
+                        </select>
+                    </label>
+                    <p class="hint" id="ebs-slate-variant-hint">Used when off-air video is set to slate image. Custom uploads below override the bundled stock image for each variant.</p>
+                    <label class="field" id="ebs-audio-mode-field">
+                        <span>Off-air audio</span>
+                        <select id="ebs-audio-mode" class="emby-input">
+                            <option value="0">Background music from Jellyfin library</option>
+                            <option value="1">White noise</option>
+                            <option value="2">Silence</option>
+                        </select>
+                    </label>
+                    <label class="field">
+                        <span>Background music source</span>
+                        <select id="ebs-music-source" class="emby-input">
+                            <option value="0">All music libraries</option>
+                            <option value="1">Specific music library</option>
+                        </select>
+                    </label>
+                    <label class="field" id="ebs-library-field">
+                        <span>Background music library</span>
+                        <select id="ebs-music-library" class="emby-input"></select>
+                    </label>
+                    <div class="actions" style="margin-bottom:1rem">
+                        <button type="button" id="btn-save-ebs" class="raised button-submit emby-button">Save EBS Settings</button>
+                    </div>
+                </div>
+                <div class="card section-card">
+                    <h3>Custom slate images</h3>
+                    <p class="hint">Upload PNG or JPG images to replace the bundled stock slates. Each variant can have one custom image.</p>
+                    <div class="ebs-upload-grid">
+                        <div class="ebs-upload-card">
+                            <h4>USA slate</h4>
+                            <p class="hint">Stock fallback: <code>offlineusa.jpg</code></p>
+                            <div id="ebs-usa-status" class="status-card"></div>
+                            <label class="field">
+                                <span>Upload image</span>
+                                <input id="ebs-usa-file" type="file" class="emby-input" accept=".png,.jpg,.jpeg,image/png,image/jpeg">
+                            </label>
+                            <div class="actions">
+                                <button type="button" id="btn-upload-ebs-usa" class="emby-button">Upload USA Slate</button>
+                                <button type="button" id="btn-remove-ebs-usa" class="emby-button">Remove Custom USA Slate</button>
+                            </div>
+                        </div>
+                        <div class="ebs-upload-card">
+                            <h4>International slate</h4>
+                            <p class="hint">Stock fallback: <code>offline.jpg</code></p>
+                            <div id="ebs-international-status" class="status-card"></div>
+                            <label class="field">
+                                <span>Upload image</span>
+                                <input id="ebs-international-file" type="file" class="emby-input" accept=".png,.jpg,.jpeg,image/png,image/jpeg">
+                            </label>
+                            <div class="actions">
+                                <button type="button" id="btn-upload-ebs-international" class="emby-button">Upload International Slate</button>
+                                <button type="button" id="btn-remove-ebs-international" class="emby-button">Remove Custom International Slate</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </section>
 
             <section id="tab-weather" class="tab-panel">
@@ -247,7 +325,7 @@
                         <li><a href="https://4000.weatherstar.dev/" target="_blank" rel="noopener">https://4000.weatherstar.dev/</a> <button type="button" class="emby-button btn-inline weather-url-preset" data-url="https://4000.weatherstar.dev">Use URL</button></li>
                         <li><a href="https://weatherstar3000.netbymatt.com/" target="_blank" rel="noopener">https://weatherstar3000.netbymatt.com/</a> <button type="button" class="emby-button btn-inline weather-url-preset" data-url="https://weatherstar3000.netbymatt.com">Use URL</button></li>
                     </ul>
-                    <p class="hint">Weather channels use headless Chromium via Playwright. <strong>Windows:</strong> FinTV auto-installs Chromium on first tune. <strong>Linux:</strong> FinTV uses Playwright&apos;s official Docker image (<code>mcr.microsoft.com/playwright:v1.49.0-jammy</code>) — Docker must be installed and the Jellyfin user must be able to run <code>docker</code>. Localhost WeatherStar URLs are rewritten to <code>host.docker.internal</code> for container access.</p>
+                    <p class="hint">Weather channels use headless Chromium via Playwright and the same EBS background music configured on the <strong>EBS</strong> tab. <strong>Windows:</strong> FinTV auto-installs Chromium on first tune. <strong>Linux:</strong> FinTV uses Playwright&apos;s official Docker image (<code>mcr.microsoft.com/playwright:v1.49.0-jammy</code>) — Docker must be installed and the Jellyfin user must be able to run <code>docker</code>. Localhost WeatherStar URLs are rewritten to <code>host.docker.internal</code> for container access.</p>
                     <p class="hint">Self-host a WeatherStar build from one of these projects, then paste your local base URL above:</p>
                     <ul class="weather-resource-list">
                         <li><a href="https://github.com/TheGoldDiamond9/weatherstar4000" target="_blank" rel="noopener">TheGoldDiamond9 / weatherstar4000</a></li>
@@ -274,18 +352,7 @@
                         <span>Public server URL (optional override)</span>
                         <input id="setup-public-base" type="url" class="emby-input" placeholder="http://192.168.1.50:8096">
                     </label>
-                    <label class="field">
-                        <span>EBS background music source</span>
-                        <select id="setup-ebs-music-source" class="emby-input">
-                            <option value="0">All music libraries</option>
-                            <option value="1">Specific music library</option>
-                        </select>
-                    </label>
-                    <label class="field" id="setup-ebs-library-field">
-                        <span>Background music library</span>
-                        <select id="setup-ebs-music-library" class="emby-input"></select>
-                    </label>
-                    <p class="hint">When a viewer tunes in and the channel has no media scheduled, FinTV shows an EBS slate and plays random audio from the selected source. Create a library named <code>Background Music</code> or choose any music library.</p>
+                    <p class="hint">Configure off-air Emergency Broadcast System playback on the <strong>EBS</strong> tab.</p>
                     <div class="actions" style="margin-bottom:1rem">
                         <button type="button" id="btn-save-setup" class="raised button-submit emby-button">Save &amp; Refresh URLs</button>
                     </div>

@@ -171,3 +171,20 @@ code { background: var(--fintv-surface-2); padding: .2rem .45rem; border-radius:
 .modal-footer { padding: .75rem 1rem; border-top: 1px solid var(--fintv-border); display: flex; gap: .5rem; justify-content: flex-end; flex-wrap: wrap; }
 
 .empty-state { text-align: center; padding: 2rem 1rem; color: var(--fintv-muted); }
+
+.ebs-upload-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.ebs-upload-card {
+    border: 1px solid var(--fintv-border);
+    border-radius: 8px;
+    padding: 1rem;
+    background: var(--fintv-surface-2);
+}
+
+.ebs-upload-card h4 {
+    margin: 0 0 0.5rem;
+}

@@ -17,17 +17,20 @@ public class WeatherStarChannelService
 
     private readonly ILogger<WeatherStarChannelService> _logger;
     private readonly FfmpegCommandBuilder _ffmpegBuilder;
+    private readonly EbsService _ebs;
     private readonly IMediaEncoder _mediaEncoder;
     private readonly PlaywrightRuntimeService _playwrightRuntime;
 
     public WeatherStarChannelService(
         ILogger<WeatherStarChannelService> logger,
         FfmpegCommandBuilder ffmpegBuilder,
+        EbsService ebs,
         IMediaEncoder mediaEncoder,
         PlaywrightRuntimeService playwrightRuntime)
     {
         _logger = logger;
         _ffmpegBuilder = ffmpegBuilder;
+        _ebs = ebs;
         _mediaEncoder = mediaEncoder;
         _playwrightRuntime = playwrightRuntime;
     }
@@ -41,6 +44,7 @@ public class WeatherStarChannelService
             BuildWeatherPageUrl(lat, lon, baseUrl));
         var (width, height) = GetResolution(channel);
         var ffmpegPath = _mediaEncoder.EncoderPath;
+        var backgroundMusicPath = _ebs.ResolveBackgroundMusicPath();
 
         IBrowser? browser = null;
         try
@@ -58,7 +62,7 @@ public class WeatherStarChannelService
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
             var ffmpegTask = CliWrap.Cli.Wrap(ffmpegPath)
-                .WithArguments(BuildWeatherFfmpegArgs(width, height))
+                .WithArguments(_ffmpegBuilder.BuildWeatherCommand(width, height, CaptureFps, backgroundMusicPath))
                 .WithStandardInputPipe(CliWrap.PipeSource.FromStream(frameStream))
                 .WithStandardOutputPipe(CliWrap.PipeTarget.ToStream(output))
                 .WithStandardErrorPipe(CliWrap.PipeTarget.ToStringBuilder(new System.Text.StringBuilder()))
@@ -87,13 +91,8 @@ public class WeatherStarChannelService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "WeatherStar capture failed, using offline slate");
-            var offline = _ffmpegBuilder.BuildOfflineSlateCommand(channel);
-            await CliWrap.Cli.Wrap(ffmpegPath)
-                .WithArguments(offline)
-                .WithStandardOutputPipe(CliWrap.PipeTarget.ToStream(output))
-                .WithValidation(CliWrap.CommandResultValidation.None)
-                .ExecuteAsync(cancellationToken);
+            _logger.LogWarning(ex, "WeatherStar capture failed, using EBS slate");
+            await WriteEbsFallbackAsync(channel, ffmpegPath, output, cancellationToken);
         }
         finally
         {
@@ -172,24 +171,19 @@ public class WeatherStarChannelService
             : (854, 480);
     }
 
-    private static IReadOnlyList<string> BuildWeatherFfmpegArgs(int width, int height)
+    private async Task WriteEbsFallbackAsync(
+        Domain.Channel channel,
+        string ffmpegPath,
+        Stream output,
+        CancellationToken cancellationToken)
     {
-        return new List<string>
-        {
-            "-hide_banner",
-            "-loglevel", "warning",
-            "-f", "image2pipe",
-            "-framerate", CaptureFps.ToString(CultureInfo.InvariantCulture),
-            "-i", "pipe:0",
-            "-vf", $"scale={width}:{height}",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-tune", "stillimage",
-            "-pix_fmt", "yuv420p",
-            "-an",
-            "-f", "mpegts",
-            "pipe:1"
-        };
+        var plan = _ebs.CreatePlaybackPlan(channel, durationSeconds: 120);
+        var args = _ffmpegBuilder.BuildEbsCommand(channel, plan);
+        await CliWrap.Cli.Wrap(ffmpegPath)
+            .WithArguments(args)
+            .WithStandardOutputPipe(CliWrap.PipeTarget.ToStream(output))
+            .WithValidation(CliWrap.CommandResultValidation.None)
+            .ExecuteAsync(cancellationToken);
     }
 
     private sealed class ScreenshotFrameStream : Stream

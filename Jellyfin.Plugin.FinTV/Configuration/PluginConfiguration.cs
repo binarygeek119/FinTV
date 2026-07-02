@@ -32,6 +32,21 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public string? EbsBackgroundMusicLibraryId { get; set; }
 
+    /// <summary>
+    /// Which bundled off-air slate artwork to show when a channel has no scheduled media.
+    /// </summary>
+    public EbsSlateVariant EbsSlateVariant { get; set; } = EbsSlateVariant.Usa;
+
+    /// <summary>
+    /// What viewers see during off-air playback and stream errors.
+    /// </summary>
+    public EbsDisplayMode EbsDisplayMode { get; set; } = EbsDisplayMode.SlateImage;
+
+    /// <summary>
+    /// Audio track paired with off-air video when not using static and white noise.
+    /// </summary>
+    public EbsAudioMode EbsAudioMode { get; set; } = EbsAudioMode.BackgroundMusic;
+
     public bool AutoRegisterLiveTv { get; set; }
 
     public string Binarygeek119LogoSetUrl { get; set; } =

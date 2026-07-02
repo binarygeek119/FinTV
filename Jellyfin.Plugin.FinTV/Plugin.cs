@@ -51,6 +51,16 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     public string LogosFolder => Path.Combine(DataFolder, "logos");
 
     /// <summary>
+    /// Gets the Emergency Broadcast System asset folder.
+    /// </summary>
+    public string EbsFolder => Path.Combine(DataFolder, "ebs");
+
+    /// <summary>
+    /// Gets the folder for user-uploaded EBS slate images.
+    /// </summary>
+    public string EbsCustomSlatesFolder => Path.Combine(EbsFolder, "custom");
+
+    /// <summary>
     /// Gets logos shipped inside the plugin install folder.
     /// </summary>
     public string BundledLogosFolder => Path.Combine(

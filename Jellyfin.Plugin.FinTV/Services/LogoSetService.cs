@@ -177,6 +177,7 @@ public class LogoSetService
             .Where(e => e.LogoSetId == set.Id)
             .ExecuteDeleteAsync(cancellationToken);
 
+        DetachTrackedLogoSetEntries(set.Id);
         set.Entries.Clear();
 
         foreach (var file in files)
@@ -196,6 +197,16 @@ public class LogoSetService
 
         await _db.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Indexed {Count} logos for set {Set}", files.Count, set.Name);
+    }
+
+    private void DetachTrackedLogoSetEntries(Guid logoSetId)
+    {
+        foreach (var tracked in _db.ChangeTracker.Entries<LogoSetEntry>()
+            .Where(entry => entry.Entity.LogoSetId == logoSetId)
+            .ToList())
+        {
+            tracked.State = EntityState.Detached;
+        }
     }
 
     public LogoSetEntry? FindEntry(LogoSet set, string? relativePath, string? channelName = null)

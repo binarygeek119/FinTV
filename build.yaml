@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.43"
+version: "0.0.2.44"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -52,7 +52,6 @@ artifacts:
   - "runtimes/osx-x64/native/libe_sqlite3.dylib"
   - "runtimes/osx-arm64/native/libe_sqlite3.dylib"
   - "logos/binarygeek119/EBS/offline.jpg"
-  - "logos/binarygeek119/EBS/offline2.jpg"
   - "logos/binarygeek119/EBS/offlineusa.jpg"
   - "logos/binarygeek119/Movies/Creature_Double_Feature.png"
   - "logos/binarygeek119/Movies/Hero_TV.png"
@@ -81,6 +80,10 @@ artifacts:
   - "tools/yt-dlp/linux-x64/yt-dlp"
   - "tools/yt-dlp/win-x64/yt-dlp.exe"
 changelog: |-
+  - Add EBS admin tab with custom slate uploads, color bars, and TV static with white noise
+  - Play EBS background music on weather channels and use configured EBS playback on errors
+  - Add USA and International off-air slate selection with custom PNG/JPG overrides
+  - Fix logo sync concurrency when re-indexing EBS logo entries
   - Fix Apply Logos to Channels failing with 500 when channels reference missing logo sets
   - Fix custom logo uploads returning 401 by sending Jellyfin auth through multipart requests
   - Handle Jellyfin server outages gracefully in the admin UI instead of uncaught fetch errors

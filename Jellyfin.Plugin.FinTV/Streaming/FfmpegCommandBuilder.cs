@@ -133,26 +133,71 @@ public class FfmpegCommandBuilder
         return args;
     }
 
+    public IReadOnlyList<string> BuildEbsCommand(Channel channel, EbsPlaybackPlan plan)
+    {
+        var (width, height) = GetResolution(channel);
+        var duration = Math.Max(30, plan.DurationSeconds).ToString("F0", CultureInfo.InvariantCulture);
+
+        return plan.DisplayMode switch
+        {
+            EbsDisplayMode.StaticAndWhiteNoise => BuildStaticWhiteNoiseCommand(width, height, duration),
+            EbsDisplayMode.ColorBars => BuildColorBarsCommand(width, height, duration, plan.AudioMode, plan.MusicPath),
+            EbsDisplayMode.SlateImage => BuildSlateImageCommand(
+                width,
+                height,
+                duration,
+                plan.SlateImagePath,
+                plan.AudioMode,
+                plan.MusicPath),
+            _ => BuildColorBarsCommand(width, height, duration, plan.AudioMode, plan.MusicPath)
+        };
+    }
+
     public IReadOnlyList<string> BuildEbsCommand(
         Channel channel,
         string slateImagePath,
         string? audioPath,
         double durationSeconds)
     {
-        var (width, height) = GetResolution(channel);
-        var duration = Math.Max(30, durationSeconds).ToString("F0", CultureInfo.InvariantCulture);
+        return BuildEbsCommand(channel, new EbsPlaybackPlan
+        {
+            DisplayMode = EbsDisplayMode.SlateImage,
+            AudioMode = string.IsNullOrWhiteSpace(audioPath) || !File.Exists(audioPath)
+                ? EbsAudioMode.Silence
+                : EbsAudioMode.BackgroundMusic,
+            SlateImagePath = slateImagePath,
+            MusicPath = audioPath,
+            DurationSeconds = durationSeconds
+        });
+    }
+
+    private static IReadOnlyList<string> BuildSlateImageCommand(
+        int width,
+        int height,
+        string duration,
+        string? slateImagePath,
+        EbsAudioMode audioMode,
+        string? musicPath)
+    {
+        if (string.IsNullOrWhiteSpace(slateImagePath) || !File.Exists(slateImagePath))
+        {
+            return BuildColorBarsCommand(width, height, duration, audioMode, musicPath);
+        }
+
         var filter =
             $"[1:v]scale={width}:{height}:force_original_aspect_ratio=decrease," +
             $"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,format=yuv420p[vout]";
 
-        if (!string.IsNullOrWhiteSpace(audioPath) && File.Exists(audioPath))
+        if (audioMode == EbsAudioMode.BackgroundMusic
+            && !string.IsNullOrWhiteSpace(musicPath)
+            && File.Exists(musicPath))
         {
             return new List<string>
             {
                 "-hide_banner",
                 "-loglevel", "warning",
                 "-stream_loop", "-1",
-                "-i", audioPath,
+                "-i", musicPath,
                 "-loop", "1",
                 "-i", slateImagePath,
                 "-filter_complex", filter,
@@ -170,12 +215,14 @@ public class FfmpegCommandBuilder
             };
         }
 
-        return new List<string>
+        var args = new List<string>
         {
             "-hide_banner",
-            "-loglevel", "warning",
-            "-f", "lavfi",
-            "-i", $"anullsrc=channel_layout=stereo:sample_rate=48000",
+            "-loglevel", "warning"
+        };
+        args.AddRange(BuildLavfiAudioInput(audioMode));
+        args.AddRange(new[]
+        {
             "-loop", "1",
             "-i", slateImagePath,
             "-filter_complex", filter,
@@ -188,6 +235,154 @@ public class FfmpegCommandBuilder
             "-b:a", "192k",
             "-t", duration,
             "-shortest",
+            "-f", "mpegts",
+            "pipe:1"
+        });
+        return args;
+    }
+
+    private static IReadOnlyList<string> BuildColorBarsCommand(
+        int width,
+        int height,
+        string duration,
+        EbsAudioMode audioMode,
+        string? musicPath)
+    {
+        if (audioMode == EbsAudioMode.BackgroundMusic
+            && !string.IsNullOrWhiteSpace(musicPath)
+            && File.Exists(musicPath))
+        {
+            return new List<string>
+            {
+                "-hide_banner",
+                "-loglevel", "warning",
+                "-stream_loop", "-1",
+                "-i", musicPath,
+                "-f", "lavfi",
+                "-i", $"smptebars=size={width}x{height}:rate=30",
+                "-map", "1:v",
+                "-map", "0:a",
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-tune", "stillimage",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-t", duration,
+                "-shortest",
+                "-f", "mpegts",
+                "pipe:1"
+            };
+        }
+
+        var args = new List<string>
+        {
+            "-hide_banner",
+            "-loglevel", "warning"
+        };
+        args.AddRange(BuildLavfiAudioInput(audioMode));
+        args.AddRange(new[]
+        {
+            "-f", "lavfi",
+            "-i", $"smptebars=size={width}x{height}:rate=30",
+            "-map", "1:v",
+            "-map", "0:a",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-tune", "stillimage",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-t", duration,
+            "-shortest",
+            "-f", "mpegts",
+            "pipe:1"
+        });
+        return args;
+    }
+
+    private static IReadOnlyList<string> BuildStaticWhiteNoiseCommand(int width, int height, string duration)
+    {
+        return new List<string>
+        {
+            "-hide_banner",
+            "-loglevel", "warning",
+            "-f", "lavfi",
+            "-i", $"color=c=808080:s={width}x{height}:r=30,format=gray,geq=lum='255*random(0)'",
+            "-f", "lavfi",
+            "-i", "anoisesrc=color=white:amplitude=0.01:sample_rate=48000",
+            "-map", "0:v",
+            "-map", "1:a",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-t", duration,
+            "-shortest",
+            "-f", "mpegts",
+            "pipe:1"
+        };
+    }
+
+    private static IReadOnlyList<string> BuildLavfiAudioInput(EbsAudioMode audioMode)
+    {
+        return audioMode == EbsAudioMode.WhiteNoise
+            ? new List<string> { "-f", "lavfi", "-i", "anoisesrc=color=white:amplitude=0.01:sample_rate=48000" }
+            : new List<string> { "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000" };
+    }
+
+    public IReadOnlyList<string> BuildWeatherCommand(
+        int width,
+        int height,
+        double captureFps,
+        string? audioPath)
+    {
+        var fps = captureFps.ToString(CultureInfo.InvariantCulture);
+
+        if (!string.IsNullOrWhiteSpace(audioPath) && File.Exists(audioPath))
+        {
+            return new List<string>
+            {
+                "-hide_banner",
+                "-loglevel", "warning",
+                "-f", "image2pipe",
+                "-framerate", fps,
+                "-i", "pipe:0",
+                "-stream_loop", "-1",
+                "-i", audioPath,
+                "-vf", $"scale={width}:{height}",
+                "-map", "0:v",
+                "-map", "1:a",
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-tune", "stillimage",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-f", "mpegts",
+                "pipe:1"
+            };
+        }
+
+        return new List<string>
+        {
+            "-hide_banner",
+            "-loglevel", "warning",
+            "-f", "image2pipe",
+            "-framerate", fps,
+            "-i", "pipe:0",
+            "-f", "lavfi",
+            "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+            "-vf", $"scale={width}:{height}",
+            "-map", "0:v",
+            "-map", "1:a",
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-tune", "stillimage",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            "-b:a", "192k",
             "-f", "mpegts",
             "pipe:1"
         };

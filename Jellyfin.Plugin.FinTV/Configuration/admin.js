@@ -1722,13 +1722,40 @@
     }
 
     function updateEbsLibraryFieldVisibility() {
-        const source = Number($('setup-ebs-music-source')?.value || '1');
-        const field = $('setup-ebs-library-field');
+        const source = Number($('ebs-music-source')?.value || $('setup-ebs-music-source')?.value || '1');
+        const field = $('ebs-library-field') || $('setup-ebs-library-field');
         if (field) field.style.display = source === 1 ? '' : 'none';
     }
 
-    function populateEbsMusicLibraries(libraries, selectedId, selectedName) {
-        const select = $('setup-ebs-music-library');
+    function updateEbsFieldVisibility() {
+        const displayMode = Number($('ebs-display-mode')?.value || '0');
+        const audioModeField = $('ebs-audio-mode-field');
+        const slateVariantField = $('ebs-slate-variant-field');
+        const slateVariantHint = $('ebs-slate-variant-hint');
+        const musicSourceField = $('ebs-music-source')?.closest('.field');
+        const musicLibraryField = $('ebs-library-field');
+        const audioMode = Number($('ebs-audio-mode')?.value || '0');
+
+        if (slateVariantField) {
+            slateVariantField.style.display = displayMode === 0 ? '' : 'none';
+        }
+        if (slateVariantHint) {
+            slateVariantHint.style.display = displayMode === 0 ? '' : 'none';
+        }
+        if (audioModeField) {
+            audioModeField.style.display = displayMode === 2 ? 'none' : '';
+        }
+        if (musicSourceField) {
+            musicSourceField.style.display = displayMode === 2 || audioMode !== 0 ? 'none' : '';
+        }
+        if (musicLibraryField) {
+            musicLibraryField.style.display = displayMode === 2 || audioMode !== 0 ? 'none' : '';
+        }
+        updateEbsLibraryFieldVisibility();
+    }
+
+    function populateEbsMusicLibraries(libraries, selectedId, selectedName, selectId) {
+        const select = $(selectId || 'ebs-music-library') || $('setup-ebs-music-library');
         if (!select) return;
 
         const options = (libraries || []).map((lib) =>
@@ -1744,6 +1771,95 @@
         const byName = [...select.options].find((opt) => opt.textContent === selectedName);
         if (byName) {
             select.value = byName.value;
+        }
+    }
+
+    function renderEbsCustomSlateStatus(customSlates) {
+        const usa = customSlates?.usa;
+        const international = customSlates?.international;
+        const usaEl = $('ebs-usa-status');
+        const intlEl = $('ebs-international-status');
+        if (usaEl) {
+            usaEl.textContent = usa?.fileName
+                ? `Custom upload: ${usa.fileName}`
+                : 'Using bundled stock slate.';
+        }
+        if (intlEl) {
+            intlEl.textContent = international?.fileName
+                ? `Custom upload: ${international.fileName}`
+                : 'Using bundled stock slate.';
+        }
+    }
+
+    async function loadEbs() {
+        try {
+            const settings = await api('/ebs/settings');
+            if ($('ebs-display-mode')) $('ebs-display-mode').value = String(settings.ebsDisplayMode ?? 0);
+            if ($('ebs-audio-mode')) $('ebs-audio-mode').value = String(settings.ebsAudioMode ?? 0);
+            if ($('ebs-slate-variant')) $('ebs-slate-variant').value = String(settings.ebsSlateVariant ?? 0);
+            if ($('ebs-music-source')) $('ebs-music-source').value = String(settings.ebsBackgroundMusicSource ?? 1);
+            populateEbsMusicLibraries(
+                settings.musicLibraries,
+                settings.ebsBackgroundMusicLibraryId || '',
+                settings.ebsBackgroundMusicLibraryName || 'Background Music',
+                'ebs-music-library'
+            );
+            renderEbsCustomSlateStatus(settings.customSlates);
+            updateEbsFieldVisibility();
+        } catch (err) {
+            reportApiError(err, 'Could not load EBS settings.');
+        }
+    }
+
+    async function saveEbsSettings() {
+        const librarySelect = $('ebs-music-library');
+        const selectedOption = librarySelect?.selectedOptions?.[0];
+        try {
+            await api('/ebs/settings', {
+                method: 'PUT',
+                body: JSON.stringify({
+                    ebsDisplayMode: Number($('ebs-display-mode')?.value || '0'),
+                    ebsAudioMode: Number($('ebs-audio-mode')?.value || '0'),
+                    ebsSlateVariant: Number($('ebs-slate-variant')?.value || '0'),
+                    ebsBackgroundMusicSource: Number($('ebs-music-source')?.value || '1'),
+                    ebsBackgroundMusicLibraryId: selectedOption?.value || null,
+                    ebsBackgroundMusicLibraryName: selectedOption?.textContent?.trim() || 'Background Music'
+                })
+            });
+            toast('EBS settings saved.', 'success');
+            await loadEbs();
+        } catch (err) {
+            toast(err.message, 'error');
+        }
+    }
+
+    async function uploadEbsSlate(variant, inputId) {
+        const input = $(inputId);
+        const file = input?.files?.[0];
+        if (!file) {
+            toast('Choose a PNG or JPG image first.', 'error');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('file', file);
+        try {
+            const data = await apiForm('/ebs/slates/' + variant, formData, 'POST');
+            renderEbsCustomSlateStatus(data.customSlates);
+            if (input) input.value = '';
+            toast('Custom EBS slate uploaded.', 'success');
+        } catch (err) {
+            toast(err.message, 'error');
+        }
+    }
+
+    async function removeEbsSlate(variant) {
+        try {
+            const data = await api('/ebs/slates/' + variant, { method: 'DELETE' });
+            renderEbsCustomSlateStatus(data.customSlates);
+            toast('Custom EBS slate removed.', 'success');
+        } catch (err) {
+            toast(err.message, 'error');
         }
     }
 
@@ -1796,13 +1912,6 @@
             try {
                 const settings = await api('/setup/settings');
                 if ($('setup-public-base')) $('setup-public-base').value = settings.publicBaseUrl || '';
-                if ($('setup-ebs-music-source')) $('setup-ebs-music-source').value = String(settings.ebsBackgroundMusicSource ?? 1);
-                populateEbsMusicLibraries(
-                    settings.musicLibraries,
-                    settings.ebsBackgroundMusicLibraryId || '',
-                    settings.ebsBackgroundMusicLibraryName || 'Background Music'
-                );
-                updateEbsLibraryFieldVisibility();
             } catch (settingsErr) {
                 console.warn('Could not load setup settings', settingsErr);
             }
@@ -1814,24 +1923,15 @@
 
     async function saveSetupSettings() {
         const publicBaseUrl = $('setup-public-base').value.trim();
-        const ebsBackgroundMusicSource = Number($('setup-ebs-music-source')?.value || '1');
-        const librarySelect = $('setup-ebs-music-library');
-        const selectedOption = librarySelect?.selectedOptions?.[0];
-        const ebsBackgroundMusicLibraryId = selectedOption?.value || null;
-        const ebsBackgroundMusicLibraryName = selectedOption?.textContent?.trim() || 'Background Music';
         try {
             const data = await api('/setup/settings', {
                 method: 'PUT',
                 body: JSON.stringify({
-                    publicBaseUrl: publicBaseUrl || null,
-                    ebsBackgroundMusicSource,
-                    ebsBackgroundMusicLibraryId,
-                    ebsBackgroundMusicLibraryName
+                    publicBaseUrl: publicBaseUrl || null
                 })
             });
             applySetupData(data);
             if ($('setup-public-base')) $('setup-public-base').value = publicBaseUrl;
-            updateEbsLibraryFieldVisibility();
             toast('Live TV URLs updated.', 'success');
         } catch (err) {
             toast(err.message, 'error');
@@ -1857,6 +1957,7 @@
         stopOnAirPolling();
         if (name === 'channels') startOnAirPolling();
         if (name === 'setup') loadSetup();
+        if (name === 'ebs') loadEbs();
         if (name === 'weather') loadWeather();
         if (name === 'presets') loadPresets();
         if (name === 'lineups') loadLineups();
@@ -1959,10 +2060,17 @@
 
         qa('.btn-copy').forEach((btn) => btn.onclick = () => copyText(btn.dataset.copyTarget));
         click('btn-save-setup', saveSetupSettings);
+        click('btn-save-ebs', () => saveEbsSettings().catch((e) => toast(e.message, 'error')));
+        click('btn-upload-ebs-usa', () => uploadEbsSlate('usa', 'ebs-usa-file'));
+        click('btn-upload-ebs-international', () => uploadEbsSlate('international', 'ebs-international-file'));
+        click('btn-remove-ebs-usa', () => removeEbsSlate('usa'));
+        click('btn-remove-ebs-international', () => removeEbsSlate('international'));
         click('btn-save-weather', saveWeatherSettings);
         click('btn-use-test-weather-url', useTestWeatherUrl);
         bindWeatherUrlPresets();
-        change('setup-ebs-music-source', updateEbsLibraryFieldVisibility);
+        change('ebs-display-mode', updateEbsFieldVisibility);
+        change('ebs-audio-mode', updateEbsFieldVisibility);
+        change('ebs-music-source', updateEbsFieldVisibility);
         click('btn-apply-presets', applyPresets);
         change('preset-numbering-mode', loadPresets);
         click('modal-close', closeModal);
