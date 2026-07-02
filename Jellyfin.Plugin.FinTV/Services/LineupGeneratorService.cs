@@ -149,21 +149,33 @@ public class LineupGeneratorService
 
     private async Task BuildWeatherPlayoutAsync(Channel channel, DateTime startUtc, DateTime endUtc, CancellationToken cancellationToken)
     {
-        _ = cancellationToken;
         var existing = await _db.PlayoutItems
             .Where(p => p.ChannelId == channel.Id && p.Start >= startUtc && p.Start < endUtc)
             .ToListAsync(cancellationToken);
 
         _db.PlayoutItems.RemoveRange(existing);
-        _db.PlayoutItems.Add(new PlayoutItem
+
+        var cursor = startUtc;
+        while (cursor < endUtc)
         {
-            ChannelId = channel.Id,
-            Start = startUtc,
-            Finish = endUtc,
-            Title = "WeatherStar 4000",
-            IsVirtual = true,
-            VirtualSource = VirtualContentSource.WeatherStar
-        });
+            var segmentEnd = cursor.AddHours(24);
+            if (segmentEnd > endUtc)
+            {
+                segmentEnd = endUtc;
+            }
+
+            _db.PlayoutItems.Add(new PlayoutItem
+            {
+                ChannelId = channel.Id,
+                Start = cursor,
+                Finish = segmentEnd,
+                Title = "Local Weather",
+                IsVirtual = true,
+                VirtualSource = VirtualContentSource.WeatherStar
+            });
+
+            cursor = segmentEnd;
+        }
 
         channel.LastPlayoutBuiltAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(cancellationToken);

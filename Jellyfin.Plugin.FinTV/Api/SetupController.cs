@@ -1,3 +1,4 @@
+using Jellyfin.Plugin.FinTV.Configuration;
 using Jellyfin.Plugin.FinTV.Domain;
 using Jellyfin.Plugin.FinTV.Services;
 using MediaBrowser.Common.Api;
@@ -53,6 +54,7 @@ public class SetupController : ControllerBase
             ebsBackgroundMusicSource = (int)(Plugin.Instance?.Configuration.EbsBackgroundMusicSource ?? EbsBackgroundMusicSource.NamedLibrary),
             ebsBackgroundMusicLibraryName = Plugin.Instance?.Configuration.EbsBackgroundMusicLibraryName ?? "Background Music",
             ebsBackgroundMusicLibraryId = Plugin.Instance?.Configuration.EbsBackgroundMusicLibraryId ?? string.Empty,
+            weatherStarBaseUrl = Plugin.Instance?.Configuration.WeatherStarBaseUrl ?? WeatherStarChannelService.DefaultWeatherStarBaseUrl,
             musicLibraries = _catalog.GetMusicLibraries().Select(l => new { id = l.Id, name = l.Name })
         });
     }
@@ -89,6 +91,11 @@ public class SetupController : ControllerBase
         plugin.Configuration.EbsBackgroundMusicLibraryId = string.IsNullOrWhiteSpace(request.EbsBackgroundMusicLibraryId)
             ? null
             : request.EbsBackgroundMusicLibraryId.Trim();
+
+        if (request.WeatherStarBaseUrl is not null)
+        {
+            plugin.Configuration.WeatherStarBaseUrl = WeatherStarChannelService.NormalizeWeatherStarBaseUrl(request.WeatherStarBaseUrl);
+        }
 
         plugin.SaveConfiguration();
 
@@ -138,6 +145,11 @@ public class SetupSettingsRequest
     /// Gets or sets the selected music library identifier for EBS background music.
     /// </summary>
     public string? EbsBackgroundMusicLibraryId { get; set; }
+
+    /// <summary>
+    /// Gets or sets the WeatherStar 4000 base URL used by weather channels.
+    /// </summary>
+    public string? WeatherStarBaseUrl { get; set; }
 }
 
 /// <summary>

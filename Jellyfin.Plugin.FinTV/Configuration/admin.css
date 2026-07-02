@@ -67,6 +67,11 @@ body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 0; b
 
 .hidden { display: none !important; }
 .hint { color: var(--fintv-muted); font-size: .9rem; margin: 0 0 .75rem; }
+.hint-warning { color: var(--fintv-warning); border-left: 3px solid var(--fintv-warning); padding-left: .65rem; }
+.weather-resource-list { margin: 0 0 .85rem 1.1rem; color: var(--fintv-muted); font-size: .9rem; }
+.weather-resource-list li { margin-bottom: .45rem; }
+.weather-resource-list a { color: #93c5fd; }
+.btn-inline { display: inline-block; margin-left: .35rem; padding: .15rem .55rem; font-size: .78rem; vertical-align: middle; }
 
 .actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .5rem; }
 button, .emby-button { background: var(--fintv-surface-2); color: var(--fintv-text); border: 1px solid var(--fintv-border); padding: .5rem 1rem; border-radius: 8px; cursor: pointer; }

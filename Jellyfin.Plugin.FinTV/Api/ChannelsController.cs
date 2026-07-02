@@ -1,3 +1,4 @@
+using Jellyfin.Plugin.FinTV;
 using Jellyfin.Plugin.FinTV.Domain;
 using Jellyfin.Plugin.FinTV.Services;
 using MediaBrowser.Common.Api;
@@ -16,16 +17,19 @@ public class ChannelsController : ControllerBase
 {
     private readonly ChannelService _channels;
     private readonly StreamService _stream;
+    private readonly LineupGeneratorService _lineupGenerator;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChannelsController"/> class.
     /// </summary>
     /// <param name="channels">Channel service.</param>
     /// <param name="stream">Stream service.</param>
-    public ChannelsController(ChannelService channels, StreamService stream)
+    /// <param name="lineupGenerator">Lineup generator service.</param>
+    public ChannelsController(ChannelService channels, StreamService stream, LineupGeneratorService lineupGenerator)
     {
         _channels = channels;
         _stream = stream;
+        _lineupGenerator = lineupGenerator;
     }
 
     /// <summary>
@@ -82,6 +86,7 @@ public class ChannelsController : ControllerBase
         try
         {
             var created = await _channels.CreateAsync(request.ToChannel(), cancellationToken);
+            await BuildWeatherPlayoutIfNeededAsync(created, cancellationToken);
             return CreatedAtAction(nameof(Get), new { id = created.Id }, created);
         }
         catch (ArgumentException ex)
@@ -103,7 +108,13 @@ public class ChannelsController : ControllerBase
         try
         {
             var updated = await _channels.UpdateAsync(id, request.ToChannel(), cancellationToken);
-            return updated is null ? NotFound() : updated;
+            if (updated is null)
+            {
+                return NotFound();
+            }
+
+            await BuildWeatherPlayoutIfNeededAsync(updated, cancellationToken);
+            return updated;
         }
         catch (ArgumentException ex)
         {
@@ -121,5 +132,18 @@ public class ChannelsController : ControllerBase
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
         return await _channels.DeleteAsync(id, cancellationToken) ? NoContent() : NotFound();
+    }
+
+    private async Task BuildWeatherPlayoutIfNeededAsync(Channel channel, CancellationToken cancellationToken)
+    {
+        if (channel.ContentType != ChannelContentType.Weather)
+        {
+            return;
+        }
+
+        var days = Plugin.Instance?.Configuration.PlayoutDaysToBuild ?? 3;
+        var start = DateTime.UtcNow.Date;
+        var end = start.AddDays(days);
+        await _lineupGenerator.BuildPlayoutAsync(channel, start, end, cancellationToken);
     }
 }

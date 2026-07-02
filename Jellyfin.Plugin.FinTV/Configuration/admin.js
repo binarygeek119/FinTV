@@ -1120,6 +1120,48 @@
         }
     }
 
+    async function loadWeather() {
+        try {
+            const settings = await api('/setup/settings');
+            const input = $('weather-base-url');
+            if (input) {
+                input.value = settings.weatherStarBaseUrl || '';
+            }
+        } catch (err) {
+            toast('Failed to load weather settings: ' + err.message, 'error');
+        }
+    }
+
+    async function saveWeatherSettings() {
+        const weatherStarBaseUrl = $('weather-base-url')?.value.trim() || '';
+        try {
+            await api('/setup/settings', {
+                method: 'PUT',
+                body: JSON.stringify({ weatherStarBaseUrl: weatherStarBaseUrl || null })
+            });
+            toast('Weather settings saved.', 'success');
+        } catch (err) {
+            toast(err.message, 'error');
+        }
+    }
+
+    function useTestWeatherUrl() {
+        applyWeatherBaseUrl('https://weather.jmthornton.net');
+    }
+
+    function applyWeatherBaseUrl(url) {
+        const input = $('weather-base-url');
+        if (input) {
+            input.value = url;
+        }
+    }
+
+    function bindWeatherUrlPresets() {
+        qa('.weather-url-preset').forEach((btn) => {
+            btn.onclick = () => applyWeatherBaseUrl(btn.dataset.url || '');
+        });
+    }
+
     async function loadSetup() {
         try {
             const data = await api('/setup/urls');
@@ -1186,6 +1228,7 @@
         qa('.fintv-tabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
         qa('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + name));
         if (name === 'setup') loadSetup();
+        if (name === 'weather') loadWeather();
         if (name === 'presets') loadPresets();
         if (name === 'lineups') loadLineups();
         if (name === 'commercials') loadCommercials();
@@ -1282,6 +1325,9 @@
 
         qa('.btn-copy').forEach((btn) => btn.onclick = () => copyText(btn.dataset.copyTarget));
         click('btn-save-setup', saveSetupSettings);
+        click('btn-save-weather', saveWeatherSettings);
+        click('btn-use-test-weather-url', useTestWeatherUrl);
+        bindWeatherUrlPresets();
         change('setup-ebs-music-source', updateEbsLibraryFieldVisibility);
         click('btn-apply-presets', applyPresets);
         change('preset-numbering-mode', loadPresets);

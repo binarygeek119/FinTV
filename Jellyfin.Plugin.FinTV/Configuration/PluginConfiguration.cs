@@ -37,6 +37,11 @@ public class PluginConfiguration : BasePluginConfiguration
     public string Binarygeek119LogoSetUrl { get; set; } =
         "https://github.com/binarygeek119/open-channel-logos/tree/fintv2";
 
+    /// <summary>
+    /// Base URL for the WeatherStar 4000 page. FinTV appends lat/lon query parameters per channel.
+    /// </summary>
+    public string WeatherStarBaseUrl { get; set; } = "https://weather.jmthornton.net";
+
     public BlackframeTaskState BlackframeTaskState { get; set; } = new();
 }
 

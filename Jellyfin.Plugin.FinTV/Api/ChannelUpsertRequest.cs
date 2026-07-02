@@ -33,7 +33,7 @@ public class ChannelUpsertRequest
 
     public Channel ToChannel()
     {
-        return new Channel
+        var channel = new Channel
         {
             Number = Number,
             Name = Name,
@@ -48,5 +48,13 @@ public class ChannelUpsertRequest
             WeatherLatitude = WeatherLatitude,
             WeatherLongitude = WeatherLongitude
         };
+
+        if (channel.ContentType == ChannelContentType.Weather)
+        {
+            channel.WeatherLatitude ??= 41.60574;
+            channel.WeatherLongitude ??= -93.55002;
+        }
+
+        return channel;
     }
 }

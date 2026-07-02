@@ -46,7 +46,19 @@ public class StreamService
 
         if (channel.ContentType == ChannelContentType.Weather)
         {
-            await weather.StreamAsync(channel, output, cancellationToken);
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                try
+                {
+                    await weather.StreamAsync(channel, output, cancellationToken);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogError(ex, "Weather stream failed for {Channel}; retrying in 5 seconds", channel.Name);
+                    await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+                }
+            }
+
             return;
         }
 

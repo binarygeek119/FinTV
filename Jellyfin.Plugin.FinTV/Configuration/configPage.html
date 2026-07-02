@@ -15,6 +15,7 @@
                 <button type="button" class="tab" data-tab="lineups" role="tab">Lineups</button>
                 <button type="button" class="tab" data-tab="commercials" role="tab">Commercials</button>
                 <button type="button" class="tab" data-tab="logos" role="tab">Logo Sets</button>
+                <button type="button" class="tab" data-tab="weather" role="tab">Weather</button>
                 <button type="button" class="tab" data-tab="setup" role="tab">Live TV Setup</button>
                 <button type="button" class="tab" data-tab="tasks" role="tab">Tasks</button>
             </nav>
@@ -97,6 +98,7 @@
                                     <span>Weather Longitude</span>
                                     <input id="ch-lon" type="text" inputmode="decimal" class="emby-input" placeholder="-93.55002">
                                 </label>
+                                <p class="hint">Weather channels stream live local weather 24/7. Set coordinates here and configure the WeatherStar URL on the Weather tab.</p>
                                 <p class="hint">Need coordinates from a ZIP code? Use the <a href="https://www.freemaptools.com/convert-us-zip-code-to-lat-lng.htm" target="_blank" rel="noopener">US ZIP code to latitude/longitude converter</a>.</p>
                             </div>
                             <label class="field checkbox-field">
@@ -182,6 +184,35 @@
                 <p class="hint">Channel bugs live under Shows, Movies, and Music Videos Channels. The <code>EBS/</code> folder is separate: those full-screen slates play when a channel has no scheduled media, with background music from your Jellyfin music libraries (configured in Live TV Setup).</p>
                 <button id="btn-sync-logos" class="emby-button">Import / Refresh Logo Set</button>
                 <div id="logo-set-info"></div>
+            </section>
+
+            <section id="tab-weather" class="tab-panel">
+                <div class="card section-card">
+                    <h3>WeatherStar 4000</h3>
+                    <p class="hint hint-warning"><strong>Host WeatherStar4000 locally.</strong> Do not point production channels at a public WeatherStar URL. That puts unnecessary load on someone else&apos;s server and can stop working without notice.</p>
+                    <p class="hint">Run your own WeatherStar4000 instance on your LAN or the same machine as Jellyfin, then enter that base URL below. FinTV appends each weather channel&apos;s latitude and longitude as <code>?lat=…&amp;lon=…</code>.</p>
+                    <p class="hint">For testing only, you may use a public hosted demo (not for production):</p>
+                    <ul class="weather-resource-list">
+                        <li><a href="https://weather.jmthornton.net/" target="_blank" rel="noopener">https://weather.jmthornton.net/</a> <button type="button" class="emby-button btn-inline weather-url-preset" data-url="https://weather.jmthornton.net">Use URL</button></li>
+                        <li><a href="https://4000.weatherstar.dev/" target="_blank" rel="noopener">https://4000.weatherstar.dev/</a> <button type="button" class="emby-button btn-inline weather-url-preset" data-url="https://4000.weatherstar.dev">Use URL</button></li>
+                        <li><a href="https://weatherstar3000.netbymatt.com/" target="_blank" rel="noopener">https://weatherstar3000.netbymatt.com/</a> <button type="button" class="emby-button btn-inline weather-url-preset" data-url="https://weatherstar3000.netbymatt.com">Use URL</button></li>
+                    </ul>
+                    <p class="hint">Self-host a WeatherStar build from one of these projects, then paste your local base URL above:</p>
+                    <ul class="weather-resource-list">
+                        <li><a href="https://github.com/TheGoldDiamond9/weatherstar4000" target="_blank" rel="noopener">TheGoldDiamond9 / weatherstar4000</a></li>
+                        <li><a href="https://github.com/thornjad/weatherstar4k" target="_blank" rel="noopener">thornjad / weatherstar4k</a></li>
+                        <li><a href="https://github.com/netbymatt/ws3kp" target="_blank" rel="noopener">netbymatt / ws3kp</a> (WeatherStar 3000)</li>
+                    </ul>
+                    <label class="field">
+                        <span>WeatherStar4000 base URL</span>
+                        <input id="weather-base-url" type="url" class="emby-input" placeholder="http://192.168.1.50:8080">
+                    </label>
+                    <p class="hint">Example local URL: <code>http://127.0.0.1:8080</code> or <code>http://192.168.1.50:8080</code>. Do not include <code>lat</code> or <code>lon</code> here; FinTV adds them from each weather channel.</p>
+                    <div class="actions">
+                        <button type="button" id="btn-save-weather" class="raised button-submit emby-button">Save Weather Settings</button>
+                        <button type="button" id="btn-use-test-weather-url" class="emby-button">Use jmthornton test URL</button>
+                    </div>
+                </div>
             </section>
 
             <section id="tab-setup" class="tab-panel">
