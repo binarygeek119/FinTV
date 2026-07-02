@@ -1,6 +1,7 @@
 using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.FinTV.Domain;
 using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Entities.Movies;
 using MediaBrowser.Controller.Entities.TV;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Entities;
@@ -21,12 +22,20 @@ public class JellyfinCatalogService
     public async Task<IReadOnlyList<ResolvedCandidate>> ResolveItemAsync(
         Guid itemId,
         Channel channel,
+        PlayoutAnchorState anchor,
         CancellationToken cancellationToken)
     {
+        _ = cancellationToken;
         var item = _libraryManager.GetItemById(itemId);
         if (item is null)
         {
             return Array.Empty<ResolvedCandidate>();
+        }
+
+        if (item is Series series)
+        {
+            var episodes = QueryItems(channel, parentId: series.Id);
+            return PickFromPool(episodes, channel, anchor);
         }
 
         return new[] { MapItem(item) };
@@ -38,6 +47,7 @@ public class JellyfinCatalogService
         PlayoutAnchorState anchor,
         CancellationToken cancellationToken)
     {
+        _ = cancellationToken;
         var items = QueryItems(channel, collectionName: collectionName);
         return Task.FromResult<IReadOnlyList<ResolvedCandidate>>(PickFromPool(items, channel, anchor));
     }
@@ -48,6 +58,7 @@ public class JellyfinCatalogService
         PlayoutAnchorState anchor,
         CancellationToken cancellationToken)
     {
+        _ = cancellationToken;
         FilterDefinition? filter = null;
         try
         {
@@ -62,49 +73,68 @@ public class JellyfinCatalogService
         return Task.FromResult<IReadOnlyList<ResolvedCandidate>>(PickFromPool(items, channel, anchor));
     }
 
-    public IReadOnlyList<BaseItem> QueryItems(Channel channel, FilterDefinition? filter = null, string? collectionName = null)
+    public IReadOnlyList<BaseItem> QueryItems(
+        Channel channel,
+        FilterDefinition? filter = null,
+        string? collectionName = null,
+        Guid? parentId = null)
     {
         var query = new InternalItemsQuery
         {
             Recursive = true,
             IsVirtualItem = false,
-            IncludeItemTypes = GetItemTypes(channel.ContentType),
+            IncludeItemTypes = GetQueryItemTypes(channel),
             OrderBy = new[] { (ItemSortBy.SortName, Jellyfin.Database.Implementations.Enums.SortOrder.Ascending) }
         };
 
-        if (!string.IsNullOrWhiteSpace(filter?.Genre))
+        if (parentId.HasValue)
         {
-            query.Genres = new[] { filter.Genre };
+            query.ParentId = parentId.Value;
+            query.IncludeItemTypes = new[] { BaseItemKind.Episode };
         }
 
-        if (filter?.Tags is { Count: > 0 })
-        {
-            query.Tags = filter.Tags.ToArray();
-        }
+        ApplyFilterToQuery(query, filter);
+        MergeChannelFilter(query, channel);
 
         if (!string.IsNullOrWhiteSpace(collectionName))
         {
             query.Name = collectionName;
         }
 
-        if (!string.IsNullOrWhiteSpace(channel.FilterJson))
-        {
-            try
-            {
-                var channelFilter = JsonSerializer.Deserialize<FilterDefinition>(channel.FilterJson);
-                if (channelFilter?.Genre is not null)
-                {
-                    query.Genres = new[] { channelFilter.Genre };
-                }
-            }
-            catch
-            {
-                // ignore malformed channel filter
-            }
-        }
-
         return _libraryManager.GetItemsResult(query).Items.ToList();
     }
+
+    public IReadOnlyList<BaseItem> BrowseForAiManifest(Channel channel, ChannelCatalogMode catalogMode, int limit)
+    {
+        var kinds = GetManifestItemTypes(channel, catalogMode);
+        var query = new InternalItemsQuery
+        {
+            Recursive = true,
+            IsVirtualItem = false,
+            IncludeItemTypes = kinds,
+            Limit = Math.Clamp(limit, 1, 1000),
+            OrderBy = new[] { (ItemSortBy.SortName, Jellyfin.Database.Implementations.Enums.SortOrder.Ascending) }
+        };
+
+        MergeChannelFilter(query, channel);
+        return _libraryManager.GetItemsResult(query).Items.ToList();
+    }
+
+    public int CountForAiManifest(Channel channel, ChannelCatalogMode catalogMode)
+    {
+        var kinds = GetManifestItemTypes(channel, catalogMode);
+        var query = new InternalItemsQuery
+        {
+            Recursive = true,
+            IsVirtualItem = false,
+            IncludeItemTypes = kinds
+        };
+
+        MergeChannelFilter(query, channel);
+        return _libraryManager.GetItemsResult(query).TotalRecordCount;
+    }
+
+    public BaseItem? GetItemById(Guid id) => _libraryManager.GetItemById(id);
 
     public IReadOnlyList<BaseItem> QueryAllMusicAudio()
     {
@@ -193,6 +223,9 @@ public class JellyfinCatalogService
         return TimeSpan.FromMinutes(30);
     }
 
+    public int GetRuntimeMinutes(BaseItem item)
+        => (int)Math.Max(1, Math.Round(GetRuntime(item).TotalMinutes));
+
     public string? GetPrimaryImagePath(BaseItem item)
     {
         return item.HasImage(ImageType.Primary)
@@ -205,15 +238,96 @@ public class JellyfinCatalogService
         return item.Path;
     }
 
-    private static BaseItemKind[] GetItemTypes(ChannelContentType contentType)
+    public static ChannelCatalogMode ResolveCatalogMode(Channel channel)
+        => ChannelAiRules.ResolveCatalogMode(channel);
+
+    private static void ApplyFilterToQuery(InternalItemsQuery query, FilterDefinition? filter)
     {
-        return contentType switch
+        if (filter is null)
         {
-            ChannelContentType.TvShow => new[] { BaseItemKind.Episode },
-            ChannelContentType.Movie => new[] { BaseItemKind.Movie },
-            ChannelContentType.MusicVideo => new[] { BaseItemKind.MusicVideo },
-            ChannelContentType.Music => new[] { BaseItemKind.Audio },
-            _ => new[] { BaseItemKind.Movie, BaseItemKind.Episode }
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.Genre))
+        {
+            query.Genres = new[] { filter.Genre };
+        }
+
+        if (filter.Tags is { Count: > 0 })
+        {
+            query.Tags = filter.Tags.ToArray();
+        }
+    }
+
+    private static void MergeChannelFilter(InternalItemsQuery query, Channel channel)
+    {
+        if (string.IsNullOrWhiteSpace(channel.FilterJson))
+        {
+            return;
+        }
+
+        try
+        {
+            var channelFilter = JsonSerializer.Deserialize<FilterDefinition>(channel.FilterJson);
+            if (channelFilter is null)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(channelFilter.Genre))
+            {
+                query.Genres = new[] { channelFilter.Genre };
+            }
+
+            if (channelFilter.Tags is { Count: > 0 })
+            {
+                query.Tags = channelFilter.Tags.ToArray();
+            }
+        }
+        catch
+        {
+            // ignore malformed channel filter
+        }
+    }
+
+    private static BaseItemKind[] GetQueryItemTypes(Channel channel)
+    {
+        var catalogMode = ResolveCatalogMode(channel);
+        if (channel.ContentType == ChannelContentType.MusicVideo)
+        {
+            return new[] { BaseItemKind.MusicVideo };
+        }
+
+        if (channel.ContentType == ChannelContentType.Music)
+        {
+            return new[] { BaseItemKind.Audio };
+        }
+
+        return catalogMode switch
+        {
+            ChannelCatalogMode.MovieOnly => new[] { BaseItemKind.Movie },
+            ChannelCatalogMode.Mixed => new[] { BaseItemKind.Movie, BaseItemKind.Episode },
+            _ => new[] { BaseItemKind.Episode }
+        };
+    }
+
+    private static BaseItemKind[] GetManifestItemTypes(Channel channel, ChannelCatalogMode catalogMode)
+    {
+        if (channel.ContentType == ChannelContentType.MusicVideo)
+        {
+            return new[] { BaseItemKind.MusicVideo };
+        }
+
+        if (channel.ContentType == ChannelContentType.Music)
+        {
+            return new[] { BaseItemKind.Audio };
+        }
+
+        return catalogMode switch
+        {
+            ChannelCatalogMode.MovieOnly => new[] { BaseItemKind.Movie },
+            ChannelCatalogMode.Mixed => new[] { BaseItemKind.Series, BaseItemKind.Movie },
+            _ => new[] { BaseItemKind.Series }
         };
     }
 
@@ -241,7 +355,11 @@ public class JellyfinCatalogService
             return Array.Empty<ResolvedCandidate>();
         }
 
-        if (channel.ContentType == ChannelContentType.TvShow)
+        var catalogMode = ResolveCatalogMode(channel);
+        var useEpisodeRotation = catalogMode != ChannelCatalogMode.MovieOnly
+            && items.Any(i => i is Episode);
+
+        if (useEpisodeRotation)
         {
             var grouped = items.OfType<Episode>()
                 .GroupBy(e => e.SeriesId)

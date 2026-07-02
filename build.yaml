@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.45"
+version: "0.0.2.46"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -80,6 +80,13 @@ artifacts:
   - "tools/yt-dlp/linux-x64/yt-dlp"
   - "tools/yt-dlp/win-x64/yt-dlp.exe"
 changelog: |-
+  - Add AI Lineup Generator tab with OpenAI and Venice API support for auto-building channel schedules
+  - Send tagged Jellyfin series and movies to the AI and assign specific shows or movies to 48 lineup slots
+  - Support merged timeslots for long movies and per-channel TV-only, movie-only, or mixed catalog modes
+  - Add channel fine-tune prompts, AI enable switch, lineup preview, apply, and generate-all actions
+  - Fix channel library tag filters so preset tags apply during catalog and playout queries
+  - Update OpenSwim preset to 119.3 and Flip Television to 119.4 with preset refresh by library tag
+  - Split EBS off-air audio into independent TV static, white noise, silence, and beep tone options
   - Fix XMLTV guide excluding regular playout items so Jellyfin Live TV shows programme data
   - Add EBS admin tab with custom slate uploads, color bars, and TV static with white noise
   - Play EBS background music on weather channels and use configured EBS playback on errors

@@ -140,7 +140,7 @@ public class FfmpegCommandBuilder
 
         return plan.DisplayMode switch
         {
-            EbsDisplayMode.StaticAndWhiteNoise => BuildStaticWhiteNoiseCommand(width, height, duration),
+            EbsDisplayMode.Static => BuildStaticCommand(width, height, duration, plan.AudioMode, plan.MusicPath),
             EbsDisplayMode.ColorBars => BuildColorBarsCommand(width, height, duration, plan.AudioMode, plan.MusicPath),
             EbsDisplayMode.SlateImage => BuildSlateImageCommand(
                 width,
@@ -301,18 +301,51 @@ public class FfmpegCommandBuilder
         return args;
     }
 
-    private static IReadOnlyList<string> BuildStaticWhiteNoiseCommand(int width, int height, string duration)
+    private static IReadOnlyList<string> BuildStaticCommand(
+        int width,
+        int height,
+        string duration,
+        EbsAudioMode audioMode,
+        string? musicPath)
     {
-        return new List<string>
+        if (audioMode == EbsAudioMode.BackgroundMusic
+            && !string.IsNullOrWhiteSpace(musicPath)
+            && File.Exists(musicPath))
+        {
+            return new List<string>
+            {
+                "-hide_banner",
+                "-loglevel", "warning",
+                "-stream_loop", "-1",
+                "-i", musicPath,
+                "-f", "lavfi",
+                "-i", $"color=c=808080:s={width}x{height}:r=30,format=gray,geq=lum='255*random(0)'",
+                "-map", "1:v",
+                "-map", "0:a",
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-pix_fmt", "yuv420p",
+                "-c:a", "aac",
+                "-b:a", "192k",
+                "-t", duration,
+                "-shortest",
+                "-f", "mpegts",
+                "pipe:1"
+            };
+        }
+
+        var args = new List<string>
         {
             "-hide_banner",
-            "-loglevel", "warning",
+            "-loglevel", "warning"
+        };
+        args.AddRange(BuildLavfiAudioInput(audioMode));
+        args.AddRange(new[]
+        {
             "-f", "lavfi",
             "-i", $"color=c=808080:s={width}x{height}:r=30,format=gray,geq=lum='255*random(0)'",
-            "-f", "lavfi",
-            "-i", "anoisesrc=color=white:amplitude=0.01:sample_rate=48000",
-            "-map", "0:v",
-            "-map", "1:a",
+            "-map", "1:v",
+            "-map", "0:a",
             "-c:v", "libx264",
             "-preset", "veryfast",
             "-pix_fmt", "yuv420p",
@@ -322,14 +355,30 @@ public class FfmpegCommandBuilder
             "-shortest",
             "-f", "mpegts",
             "pipe:1"
-        };
+        });
+        return args;
     }
 
     private static IReadOnlyList<string> BuildLavfiAudioInput(EbsAudioMode audioMode)
     {
-        return audioMode == EbsAudioMode.WhiteNoise
-            ? new List<string> { "-f", "lavfi", "-i", "anoisesrc=color=white:amplitude=0.01:sample_rate=48000" }
-            : new List<string> { "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000" };
+        return audioMode switch
+        {
+            EbsAudioMode.WhiteNoise => new List<string>
+            {
+                "-f", "lavfi",
+                "-i", "anoisesrc=color=white:amplitude=0.01:sample_rate=48000"
+            },
+            EbsAudioMode.BeepTone => new List<string>
+            {
+                "-f", "lavfi",
+                "-i", "sine=frequency=960:sample_rate=48000,aeval=val(0)*if(lt(mod(t\\,1)\\,0.5)\\,1\\,0)"
+            },
+            _ => new List<string>
+            {
+                "-f", "lavfi",
+                "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"
+            }
+        };
     }
 
     public IReadOnlyList<string> BuildWeatherCommand(

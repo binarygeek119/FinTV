@@ -52,21 +52,29 @@ public class LineupGeneratorService
             var date = DateOnly.FromDateTime(local);
             var slots = await _lineupService.ResolveSlotsForDateAsync(channel.Id, date, cancellationToken);
             var slotIndex = (local.Hour * 60 + local.Minute) / 30;
-            var slot = slots.FirstOrDefault(s => s.SlotIndex == slotIndex);
-            if (slot is null)
+
+            if (IsSlotConsumedByEarlierSpan(slots, slotIndex))
             {
                 cursor = cursor.AddMinutes(30);
                 continue;
             }
 
-            var slotStartLocal = local.Date.AddMinutes(slotIndex * 30);
-            var slotEndLocal = slotStartLocal.AddMinutes(30);
-            var slotStart = TimeZoneInfo.ConvertTimeToUtc(slotStartLocal, tz);
-            var slotEnd = TimeZoneInfo.ConvertTimeToUtc(slotEndLocal, tz);
-
-            if (slotEnd <= cursor)
+            var slot = slots.FirstOrDefault(s => s.SlotIndex == slotIndex);
+            if (slot is null || slot.Candidates.Count == 0)
             {
-                cursor = slotEnd;
+                cursor = cursor.AddMinutes(30);
+                continue;
+            }
+
+            var spanSlots = Math.Clamp(slot.SpanSlots, 1, 8);
+            var slotStartLocal = local.Date.AddMinutes(slotIndex * 30);
+            var blockEndLocal = slotStartLocal.AddMinutes(30 * spanSlots);
+            var slotStart = TimeZoneInfo.ConvertTimeToUtc(slotStartLocal, tz);
+            var blockEnd = TimeZoneInfo.ConvertTimeToUtc(blockEndLocal, tz);
+
+            if (blockEnd <= cursor)
+            {
+                cursor = blockEnd;
                 continue;
             }
 
@@ -78,13 +86,14 @@ public class LineupGeneratorService
             var picked = await _smartSelection.PickCandidateAsync(channel, slot, date, anchor, cancellationToken);
             if (picked is null)
             {
-                cursor = slotEnd;
+                cursor = blockEnd;
                 continue;
             }
 
             var contentStart = slotStart;
-            var contentEnd = slotEnd;
-            if (picked.Duration < TimeSpan.FromMinutes(30) && picked.Duration > TimeSpan.Zero)
+            var maxBlockDuration = blockEnd - contentStart;
+            var contentEnd = blockEnd;
+            if (picked.Duration > TimeSpan.Zero && picked.Duration < maxBlockDuration)
             {
                 contentEnd = contentStart.Add(picked.Duration);
             }
@@ -117,12 +126,30 @@ public class LineupGeneratorService
                 Title = picked.Title
             });
 
-            cursor = slotEnd;
+            cursor = blockEnd;
         }
 
         await _channelService.SaveAnchorAsync(channel.Id, anchor, cancellationToken);
         channel.LastPlayoutBuiltAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static bool IsSlotConsumedByEarlierSpan(IReadOnlyList<LineupSlot> slots, int slotIndex)
+    {
+        foreach (var slot in slots)
+        {
+            if (slot.SlotIndex >= slotIndex || slot.SpanSlots <= 1)
+            {
+                continue;
+            }
+
+            if (slotIndex >= slot.SlotIndex && slotIndex < slot.SlotIndex + slot.SpanSlots)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private async Task AddMusicPlayoutItemAsync(

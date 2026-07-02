@@ -1,5 +1,6 @@
 using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.FinTV.Domain;
+using Jellyfin.Plugin.FinTV.Services;
 using MediaBrowser.Common.Api;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
@@ -19,14 +20,17 @@ namespace Jellyfin.Plugin.FinTV.Api;
 public class CatalogController : ControllerBase
 {
     private readonly ILibraryManager _libraryManager;
+    private readonly JellyfinCatalogService _catalog;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CatalogController"/> class.
     /// </summary>
     /// <param name="libraryManager">Library manager.</param>
-    public CatalogController(ILibraryManager libraryManager)
+    /// <param name="catalog">FinTV catalog service.</param>
+    public CatalogController(ILibraryManager libraryManager, JellyfinCatalogService catalog)
     {
         _libraryManager = libraryManager;
+        _catalog = catalog;
     }
 
     /// <summary>
@@ -94,6 +98,44 @@ public class CatalogController : ControllerBase
         }
 
         return Ok(results);
+    }
+
+    /// <summary>
+    /// Browses library items by tag for AI lineup generation.
+    /// </summary>
+    /// <param name="tag">Library tag filter.</param>
+    /// <param name="contentType">Optional channel content type.</param>
+    /// <param name="catalogMode">Optional catalog mode override.</param>
+    /// <param name="limit">Maximum results.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Matching library items.</returns>
+    [HttpGet("browse")]
+    public ActionResult<object> Browse(
+        [FromQuery] string? tag,
+        [FromQuery] ChannelContentType? contentType,
+        [FromQuery] ChannelCatalogMode? catalogMode,
+        [FromQuery] int limit = 50,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var channel = new Channel
+        {
+            ContentType = contentType ?? ChannelContentType.TvShow,
+            FilterJson = string.IsNullOrWhiteSpace(tag)
+                ? null
+                : System.Text.Json.JsonSerializer.Serialize(new { tags = new[] { tag } }),
+            CatalogMode = catalogMode
+        };
+
+        var mode = JellyfinCatalogService.ResolveCatalogMode(channel);
+        var items = _catalog.BrowseForAiManifest(channel, mode, Math.Clamp(limit, 1, 500));
+        return Ok(new
+        {
+            catalogMode = mode.ToString(),
+            total = items.Count,
+            items = items.Select(MapSearchResult)
+        });
     }
 
     private static object MapSearchResult(BaseItem item)

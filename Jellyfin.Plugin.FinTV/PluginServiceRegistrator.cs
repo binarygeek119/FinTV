@@ -41,6 +41,9 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddScoped<EpgService>();
         serviceCollection.AddScoped<LogoSetService>();
         serviceCollection.AddScoped<JellyfinCatalogService>();
+        serviceCollection.AddScoped<AiCatalogManifestBuilder>();
+        serviceCollection.AddScoped<LlmClientService>();
+        serviceCollection.AddScoped<AiLineupGeneratorService>();
         serviceCollection.AddScoped<EbsService>();
         serviceCollection.AddSingleton<PlaywrightDockerBrowserService>();
         serviceCollection.AddSingleton<PlaywrightRuntimeService>();

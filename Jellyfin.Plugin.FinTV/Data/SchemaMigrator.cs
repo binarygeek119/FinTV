@@ -8,6 +8,7 @@ internal static class SchemaMigrator
 {
     private const string ChannelNumberMigrationKey = "channel-number-decimal";
     private const string CommercialBrainzMigrationKey = "commercial-brainz-v1";
+    private const string AiLineupMigrationKey = "ai-lineup-v1";
     private static readonly Regex SqlIdentifierRegex = new("^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.Compiled);
 
     public static async Task MigrateAsync(FinTvDbContext db, ILogger logger, CancellationToken cancellationToken)
@@ -25,6 +26,12 @@ internal static class SchemaMigrator
         {
             await MigrateCommercialBrainzAsync(db, logger, cancellationToken);
             await MarkMigrationAppliedAsync(db, CommercialBrainzMigrationKey, cancellationToken);
+        }
+
+        if (!await IsMigrationAppliedAsync(db, AiLineupMigrationKey, cancellationToken))
+        {
+            await MigrateAiLineupAsync(db, logger, cancellationToken);
+            await MarkMigrationAppliedAsync(db, AiLineupMigrationKey, cancellationToken);
         }
     }
 
@@ -174,6 +181,25 @@ internal static class SchemaMigrator
                 CREATE INDEX IF NOT EXISTS "IX_PlayoutItems_CommercialId" ON "PlayoutItems" ("CommercialId");
                 """,
                 cancellationToken);
+        }
+    }
+
+    private static async Task MigrateAiLineupAsync(
+        FinTvDbContext db,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        logger.LogInformation("Applying AI lineup schema migration");
+
+        if (await TableExistsAsync(db, "Channels", cancellationToken))
+        {
+            await AddColumnIfMissingAsync(db, "Channels", "CatalogMode", "INTEGER", cancellationToken);
+            await AddColumnIfMissingAsync(db, "Channels", "AiFineTunePrompt", "TEXT", cancellationToken);
+        }
+
+        if (await TableExistsAsync(db, "LineupSlots", cancellationToken))
+        {
+            await AddColumnIfMissingAsync(db, "LineupSlots", "SpanSlots", "INTEGER NOT NULL DEFAULT 1", cancellationToken);
         }
     }
 

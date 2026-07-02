@@ -43,7 +43,7 @@ public class PluginConfiguration : BasePluginConfiguration
     public EbsDisplayMode EbsDisplayMode { get; set; } = EbsDisplayMode.SlateImage;
 
     /// <summary>
-    /// Audio track paired with off-air video when not using static and white noise.
+    /// Audio track paired with off-air video.
     /// </summary>
     public EbsAudioMode EbsAudioMode { get; set; } = EbsAudioMode.BackgroundMusic;
 
@@ -60,6 +60,28 @@ public class PluginConfiguration : BasePluginConfiguration
     public BlackframeTaskState BlackframeTaskState { get; set; } = new();
 
     public CommercialBrainzSettings CommercialBrainz { get; set; } = new();
+
+    public AiSettings Ai { get; set; } = new();
+}
+
+public class AiSettings
+{
+    /// <summary>
+    /// Master switch — when false, no LLM calls or lineup generation.
+    /// </summary>
+    public bool Enabled { get; set; }
+
+    public AiProvider DefaultProvider { get; set; } = AiProvider.OpenAi;
+
+    public string? OpenAiApiKey { get; set; }
+
+    public string OpenAiModel { get; set; } = "gpt-4o-mini";
+
+    public string? VeniceApiKey { get; set; }
+
+    public string VeniceModel { get; set; } = "gpt-4o-mini";
+
+    public int MaxCatalogItemsInPrompt { get; set; } = 250;
 }
 
 public class BlackframeTaskState

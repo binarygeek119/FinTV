@@ -104,7 +104,15 @@ table.data-table tbody tr.selected { background: rgba(59, 130, 246, .16); }
 .row-actions { display: flex; gap: .35rem; }
 .row-actions button { padding: .35rem .55rem; font-size: .8rem; }
 
-.lineup-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: .55rem; margin-bottom: 1rem; }
+.lineup-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: .55rem; margin-bottom: 1rem; }
+.ai-preview-grid .slot-card.span-block { grid-column: span var(--slot-span, 1); }
+.ai-channels-list { display: flex; flex-direction: column; gap: .75rem; }
+.ai-channel-row { border: 1px solid var(--divider, rgba(255,255,255,.08)); border-radius: 8px; padding: .75rem; display: grid; gap: .5rem; }
+.ai-channel-row .row-top { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; justify-content: space-between; }
+.ai-channel-row textarea { min-height: 4rem; resize: vertical; }
+.ai-channel-row .meta { opacity: .85; font-size: .9rem; }
+.ai-channel-row.disabled-row { opacity: .55; }
+.section-header-row { display: flex; align-items: center; justify-content: space-between; gap: .75rem; flex-wrap: wrap; }
 .slot-card { background: var(--fintv-surface); border: 1px solid var(--fintv-border); border-radius: 8px; padding: .55rem .65rem; min-height: 96px; cursor: pointer; transition: border-color .12s, transform .12s; }
 .slot-card:hover { border-color: var(--fintv-accent); transform: translateY(-1px); }
 .slot-card.has-items { border-color: rgba(34, 197, 94, .45); }

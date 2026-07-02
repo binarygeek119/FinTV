@@ -100,7 +100,7 @@ public class SmartSelectionService
         return candidate.Kind switch
         {
             SlotCandidateKind.JellyfinItem when candidate.JellyfinItemId.HasValue =>
-                await _catalog.ResolveItemAsync(candidate.JellyfinItemId.Value, channel, cancellationToken),
+                await _catalog.ResolveItemAsync(candidate.JellyfinItemId.Value, channel, anchor, cancellationToken),
             SlotCandidateKind.Collection when !string.IsNullOrWhiteSpace(candidate.CollectionName) =>
                 await _catalog.ResolveCollectionAsync(candidate.CollectionName, channel, anchor, cancellationToken),
             SlotCandidateKind.FilterQuery when !string.IsNullOrWhiteSpace(candidate.FilterJson) =>

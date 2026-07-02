@@ -42,6 +42,10 @@ public class Channel
 
     public string? FilterJson { get; set; }
 
+    public ChannelCatalogMode? CatalogMode { get; set; }
+
+    public string? AiFineTunePrompt { get; set; }
+
     [JsonIgnore]
     public LogoSet? LogoSet { get; set; }
 
@@ -137,6 +141,8 @@ public class LineupSlot
     public Guid? LineupOverrideId { get; set; }
 
     public int SlotIndex { get; set; }
+
+    public int SpanSlots { get; set; } = 1;
 
     [JsonIgnore]
     public Lineup? Lineup { get; set; }

@@ -141,6 +141,7 @@ public class LineupService
         return new LineupSlot
         {
             SlotIndex = dto.SlotIndex,
+            SpanSlots = Math.Clamp(dto.SpanSlots, 1, 8),
             LineupId = lineupId,
             LineupOverrideId = overrideId,
             Candidates = dto.Candidates.Select(c => new SlotCandidate
@@ -159,6 +160,8 @@ public class LineupService
 public class LineupSlotDto
 {
     public int SlotIndex { get; set; }
+
+    public int SpanSlots { get; set; } = 1;
 
     public List<SlotCandidateDto> Candidates { get; set; } = new();
 }

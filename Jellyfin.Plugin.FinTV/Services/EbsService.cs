@@ -34,11 +34,6 @@ public class EbsService
         var displayMode = config?.EbsDisplayMode ?? EbsDisplayMode.SlateImage;
         var audioMode = config?.EbsAudioMode ?? EbsAudioMode.BackgroundMusic;
 
-        if (displayMode == EbsDisplayMode.StaticAndWhiteNoise)
-        {
-            audioMode = EbsAudioMode.WhiteNoise;
-        }
-
         string? slatePath = null;
         if (displayMode == EbsDisplayMode.SlateImage)
         {

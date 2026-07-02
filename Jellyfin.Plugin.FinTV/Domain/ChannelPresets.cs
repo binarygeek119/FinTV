@@ -30,9 +30,9 @@ public static class ChannelPresets
     /// </summary>
     public static IReadOnlyList<ChannelPresetDefinition> All { get; } =
     [
-        Preset(119, 119.1m, "FlashBack TV", ChannelContentType.TvShow, "TV Shows", "1970's - 2000's tv shows and movies", "fintv-flashback", "Shows/FlashBack_TV.png"),
-        Preset(120, 119.2m, "Retro TV", ChannelContentType.TvShow, "TV Shows", "1910's - 1960's tv shows and movies", "fintv-retro", "Shows/Retro_TV.png"),
-        Preset(121, 119.3m, "[Open Swim]", ChannelContentType.TvShow, "TV Shows", "Cartoons and kid shows and movies", "fintv-open-swim", "Shows/[open_swim].png"),
+        Preset(119, 119.1m, "FlashBack TV", ChannelContentType.TvShow, "TV Shows", "1970's - 2000's tv shows and movies", "fintv-flashback", "Shows/FlashBack_TV.png", catalogMode: ChannelCatalogMode.Mixed),
+        Preset(120, 119.2m, "Retro TV", ChannelContentType.TvShow, "TV Shows", "1910's - 1960's tv shows and movies", "fintv-retro", "Shows/Retro_TV.png", catalogMode: ChannelCatalogMode.Mixed),
+        Preset(121, 119.3m, "[OpenSwim]", ChannelContentType.TvShow, "TV Shows", "Kids and teen shows and movies only", "fintv-open-swim", "Shows/[open_swim].png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(122, 119.4m, "Flip Television", ChannelContentType.TvShow, "TV Shows", "Reality TV", "fintv-reality", "Shows/Flip_Television.png"),
         Preset(123, 119.5m, "BinaryGeek119 News", ChannelContentType.TvShow, "TV Shows", "News", "fintv-news", logoPath: null),
         Preset(124, 119.6m, "WeatherStar4000", ChannelContentType.Weather, "TV Shows", "Weather channel", "fintv-weatherstar4000", "Weather/WeatherStar4000.png", weather: true),
@@ -40,12 +40,12 @@ public static class ChannelPresets
         Preset(128, 124.2m, "Cops And Robbers", ChannelContentType.TvShow, "TV Shows", "Crime themed channel", "fintv-crime", "Shows/cops_and_robbers.png"),
         Preset(129, 124.3m, "Slappy", ChannelContentType.TvShow, "TV Shows", "Comedy themed channel", "fintv-comedy", "Shows/Slappy.png"),
         Preset(130, 126.1m, "Winning", ChannelContentType.TvShow, "TV Shows", "Game shows channel", "fintv-game-shows", "Shows/winning.png"),
-        Preset(133, 126.2m, "GET LEARNEDED", ChannelContentType.TvShow, "TV Shows", "Educational tv shows and movies", "fintv-education", "Shows/GET_LEARNEDED.png"),
+        Preset(133, 126.2m, "GET LEARNEDED", ChannelContentType.TvShow, "TV Shows", "Educational tv shows and movies", "fintv-education", "Shows/GET_LEARNEDED.png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(134, 126.3m, "YouTube TV", ChannelContentType.TvShow, "TV Shows", "Youtube channels", "fintv-youtube", logoPath: null),
-        Preset(203, 203.1m, "Creature Double Feature", ChannelContentType.Movie, "Movies", "Creature, monster movies", "fintv-creature", "Movies/Creature_Double_Feature.png"),
-        Preset(204, 203.2m, "Hero TV", ChannelContentType.Movie, "Movies", "Super hero movies", "fintv-hero", "Movies/Hero_TV.png"),
-        Preset(205, 203.3m, "That's Funny", ChannelContentType.Movie, "Movies", "Comedian movies and tv shows", "fintv-funny", logoPath: null),
-        Preset(207, 203.4m, "The Holiday Channel", ChannelContentType.Movie, "Movies", "Holiday themed tv shows and movies", "fintv-holiday", "The Holiday Channel/christmas-marry.png"),
+        Preset(203, 203.1m, "Creature Double Feature", ChannelContentType.Movie, "Movies", "Creature, monster movies", "fintv-creature", "Movies/Creature_Double_Feature.png", catalogMode: ChannelCatalogMode.MovieOnly),
+        Preset(204, 203.2m, "Hero TV", ChannelContentType.Movie, "Movies", "Super hero movies", "fintv-hero", "Movies/Hero_TV.png", catalogMode: ChannelCatalogMode.MovieOnly),
+        Preset(205, 203.3m, "That's Funny", ChannelContentType.Movie, "Movies", "Comedian movies and tv shows", "fintv-funny", logoPath: null, catalogMode: ChannelCatalogMode.Mixed),
+        Preset(207, 203.4m, "The Holiday Channel", ChannelContentType.Movie, "Movies", "Holiday themed tv shows and movies", "fintv-holiday", "The Holiday Channel/christmas-marry.png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(312, 312.1m, "The Parody Channel", ChannelContentType.MusicVideo, "Music Videos", "Parody music videos", "fintv-parody", "Music Videos Channels/The-Parody-Channel.png"),
         Preset(313, 312.2m, "Rap On Tap", ChannelContentType.MusicVideo, "Music Videos", "Rap and hip hop music videos", "fintv-rap", "Music Videos Channels/Rap-On-Tap.png"),
         Preset(314, 312.3m, "HeadPhone Jack", ChannelContentType.MusicVideo, "Music Videos", "All other music videos", "fintv-music-video", "Music Videos Channels/HeadPhone_Jack.png"),
@@ -69,7 +69,8 @@ public static class ChannelPresets
         string libraryTag,
         string? logoPath,
         bool useLogo = true,
-        bool weather = false)
+        bool weather = false,
+        ChannelCatalogMode? catalogMode = null)
     {
         return new ChannelPresetDefinition
         {
@@ -84,7 +85,8 @@ public static class ChannelPresets
             LogoRelativePath = logoPath,
             UseBinarygeek119Logo = useLogo,
             FilterJson = JsonSerializer.Serialize(new { tags = new[] { libraryTag } }),
-            IsWeatherChannel = weather
+            IsWeatherChannel = weather,
+            CatalogMode = catalogMode ?? ChannelAiRules.GetByLibraryTag(libraryTag)?.DefaultCatalogMode
         };
     }
 }
@@ -117,6 +119,8 @@ public class ChannelPresetDefinition
     public string? FilterJson { get; set; }
 
     public bool IsWeatherChannel { get; set; }
+
+    public ChannelCatalogMode? CatalogMode { get; set; }
 
     /// <summary>
     /// Resolves the channel number for the selected numbering mode.

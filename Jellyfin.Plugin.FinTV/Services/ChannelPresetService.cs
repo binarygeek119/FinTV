@@ -73,10 +73,14 @@ public class ChannelPresetService
     {
         var numberingMode = request.NumberingMode;
         var presets = ResolvePresets(request.PresetIds);
-        var existingNumbers = await _db.Channels
+        var existingChannels = await _db.Channels
             .AsNoTracking()
-            .Select(c => new { c.Number, c.Id })
+            .Select(c => new { c.Number, c.Id, c.FilterJson })
             .ToListAsync(cancellationToken);
+
+        var existingNumbers = existingChannels
+            .Select(c => new { c.Number, c.Id })
+            .ToList();
 
         LogoSet? logoSet = null;
         try
@@ -93,7 +97,11 @@ public class ChannelPresetService
         foreach (var preset in presets)
         {
             var number = preset.GetNumber(numberingMode);
-            var match = existingNumbers.FirstOrDefault(c => c.Number == number);
+            var match = existingNumbers.FirstOrDefault(c => c.Number == number)
+                ?? existingChannels
+                    .Where(c => ChannelMatchesLibraryTag(c.FilterJson, preset.LibraryTag))
+                    .Select(c => new { c.Number, c.Id })
+                    .FirstOrDefault();
             if (match is not null)
             {
                 if (request.SkipExisting && !request.UpdateExisting)
@@ -115,8 +123,10 @@ public class ChannelPresetService
                 }
 
                 channel.Name = preset.Name;
+                channel.Number = number;
                 channel.ContentType = preset.ContentType;
                 channel.FilterJson = preset.FilterJson;
+                channel.CatalogMode = preset.CatalogMode;
                 channel.Enabled = true;
                 ApplyLogo(channel, preset, logoSet);
                 ApplyWeatherDefaults(channel, preset);
@@ -142,6 +152,7 @@ public class ChannelPresetService
                 ContentType = preset.ContentType,
                 Enabled = true,
                 FilterJson = preset.FilterJson,
+                CatalogMode = preset.CatalogMode,
                 PlayoutSeed = CreateSeed(number)
             };
 
@@ -205,6 +216,13 @@ public class ChannelPresetService
         }
 
         _logoSets.ApplyLogoToChannel(channel, logoSet, preset.LogoRelativePath, preset.Name);
+    }
+
+    private static bool ChannelMatchesLibraryTag(string? filterJson, string libraryTag)
+    {
+        var tag = ChannelAiRules.ExtractLibraryTag(filterJson);
+        return !string.IsNullOrWhiteSpace(tag)
+            && tag.Equals(libraryTag, StringComparison.OrdinalIgnoreCase);
     }
 
     private static void ApplyWeatherDefaults(Channel channel, ChannelPresetDefinition preset)

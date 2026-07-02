@@ -16,6 +16,7 @@
                 <button type="button" class="tab" data-tab="commercials" role="tab">Commercials</button>
                 <button type="button" class="tab" data-tab="logos" role="tab">Logo Sets</button>
                 <button type="button" class="tab" data-tab="ebs" role="tab">EBS</button>
+                <button type="button" class="tab" data-tab="ai" role="tab">AI</button>
                 <button type="button" class="tab" data-tab="weather" role="tab">Weather</button>
                 <button type="button" class="tab" data-tab="setup" role="tab">Live TV Setup</button>
                 <button type="button" class="tab" data-tab="tasks" role="tab">Tasks</button>
@@ -240,13 +241,13 @@
             <section id="tab-ebs" class="tab-panel">
                 <div class="card section-card">
                     <h2>Emergency Broadcast System</h2>
-                    <p class="hint">EBS plays when a channel has no scheduled media, when playback fails, or when a weather capture error occurs. Viewers see your chosen video source with optional background music, white noise, or silence.</p>
+                    <p class="hint">EBS plays when a channel has no scheduled media, when playback fails, or when a weather capture error occurs. Pick off-air video and audio independently — for example, color bars with a beep tone, or TV static with white noise.</p>
                     <label class="field">
                         <span>Off-air video</span>
                         <select id="ebs-display-mode" class="emby-input">
                             <option value="0">Slate image (stock or custom upload)</option>
                             <option value="1">Color bars</option>
-                            <option value="2">TV static with white noise</option>
+                            <option value="2">TV static</option>
                         </select>
                     </label>
                     <label class="field" id="ebs-slate-variant-field">
@@ -263,6 +264,7 @@
                             <option value="0">Background music from Jellyfin library</option>
                             <option value="1">White noise</option>
                             <option value="2">Silence</option>
+                            <option value="3">Beep tone</option>
                         </select>
                     </label>
                     <label class="field">
@@ -310,6 +312,65 @@
                                 <button type="button" id="btn-remove-ebs-international" class="emby-button">Remove Custom International Slate</button>
                             </div>
                         </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="tab-ai" class="tab-panel">
+                <div class="card section-card">
+                    <h2>AI Lineup Generator</h2>
+                    <p id="ai-disabled-note" class="hint hint-warning hidden">AI lineup generation is disabled. Configure API keys below, then enable the switch to generate lineups.</p>
+                    <label class="field checkbox-field">
+                        <input type="checkbox" id="ai-enabled">
+                        <span>Enable AI lineup generation</span>
+                    </label>
+                    <div class="actions" style="margin-bottom:1rem">
+                        <button type="button" id="btn-save-ai-settings" class="raised button-submit emby-button">Save AI Settings</button>
+                        <button type="button" id="btn-test-ai" class="emby-button">Test Connection</button>
+                    </div>
+                </div>
+                <div class="card section-card">
+                    <h3>Provider settings</h3>
+                    <label class="field">
+                        <span>Default provider</span>
+                        <select id="ai-default-provider" class="emby-input">
+                            <option value="0">OpenAI (ChatGPT)</option>
+                            <option value="1">Venice</option>
+                        </select>
+                    </label>
+                    <label class="field">
+                        <span>OpenAI API key</span>
+                        <input id="ai-openai-key" type="password" class="emby-input" autocomplete="off" placeholder="Leave blank to keep existing key">
+                    </label>
+                    <label class="field">
+                        <span>OpenAI model</span>
+                        <input id="ai-openai-model" type="text" class="emby-input" placeholder="gpt-4o-mini">
+                    </label>
+                    <label class="field">
+                        <span>Venice API key</span>
+                        <input id="ai-venice-key" type="password" class="emby-input" autocomplete="off" placeholder="Leave blank to keep existing key">
+                    </label>
+                    <label class="field">
+                        <span>Venice model</span>
+                        <input id="ai-venice-model" type="text" class="emby-input" placeholder="gpt-4o-mini">
+                    </label>
+                    <p id="ai-key-status" class="hint"></p>
+                </div>
+                <div class="card section-card">
+                    <div class="section-header-row">
+                        <h3>Channel lineups</h3>
+                        <button type="button" id="btn-ai-generate-all" class="emby-button">Generate All Channels</button>
+                    </div>
+                    <div id="ai-channels-list" class="ai-channels-list"></div>
+                </div>
+                <div id="ai-preview-panel" class="card section-card hidden">
+                    <h3 id="ai-preview-title">AI Preview</h3>
+                    <p id="ai-preview-summary" class="hint"></p>
+                    <div id="ai-preview-grid" class="lineup-grid ai-preview-grid"></div>
+                    <div class="actions">
+                        <button type="button" id="btn-ai-apply" class="raised button-submit emby-button">Apply Lineup</button>
+                        <button type="button" id="btn-ai-apply-rebuild" class="emby-button">Apply + Rebuild Playout</button>
+                        <button type="button" id="btn-ai-discard" class="emby-button">Discard</button>
                     </div>
                 </div>
             </section>

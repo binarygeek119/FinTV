@@ -34,6 +34,9 @@
     let channelPresets = [];
     let presetNumberingMode = 0;
     let configPage = null;
+    let aiSettings = null;
+    let aiChannels = [];
+    let aiPreview = null;
 
     function $(id) {
         if (configPage) {
@@ -68,6 +71,10 @@
             const parsed = JSON.parse(message);
             if (parsed.title) {
                 return parsed.title;
+            }
+
+            if (parsed.message) {
+                return parsed.message;
             }
 
             if (parsed.errors) {
@@ -944,8 +951,10 @@
         grid.innerHTML = lineupSlots.sort((a, b) => a.slotIndex - b.slotIndex).map((s) => {
             const count = (s.candidates || []).length;
             const first = count ? candidateSummary(s.candidates[0]) : 'Empty slot';
-            return `<div class="slot-card ${count ? 'has-items' : 'empty'}" data-slot="${s.slotIndex}">
-                <div class="time">${slotTime(s.slotIndex)}</div>
+            const span = Math.max(1, s.spanSlots || 1);
+            const spanLabel = span > 1 ? ` · ${span * 30}m` : '';
+            return `<div class="slot-card ${count ? 'has-items' : 'empty'}" data-slot="${s.slotIndex}" style="${span > 1 ? '--slot-span:' + span + ';grid-column:span ' + span : ''}">
+                <div class="time">${slotTime(s.slotIndex)}${spanLabel}</div>
                 <div class="summary">${escapeHtml(first)}</div>
                 <div class="count">${count} candidate${count === 1 ? '' : 's'}</div>
             </div>`;
@@ -995,6 +1004,8 @@
 
         const body = `
             <p class="hint">Editing ${slotTime(index)} · add multiple weighted candidates for smart rotation.</p>
+            <label class="field"><span>Block length (30-min slots)</span>
+                <input id="slot-span-slots" type="number" min="1" max="8" class="emby-input" value="${Math.max(1, slot.spanSlots || 1)}"></label>
             <div id="slot-candidates" class="candidate-list">${renderCandidateRows(slot.candidates)}</div>
             <div class="field">
                 <span>Add candidate</span>
@@ -1102,6 +1113,7 @@
 
         document.getElementById('slot-cancel').onclick = closeModal;
         document.getElementById('slot-save').onclick = () => {
+            slot.spanSlots = Math.max(1, Math.min(8, parseInt(document.getElementById('slot-span-slots').value, 10) || 1));
             const idx = lineupSlots.findIndex((s) => s.slotIndex === index);
             if (idx >= 0) lineupSlots[idx] = slot;
             else lineupSlots.push(slot);
@@ -1729,7 +1741,6 @@
 
     function updateEbsFieldVisibility() {
         const displayMode = Number($('ebs-display-mode')?.value || '0');
-        const audioModeField = $('ebs-audio-mode-field');
         const slateVariantField = $('ebs-slate-variant-field');
         const slateVariantHint = $('ebs-slate-variant-hint');
         const musicSourceField = $('ebs-music-source')?.closest('.field');
@@ -1742,14 +1753,11 @@
         if (slateVariantHint) {
             slateVariantHint.style.display = displayMode === 0 ? '' : 'none';
         }
-        if (audioModeField) {
-            audioModeField.style.display = displayMode === 2 ? 'none' : '';
-        }
         if (musicSourceField) {
-            musicSourceField.style.display = displayMode === 2 || audioMode !== 0 ? 'none' : '';
+            musicSourceField.style.display = audioMode !== 0 ? 'none' : '';
         }
         if (musicLibraryField) {
-            musicLibraryField.style.display = displayMode === 2 || audioMode !== 0 ? 'none' : '';
+            musicLibraryField.style.display = audioMode !== 0 ? 'none' : '';
         }
         updateEbsLibraryFieldVisibility();
     }
@@ -1788,6 +1796,215 @@
             intlEl.textContent = international?.fileName
                 ? `Custom upload: ${international.fileName}`
                 : 'Using bundled stock slate.';
+        }
+    }
+
+    const AI_CATALOG_MODES = ['TV only', 'Movies only', 'Both'];
+
+    function updateAiUiState() {
+        const enabled = !!(aiSettings && aiSettings.enabled);
+        const note = $('ai-disabled-note');
+        note?.classList.toggle('hidden', enabled);
+        qa('.ai-action').forEach((el) => { el.disabled = !enabled; });
+        qa('.ai-channel-row').forEach((row) => row.classList.toggle('disabled-row', !enabled));
+        if ($('btn-test-ai')) $('btn-test-ai').disabled = !enabled;
+        if ($('btn-ai-generate-all')) $('btn-ai-generate-all').disabled = !enabled;
+    }
+
+    async function loadAi() {
+        try {
+            aiSettings = await api('/ai/settings');
+            if ($('ai-enabled')) $('ai-enabled').checked = !!aiSettings.enabled;
+            if ($('ai-default-provider')) $('ai-default-provider').value = String(aiSettings.defaultProvider ?? 0);
+            if ($('ai-openai-model')) $('ai-openai-model').value = aiSettings.openAiModel || 'gpt-4o-mini';
+            if ($('ai-venice-model')) $('ai-venice-model').value = aiSettings.veniceModel || 'gpt-4o-mini';
+            if ($('ai-openai-key')) $('ai-openai-key').value = '';
+            if ($('ai-venice-key')) $('ai-venice-key').value = '';
+            const keyStatus = $('ai-key-status');
+            if (keyStatus) {
+                keyStatus.textContent = `OpenAI key: ${aiSettings.hasOpenAiApiKey ? aiSettings.openAiApiKeyMasked : 'not set'} · Venice key: ${aiSettings.hasVeniceApiKey ? aiSettings.veniceApiKeyMasked : 'not set'}`;
+            }
+            aiChannels = await api('/ai/channels');
+            renderAiChannels();
+            updateAiUiState();
+        } catch (err) {
+            reportApiError(err, 'Could not load AI settings.');
+        }
+    }
+
+    function renderAiChannels() {
+        const list = $('ai-channels-list');
+        if (!list) return;
+        if (!aiChannels.length) {
+            list.innerHTML = '<div class="empty-state">No channels available for AI lineup generation.</div>';
+            return;
+        }
+
+        list.innerHTML = aiChannels.map((ch) => `
+            <div class="ai-channel-row" data-ai-channel="${ch.id}">
+                <div class="row-top">
+                    <div>
+                        <strong>${escapeHtml(ch.number)} · ${escapeHtml(ch.name)}</strong>
+                        <div class="meta">${escapeHtml(ch.libraryTag || 'no tag')} · ${ch.filledSlots}/48 slots filled</div>
+                    </div>
+                    <div class="row-actions">
+                        <label class="field" style="margin:0">
+                            <span>Content mix</span>
+                            <select class="emby-input ai-catalog-mode" data-channel="${ch.id}">
+                                <option value="0" ${ch.catalogMode === 0 ? 'selected' : ''}>TV only</option>
+                                <option value="1" ${ch.catalogMode === 1 ? 'selected' : ''}>Movies only</option>
+                                <option value="2" ${ch.catalogMode === 2 ? 'selected' : ''}>Both</option>
+                            </select>
+                        </label>
+                        <button type="button" class="emby-button ai-action ai-save-channel" data-channel="${ch.id}">Save</button>
+                        <button type="button" class="emby-button ai-action ai-generate-channel" data-channel="${ch.id}">Generate</button>
+                    </div>
+                </div>
+                ${ch.aiRuleBrief ? `<p class="hint">${escapeHtml(ch.aiRuleBrief)}</p>` : ''}
+                <label class="field">
+                    <span>Fine-tune prompt</span>
+                    <textarea class="emby-input ai-fine-tune" data-channel="${ch.id}" placeholder="Optional extra instructions for this channel">${escapeHtml(ch.aiFineTunePrompt || '')}</textarea>
+                </label>
+            </div>`).join('');
+
+        list.querySelectorAll('.ai-save-channel').forEach((btn) => {
+            btn.onclick = () => saveAiChannelSettings(btn.dataset.channel);
+        });
+        list.querySelectorAll('.ai-generate-channel').forEach((btn) => {
+            btn.onclick = () => generateAiLineup(btn.dataset.channel);
+        });
+        updateAiUiState();
+    }
+
+    async function saveAiSettings() {
+        try {
+            const payload = {
+                enabled: !!$('ai-enabled')?.checked,
+                defaultProvider: Number($('ai-default-provider')?.value || '0'),
+                openAiModel: $('ai-openai-model')?.value?.trim() || 'gpt-4o-mini',
+                veniceModel: $('ai-venice-model')?.value?.trim() || 'gpt-4o-mini'
+            };
+            const openKey = $('ai-openai-key')?.value?.trim();
+            const veniceKey = $('ai-venice-key')?.value?.trim();
+            if (openKey) payload.openAiApiKey = openKey;
+            if (veniceKey) payload.veniceApiKey = veniceKey;
+            aiSettings = await api('/ai/settings', { method: 'PUT', body: JSON.stringify(payload) });
+            toast('AI settings saved.', 'success');
+            await loadAi();
+        } catch (err) {
+            toast(err.message, 'error');
+        }
+    }
+
+    async function testAiConnection() {
+        try {
+            const data = await api('/ai/settings/test', {
+                method: 'POST',
+                body: JSON.stringify({ provider: Number($('ai-default-provider')?.value || '0') })
+            });
+            toast(`Connected to ${data.provider}.`, 'success');
+        } catch (err) {
+            toast(err.message, 'error');
+        }
+    }
+
+    async function saveAiChannelSettings(channelId) {
+        const row = document.querySelector(`[data-ai-channel="${channelId}"]`);
+        if (!row) return;
+        try {
+            await api('/ai/channels/' + channelId + '/fine-tune', {
+                method: 'PUT',
+                body: JSON.stringify({
+                    aiFineTunePrompt: row.querySelector('.ai-fine-tune')?.value || '',
+                    catalogMode: Number(row.querySelector('.ai-catalog-mode')?.value || '0')
+                })
+            });
+            toast('Channel AI settings saved.', 'success');
+        } catch (err) {
+            toast(err.message, 'error');
+        }
+    }
+
+    async function generateAiLineup(channelId) {
+        const row = document.querySelector(`[data-ai-channel="${channelId}"]`);
+        if (row) {
+            await saveAiChannelSettings(channelId);
+        }
+        const btn = row?.querySelector('.ai-generate-channel');
+        if (btn) btn.disabled = true;
+        try {
+            aiPreview = await api('/ai/channels/' + channelId + '/generate', { method: 'POST', body: '{}' });
+            renderAiPreview();
+            toast('AI lineup generated. Review the preview below.', 'success');
+        } catch (err) {
+            toast(err.message, 'error');
+        } finally {
+            if (btn) btn.disabled = !(aiSettings && aiSettings.enabled);
+        }
+    }
+
+    function renderAiPreview() {
+        const panel = $('ai-preview-panel');
+        if (!aiPreview || !panel) return;
+        panel.classList.remove('hidden');
+        $('ai-preview-title').textContent = `Preview: ${aiPreview.channelName}`;
+        $('ai-preview-summary').textContent = `AI chose from ${aiPreview.catalogSummary.includedInPrompt} of ${aiPreview.catalogSummary.totalAvailable} tagged items · ${AI_CATALOG_MODES[aiPreview.catalogMode] || 'Mixed'} mode`;
+        const grid = $('ai-preview-grid');
+        const occupied = new Array(48).fill(false);
+        const blocks = (aiPreview.slots || []).filter((s) => (s.title && s.title !== 'Filter fallback') || s.jellyfinItemId);
+        let html = '';
+        for (let i = 0; i < 48; i++) {
+            if (occupied[i]) continue;
+            const block = blocks.find((s) => s.slotIndex === i);
+            if (!block) {
+                html += `<div class="slot-card empty"><div class="time">${slotTime(i)}</div><div class="summary">Open</div></div>`;
+                occupied[i] = true;
+                continue;
+            }
+            const span = Math.max(1, block.spanSlots || 1);
+            for (let j = i; j < i + span && j < 48; j++) occupied[j] = true;
+            const duration = span * 30;
+            html += `<div class="slot-card has-items span-block" style="--slot-span:${span};grid-column:span ${span}">
+                <div class="time">${slotTime(i)} · ${duration}m</div>
+                <div class="summary">${escapeHtml(block.title)}</div>
+                <div class="count">${escapeHtml(block.type || '')}${block.runtimeMinutes ? ' · ' + block.runtimeMinutes + 'm' : ''}</div>
+            </div>`;
+        }
+        grid.innerHTML = html;
+        updateAiUiState();
+    }
+
+    async function applyAiLineup(rebuild) {
+        if (!aiPreview) return;
+        try {
+            await api('/ai/channels/' + aiPreview.channelId + '/apply', {
+                method: 'POST',
+                body: JSON.stringify({ slots: aiPreview.lineupSlots, rebuildPlayout: !!rebuild })
+            });
+            toast(rebuild ? 'Lineup applied and playout rebuild started.' : 'Lineup applied.', 'success');
+            discardAiPreview();
+            await loadAi();
+        } catch (err) {
+            toast(err.message, 'error');
+        }
+    }
+
+    function discardAiPreview() {
+        aiPreview = null;
+        $('ai-preview-panel')?.classList.add('hidden');
+        if ($('ai-preview-grid')) $('ai-preview-grid').innerHTML = '';
+    }
+
+    async function generateAllAiLineups() {
+        if (!confirm('Generate AI lineups for all channels? This may take several minutes.')) return;
+        try {
+            const data = await api('/ai/generate-all', { method: 'POST', body: '{}' });
+            const ok = (data.results || []).filter((r) => r.ok).length;
+            const fail = (data.results || []).filter((r) => !r.ok).length;
+            toast(`Generate all finished: ${ok} succeeded, ${fail} failed.`, fail ? 'info' : 'success');
+            await loadAi();
+        } catch (err) {
+            toast(err.message, 'error');
         }
     }
 
@@ -1958,6 +2175,7 @@
         if (name === 'channels') startOnAirPolling();
         if (name === 'setup') loadSetup();
         if (name === 'ebs') loadEbs();
+        if (name === 'ai') loadAi();
         if (name === 'weather') loadWeather();
         if (name === 'presets') loadPresets();
         if (name === 'lineups') loadLineups();
@@ -2061,6 +2279,13 @@
         qa('.btn-copy').forEach((btn) => btn.onclick = () => copyText(btn.dataset.copyTarget));
         click('btn-save-setup', saveSetupSettings);
         click('btn-save-ebs', () => saveEbsSettings().catch((e) => toast(e.message, 'error')));
+        click('btn-save-ai-settings', () => saveAiSettings().catch((e) => toast(e.message, 'error')));
+        click('btn-test-ai', () => testAiConnection().catch((e) => toast(e.message, 'error')));
+        click('btn-ai-generate-all', () => generateAllAiLineups().catch((e) => toast(e.message, 'error')));
+        click('btn-ai-apply', () => applyAiLineup(false).catch((e) => toast(e.message, 'error')));
+        click('btn-ai-apply-rebuild', () => applyAiLineup(true).catch((e) => toast(e.message, 'error')));
+        click('btn-ai-discard', discardAiPreview);
+        change('ai-enabled', updateAiUiState);
         click('btn-upload-ebs-usa', () => uploadEbsSlate('usa', 'ebs-usa-file'));
         click('btn-upload-ebs-international', () => uploadEbsSlate('international', 'ebs-international-file'));
         click('btn-remove-ebs-usa', () => removeEbsSlate('usa'));
