@@ -370,6 +370,10 @@
     }
 
     async function openNewChannelForm() {
+        if (!syncConfigPage()) {
+            return;
+        }
+
         resetChannelForm();
         showChannelForm(true);
 
@@ -960,7 +964,20 @@
         }
     }
 
+    function syncConfigPage(preferred) {
+        const resolved = resolveConfigPage(preferred || configPage);
+        if (resolved) {
+            configPage = resolved;
+        }
+
+        return configPage;
+    }
+
     function switchTab(name) {
+        if (!syncConfigPage()) {
+            return;
+        }
+
         qa('.fintv-tabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
         qa('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + name));
         if (name === 'setup') loadSetup();
@@ -977,7 +994,33 @@
         });
     }
 
+    function isActiveConfigPage(candidate) {
+        if (!candidate || !document.contains(candidate)) {
+            return false;
+        }
+
+        if (candidate.classList.contains('hide')
+            || candidate.classList.contains('hidden')
+            || candidate.getAttribute('aria-hidden') === 'true') {
+            return false;
+        }
+
+        const rect = candidate.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+            return true;
+        }
+
+        return candidate.classList.contains('active')
+            || candidate.classList.contains('mainAnimatedPage');
+    }
+
     function bindEvents() {
+        if (!configPage || configPage.dataset.fintvBound === '1') {
+            return;
+        }
+
+        configPage.dataset.fintvBound = '1';
+
         function click(id, handler) {
             const el = $(id);
             if (el) {
@@ -1050,8 +1093,7 @@
     }
 
     function init(page) {
-        configPage = resolveConfigPage(page);
-        if (!configPage) {
+        if (!syncConfigPage(page)) {
             return Promise.resolve();
         }
 
@@ -1060,28 +1102,18 @@
     }
 
     function resolveConfigPage(preferred) {
-        if (preferred && document.contains(preferred)) {
+        if (isActiveConfigPage(preferred)) {
             return preferred;
         }
 
         const pages = document.querySelectorAll('#FinTVConfigPage');
         for (let i = pages.length - 1; i >= 0; i--) {
-            const candidate = pages[i];
-            if (candidate.classList.contains('hidden') || candidate.getAttribute('aria-hidden') === 'true') {
-                continue;
-            }
-
-            const rect = candidate.getBoundingClientRect();
-            if (rect.width > 0 && rect.height > 0) {
-                return candidate;
-            }
-
-            if (candidate.classList.contains('active') || candidate.classList.contains('mainAnimatedPage')) {
-                return candidate;
+            if (isActiveConfigPage(pages[i])) {
+                return pages[i];
             }
         }
 
-        return pages.length ? pages[pages.length - 1] : null;
+        return null;
     }
 
     function bootFinTvAdmin(page) {
@@ -1094,29 +1126,19 @@
         return true;
     }
 
-    window.FinTV = { init, refresh, loadChannels, loadSetup };
-
-    (function registerFinTvPageLifecycle() {
-        if (!window.__FinTVListenersRegistered) {
-            window.__FinTVListenersRegistered = true;
-
-            if (typeof jQuery !== 'undefined') {
-                jQuery(document).on('pageshow', '#FinTVConfigPage', function () {
-                    bootFinTvAdmin(this);
-                });
-            }
-
-            document.addEventListener('pageshow', (event) => {
-                if (event.target && event.target.id === 'FinTVConfigPage') {
-                    bootFinTvAdmin(event.target);
-                }
-            }, true);
-        }
-
-        if (!bootFinTvAdmin()) {
-            [100, 500, 1500, 3000].forEach((delay) => {
-                setTimeout(() => bootFinTvAdmin(), delay);
-            });
-        }
-    })();
+    window.FinTV = { init, refresh, loadChannels, loadSetup, bootFinTvAdmin };
 })();
+
+export default function (view) {
+    function boot() {
+        if (window.FinTV && window.FinTV.bootFinTvAdmin) {
+            window.FinTV.bootFinTvAdmin(view);
+        }
+    }
+
+    view.addEventListener('viewshow', boot);
+    view.addEventListener('viewdestroy', function () {
+        delete view.dataset.fintvBound;
+    });
+    boot();
+}
