@@ -66,6 +66,7 @@ public class LogoSetService
         if (isNew)
         {
             _db.LogoSets.Add(existing);
+            await _db.SaveChangesAsync(cancellationToken);
         }
 
         var localCount = Directory.Exists(storagePath)
@@ -99,7 +100,30 @@ public class LogoSetService
 
         Directory.CreateDirectory(storagePath);
         await DownloadBinarygeek119SetFromGitHubAsync(storagePath, cancellationToken);
-        return await EnsureBinarygeek119SetAsync(cancellationToken);
+
+        const string setName = ChannelPresets.Binarygeek119LogoSetName;
+        var set = await _db.LogoSets.FirstOrDefaultAsync(s => s.Name == setName, cancellationToken);
+        if (set is null)
+        {
+            set = new LogoSet
+            {
+                Name = setName,
+                SourceUrl = Binarygeek119GitHubRawBase,
+                StoragePath = storagePath
+            };
+            _db.LogoSets.Add(set);
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        else
+        {
+            set.SourceUrl = Binarygeek119GitHubRawBase;
+            set.StoragePath = storagePath;
+        }
+
+        await ScanLocalLogoFolderAsync(set, storagePath, cancellationToken);
+        set.LastSyncedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(cancellationToken);
+        return set;
     }
 
     private static int SeedBundledLogos(string storagePath)
@@ -141,20 +165,30 @@ public class LogoSetService
             .Where(IsImageFile)
             .ToList();
 
-        _db.LogoSetEntries.RemoveRange(set.Entries);
+        if (set.Id == Guid.Empty)
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+
+        await _db.LogoSetEntries
+            .Where(e => e.LogoSetId == set.Id)
+            .ExecuteDeleteAsync(cancellationToken);
+
         set.Entries.Clear();
 
         foreach (var file in files)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var relative = Path.GetRelativePath(folder, file).Replace('\\', '/');
-            set.Entries.Add(new LogoSetEntry
+            var entry = new LogoSetEntry
             {
                 LogoSetId = set.Id,
                 FileName = Path.GetFileName(file),
                 RelativePath = relative,
                 DisplayName = Path.GetFileNameWithoutExtension(file)
-            });
+            };
+            set.Entries.Add(entry);
+            _db.LogoSetEntries.Add(entry);
         }
 
         await _db.SaveChangesAsync(cancellationToken);

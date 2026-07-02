@@ -195,8 +195,8 @@ public class ChannelPresetService
             return;
         }
 
-        channel.WeatherLatitude ??= 41.6057;
-        channel.WeatherLongitude ??= -93.5500;
+        channel.WeatherLatitude ??= 41.60574;
+        channel.WeatherLongitude ??= -93.55002;
     }
 
     private static int CreateSeed(decimal number)

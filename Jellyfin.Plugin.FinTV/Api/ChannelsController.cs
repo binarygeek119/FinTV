@@ -15,14 +15,17 @@ namespace Jellyfin.Plugin.FinTV.Api;
 public class ChannelsController : ControllerBase
 {
     private readonly ChannelService _channels;
+    private readonly StreamService _stream;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ChannelsController"/> class.
     /// </summary>
     /// <param name="channels">Channel service.</param>
-    public ChannelsController(ChannelService channels)
+    /// <param name="stream">Stream service.</param>
+    public ChannelsController(ChannelService channels, StreamService stream)
     {
         _channels = channels;
+        _stream = stream;
     }
 
     /// <summary>
@@ -47,6 +50,24 @@ public class ChannelsController : ControllerBase
     {
         var channel = await _channels.GetByIdAsync(id, cancellationToken);
         return channel is null ? NotFound() : channel;
+    }
+
+    /// <summary>
+    /// Gets the playout item currently airing on a channel, if any.
+    /// </summary>
+    /// <param name="id">Channel identifier.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Current playout item or null.</returns>
+    [HttpGet("{id:guid}/now-playing")]
+    public async Task<ActionResult<object>> GetNowPlaying(Guid id, CancellationToken cancellationToken)
+    {
+        if (await _channels.GetByIdAsync(id, cancellationToken) is null)
+        {
+            return NotFound();
+        }
+
+        var current = await _stream.GetCurrentItemAsync(id, cancellationToken);
+        return Ok(new { item = current });
     }
 
     /// <summary>

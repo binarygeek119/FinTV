@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.20"
+version: "0.0.2.22"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -76,6 +76,9 @@ artifacts:
   - "logos/binarygeek119/The Holiday Channel/The Holiday Channel-plane.png"
   - "logos/binarygeek119/The Holiday Channel/The Holiday Channel-Valentine's Day.png"
 changelog: |-
+  - Fix Binarygeek119 logo sync failing with database concurrency errors on re-sync
+  - Fix admin now-playing panel causing 404 console noise when no playout is airing
+  - Support five-decimal weather coordinates such as 41.60574,-93.55002
   - Add Delete button to each channel row in the admin channel list
   - Fix FinTV admin showing NaN.NaN and undefined when Jellyfin returns PascalCase JSON
   - Harden channel API JSON output by omitting DefaultLineup navigation property

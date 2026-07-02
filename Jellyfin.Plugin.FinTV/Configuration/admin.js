@@ -189,6 +189,69 @@
         return value;
     }
 
+    function parseWeatherCoordinates(latInput, lonInput) {
+        let latText = String(latInput ?? '').trim();
+        let lonText = String(lonInput ?? '').trim();
+
+        if (latText.includes(',')) {
+            const parts = latText.split(',').map((part) => part.trim()).filter(Boolean);
+            if (parts.length >= 2) {
+                latText = parts[0];
+                lonText = parts[1];
+            }
+        }
+
+        const lat = latText === '' ? null : Number(latText);
+        const lon = lonText === '' ? null : Number(lonText);
+
+        if (latText !== '' && Number.isNaN(lat)) {
+            throw new Error('Weather latitude must be a valid number (e.g. 41.60574).');
+        }
+
+        if (lonText !== '' && Number.isNaN(lon)) {
+            throw new Error('Weather longitude must be a valid number (e.g. -93.55002).');
+        }
+
+        if (lat != null && (lat < -90 || lat > 90)) {
+            throw new Error('Weather latitude must be between -90 and 90.');
+        }
+
+        if (lon != null && (lon < -180 || lon > 180)) {
+            throw new Error('Weather longitude must be between -180 and 180.');
+        }
+
+        return { lat, lon };
+    }
+
+    function splitWeatherCoordinateInput() {
+        const latEl = $('ch-lat');
+        const lonEl = $('ch-lon');
+        if (!latEl || !lonEl || !latEl.value.includes(',')) {
+            return;
+        }
+
+        try {
+            const coords = parseWeatherCoordinates(latEl.value, lonEl.value);
+            if (coords.lat != null) {
+                latEl.value = String(coords.lat);
+            }
+
+            if (coords.lon != null) {
+                lonEl.value = String(coords.lon);
+            }
+        } catch (ignore) {
+            // Keep raw input until save validates.
+        }
+    }
+
+    function formatWeatherCoordinate(value) {
+        if (value == null || value === '') {
+            return '';
+        }
+
+        return String(value);
+    }
+
     function escapeHtml(text) {
         return String(text)
             .replace(/&/g, '&amp;')
@@ -289,8 +352,9 @@
             return;
         }
         try {
-            const now = await fetch(resolveUrl(`FinTV/iptv/now/${channelId}`)).then((r) => r.ok ? r.json() : null);
-            if (now && now.title) {
+            const response = await api(`/channels/${channelId}/now-playing`).catch(() => null);
+            const now = response?.item;
+            if (now?.title) {
                 box.classList.remove('hidden');
                 box.innerHTML = `<strong>Now playing</strong>${escapeHtml(now.title)}`;
             } else {
@@ -443,8 +507,8 @@
         $('ch-scanlines').checked = c.scanlinesEnabled;
         $('ch-bug').value = c.bugPlacement;
         $('ch-audio').value = c.audioLanguage || 'eng';
-        $('ch-lat').value = c.weatherLatitude ?? '';
-        $('ch-lon').value = c.weatherLongitude ?? '';
+        $('ch-lat').value = formatWeatherCoordinate(c.weatherLatitude);
+        $('ch-lon').value = formatWeatherCoordinate(c.weatherLongitude);
         $('ch-enabled').checked = c.enabled;
         populateLogoSelectors(c);
         toggleWeatherFields();
@@ -462,6 +526,17 @@
             return;
         }
 
+        let weatherCoords;
+        try {
+            weatherCoords = parseWeatherCoordinates($('ch-lat').value, $('ch-lon').value);
+        } catch (err) {
+            toast(err.message, 'error');
+            return;
+        }
+
+        $('ch-lat').value = weatherCoords.lat == null ? '' : String(weatherCoords.lat);
+        $('ch-lon').value = weatherCoords.lon == null ? '' : String(weatherCoords.lon);
+
         const payload = {
             number,
             name: $('ch-name').value.trim(),
@@ -472,8 +547,8 @@
             audioLanguage: $('ch-audio').value.trim(),
             logoSetId: $('ch-logo-set').value ? $('ch-logo-set').value : null,
             logoFileName: $('ch-logo-file').value || null,
-            weatherLatitude: parseFloat($('ch-lat').value) || null,
-            weatherLongitude: parseFloat($('ch-lon').value) || null,
+            weatherLatitude: weatherCoords.lat,
+            weatherLongitude: weatherCoords.lon,
             enabled: $('ch-enabled').checked
         };
 
@@ -1089,6 +1164,11 @@
             channelForm.onsubmit = saveChannel;
         }
         change('ch-content-type', toggleWeatherFields);
+        const latInput = $('ch-lat');
+        if (latInput) {
+            latInput.addEventListener('change', splitWeatherCoordinateInput);
+            latInput.addEventListener('blur', splitWeatherCoordinateInput);
+        }
         change('ch-logo-set', () => populateLogoSelectors({ logoSetId: $('ch-logo-set').value, logoFileName: '' }));
         const channelFilterEl = $('channel-filter');
         if (channelFilterEl) {

@@ -90,12 +90,13 @@
                             <div id="weather-fields" class="field-group hidden">
                                 <label class="field">
                                     <span>Weather Latitude</span>
-                                    <input id="ch-lat" type="number" step="0.0001" class="emby-input">
+                                    <input id="ch-lat" type="text" inputmode="decimal" class="emby-input" placeholder="41.60574 or 41.60574,-93.55002">
                                 </label>
                                 <label class="field">
                                     <span>Weather Longitude</span>
-                                    <input id="ch-lon" type="number" step="0.0001" class="emby-input">
+                                    <input id="ch-lon" type="text" inputmode="decimal" class="emby-input" placeholder="-93.55002">
                                 </label>
+                                <p class="hint">Need coordinates from a ZIP code? Use the <a href="https://www.freemaptools.com/convert-us-zip-code-to-lat-lng.htm" target="_blank" rel="noopener">US ZIP code to latitude/longitude converter</a>.</p>
                             </div>
                             <label class="field checkbox-field">
                                 <input id="ch-enabled" type="checkbox" checked>
