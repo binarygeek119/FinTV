@@ -45,15 +45,20 @@ public class EpgService
 
         foreach (var channel in channels)
         {
-            root.Add(new XElement(
+            var channelElement = new XElement(
                 "channel",
                 new XAttribute("id", channel.Id.ToString("N")),
                 new XElement("display-name", channel.Name),
-                new XElement("icon", new XAttribute("src", GetLogoUrl(channel, baseUrl)))));
+                new XElement("icon", new XAttribute("src", GetLogoUrl(channel, baseUrl))));
+            channelElement.Add(new XElement("lcn", ChannelNumbers.Format(channel.Number)));
+            root.Add(channelElement);
         }
 
         var items = await _db.PlayoutItems
-            .Where(p => p.Start >= start && p.Start < end && p.GuideGroup != "commercial")
+            .Where(p =>
+                p.Finish > start
+                && p.Start < end
+                && (p.GuideGroup == null || p.GuideGroup != "commercial"))
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
