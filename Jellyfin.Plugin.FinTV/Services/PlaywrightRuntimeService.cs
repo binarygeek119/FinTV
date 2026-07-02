@@ -6,6 +6,7 @@ namespace Jellyfin.Plugin.FinTV.Services;
 
 /// <summary>
 /// Configures Playwright for Jellyfin plugin hosting on Windows and headless Linux servers.
+/// Linux uses Playwright's official Docker image for Chromium; Windows uses a local browser.
 /// </summary>
 public class PlaywrightRuntimeService
 {
@@ -14,11 +15,20 @@ public class PlaywrightRuntimeService
     private static bool _browsersInstalled;
 
     private readonly ILogger<PlaywrightRuntimeService> _logger;
+    private readonly PlaywrightDockerBrowserService _dockerBrowser;
 
-    public PlaywrightRuntimeService(ILogger<PlaywrightRuntimeService> logger)
+    public PlaywrightRuntimeService(
+        ILogger<PlaywrightRuntimeService> logger,
+        PlaywrightDockerBrowserService dockerBrowser)
     {
         _logger = logger;
+        _dockerBrowser = dockerBrowser;
     }
+
+    /// <summary>
+    /// Gets a value indicating whether weather capture uses Docker-hosted Chromium.
+    /// </summary>
+    public bool UsesDockerBrowser => OperatingSystem.IsLinux();
 
     /// <summary>
     /// Creates a Playwright instance after ensuring drivers and Chromium are available.
@@ -28,8 +38,61 @@ public class PlaywrightRuntimeService
     public async Task<IPlaywright> CreateAsync(CancellationToken cancellationToken = default)
     {
         ConfigureEnvironment();
-        await EnsureChromiumInstalledAsync(cancellationToken);
+        if (!UsesDockerBrowser)
+        {
+            await EnsureChromiumInstalledAsync(cancellationToken);
+        }
+
         return await Playwright.CreateAsync();
+    }
+
+    /// <summary>
+    /// Connects to a browser using Docker CDP on Linux or a local launch on Windows.
+    /// </summary>
+    /// <param name="playwright">Playwright instance.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Connected browser.</returns>
+    public async Task<IBrowser> ConnectBrowserAsync(IPlaywright playwright, CancellationToken cancellationToken = default)
+    {
+        if (UsesDockerBrowser)
+        {
+            await _dockerBrowser.EnsureBrowserReadyAsync(cancellationToken);
+            _logger.LogDebug("Connecting to Playwright Docker browser at {CdpEndpoint}", _dockerBrowser.CdpEndpoint);
+            return await playwright.Chromium.ConnectOverCDPAsync(_dockerBrowser.CdpEndpoint);
+        }
+
+        return await playwright.Chromium.LaunchAsync(CreateLaunchOptions());
+    }
+
+    /// <summary>
+    /// Releases a browser connection without stopping the shared Docker Chromium process.
+    /// </summary>
+    /// <param name="browser">Browser to release.</param>
+    public async Task ReleaseBrowserAsync(IBrowser browser)
+    {
+        if (UsesDockerBrowser)
+        {
+            foreach (var context in browser.Contexts.ToArray())
+            {
+                await context.CloseAsync();
+            }
+
+            return;
+        }
+
+        await browser.CloseAsync();
+    }
+
+    /// <summary>
+    /// Rewrites localhost WeatherStar URLs so a Docker-hosted browser can reach the Jellyfin host.
+    /// </summary>
+    /// <param name="url">Weather page URL.</param>
+    /// <returns>Adjusted URL when Docker mode is active.</returns>
+    public string AdjustWeatherPageUrlForRuntime(string url)
+    {
+        return UsesDockerBrowser
+            ? PlaywrightDockerBrowserService.AdjustWeatherPageUrlForDocker(url)
+            : url;
     }
 
     /// <summary>
@@ -38,19 +101,9 @@ public class PlaywrightRuntimeService
     /// <returns>Headless launch options.</returns>
     public BrowserTypeLaunchOptions CreateLaunchOptions()
     {
-        var args = new List<string>();
-        if (OperatingSystem.IsLinux())
-        {
-            args.Add("--no-sandbox");
-            args.Add("--disable-setuid-sandbox");
-            args.Add("--disable-dev-shm-usage");
-            args.Add("--disable-gpu");
-        }
-
         return new BrowserTypeLaunchOptions
         {
-            Headless = true,
-            Args = args
+            Headless = true
         };
     }
 
@@ -67,17 +120,26 @@ public class PlaywrightRuntimeService
         var pluginDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)
             ?? plugin.DataFolder;
 
-        var browsersPath = Path.Combine(plugin.DataFolder, "playwright-browsers");
-        Directory.CreateDirectory(browsersPath);
-
-        Environment.SetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH", browsersPath);
         Environment.SetEnvironmentVariable("PLAYWRIGHT_DRIVER_SEARCH_PATH", pluginDirectory);
 
+        if (!UsesDockerBrowser)
+        {
+            var browsersPath = Path.Combine(plugin.DataFolder, "playwright-browsers");
+            Directory.CreateDirectory(browsersPath);
+            Environment.SetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH", browsersPath);
+            _logger.LogDebug(
+                "Playwright configured for local browser. Driver path: {DriverPath}. Browser path: {BrowserPath}",
+                pluginDirectory,
+                browsersPath);
+        }
+        else
+        {
+            _logger.LogDebug(
+                "Playwright configured for Docker browser on Linux. Driver path: {DriverPath}",
+                pluginDirectory);
+        }
+
         _environmentConfigured = true;
-        _logger.LogDebug(
-            "Playwright configured. Driver search path: {DriverPath}. Browser path: {BrowserPath}",
-            pluginDirectory,
-            browsersPath);
     }
 
     private async Task EnsureChromiumInstalledAsync(CancellationToken cancellationToken)
@@ -99,10 +161,7 @@ public class PlaywrightRuntimeService
             var exitCode = Program.Main(["install", "chromium"]);
             if (exitCode != 0)
             {
-                var hint = OperatingSystem.IsLinux()
-                    ? " On Linux headless servers, also install OS dependencies (for example: sudo npx playwright install-deps chromium)."
-                    : string.Empty;
-                throw new InvalidOperationException($"Playwright Chromium install failed with exit code {exitCode}.{hint}");
+                throw new InvalidOperationException($"Playwright Chromium install failed with exit code {exitCode}.");
             }
 
             _browsersInstalled = true;

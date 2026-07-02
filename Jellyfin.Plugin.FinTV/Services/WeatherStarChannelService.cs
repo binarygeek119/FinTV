@@ -37,14 +37,16 @@ public class WeatherStarChannelService
         var lat = channel.WeatherLatitude ?? 41.60574;
         var lon = channel.WeatherLongitude ?? -93.55002;
         var baseUrl = Plugin.Instance?.Configuration.WeatherStarBaseUrl;
-        var weatherPageUrl = BuildWeatherPageUrl(lat, lon, baseUrl);
+        var weatherPageUrl = _playwrightRuntime.AdjustWeatherPageUrlForRuntime(
+            BuildWeatherPageUrl(lat, lon, baseUrl));
         var (width, height) = GetResolution(channel);
         var ffmpegPath = _mediaEncoder.EncoderPath;
 
+        IBrowser? browser = null;
         try
         {
             using var playwright = await _playwrightRuntime.CreateAsync(cancellationToken);
-            await using var browser = await playwright.Chromium.LaunchAsync(_playwrightRuntime.CreateLaunchOptions());
+            browser = await _playwrightRuntime.ConnectBrowserAsync(playwright, cancellationToken);
             await using var context = await browser.NewContextAsync(new BrowserNewContextOptions
             {
                 ViewportSize = new ViewportSize { Width = width, Height = height }
@@ -92,6 +94,13 @@ public class WeatherStarChannelService
                 .WithStandardOutputPipe(CliWrap.PipeTarget.ToStream(output))
                 .WithValidation(CliWrap.CommandResultValidation.None)
                 .ExecuteAsync(cancellationToken);
+        }
+        finally
+        {
+            if (browser is not null)
+            {
+                await _playwrightRuntime.ReleaseBrowserAsync(browser);
+            }
         }
     }
 

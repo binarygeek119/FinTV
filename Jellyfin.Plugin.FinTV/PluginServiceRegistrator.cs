@@ -36,6 +36,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddScoped<LogoSetService>();
         serviceCollection.AddScoped<JellyfinCatalogService>();
         serviceCollection.AddScoped<EbsService>();
+        serviceCollection.AddSingleton<PlaywrightDockerBrowserService>();
         serviceCollection.AddSingleton<PlaywrightRuntimeService>();
         serviceCollection.AddScoped<WeatherStarChannelService>();
         serviceCollection.AddSingleton<StreamService>();

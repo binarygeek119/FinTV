@@ -20,7 +20,7 @@ Inspired by [ErsatzTV/legacy](https://github.com/ErsatzTV/legacy) scheduling con
 
 - Jellyfin **12.0+** (including 12.0 RC builds)
 - FFmpeg (bundled with Jellyfin)
-- For WeatherStar channel: Playwright Chromium (auto-installed on first weather tune; Linux may need OS deps — see below)
+- For WeatherStar channel: **Windows** uses bundled Playwright Chromium; **Linux** uses Playwright's official Docker image (Docker required)
 
 > **Jellyfin 10.11 users:** use [FinTV v0.0.1.3](https://github.com/binarygeek119/FinTV/releases/tag/v0.0.1.3) instead. v0.0.2.0+ targets Jellyfin 12 on .NET 10.
 
@@ -106,17 +106,19 @@ Compatible with community packs such as [Open-Commercial-Pack](https://github.co
 
 Create a channel with content type **Weather**, set latitude/longitude, enable it, and rebuild playout. FinTV captures a headless WeatherStar page with Playwright and streams it as MPEG-TS.
 
-**First tune:** FinTV downloads Chromium automatically into `{JellyfinData}/plugins/configurations/FinTV/playwright-browsers`.
+**Windows:** FinTV downloads Chromium automatically into `{JellyfinData}/plugins/configurations/FinTV/playwright-browsers` on the first weather tune.
 
-**Headless Linux server:** install Playwright OS dependencies once (requires sudo):
+**Linux:** FinTV starts Chromium from Playwright's official Docker image (`mcr.microsoft.com/playwright:v1.49.0-jammy`) and connects over CDP. Requirements:
 
-```bash
-sudo bash scripts/install-playwright-linux-deps.sh
-```
+- Docker installed and running
+- The Jellyfin service user can run `docker` (for example, add the user to the `docker` group)
+- Port **9222** available on localhost for the FinTV browser container
 
-Or: `sudo npx playwright install-deps chromium`
+On first weather tune, FinTV creates a container named `fintv-playwright-chromium`. If your WeatherStar URL uses `localhost` or `127.0.0.1`, FinTV rewrites it to `host.docker.internal` so the container can reach WeatherStar on the Jellyfin host.
 
-**Windows/Linux service account:** install FinTV from the plugin catalog, restart Jellyfin, then tune a weather channel once so Chromium can download under the Jellyfin data folder.
+If Jellyfin itself runs in Docker, mount the Docker socket into the Jellyfin container (for example `-v /var/run/docker.sock:/var/run/docker.sock`) so FinTV can start the Playwright browser container.
+
+**Install FinTV, restart Jellyfin, then tune a weather channel once** to initialize the browser runtime on either platform.
 
 ### Music channels
 
