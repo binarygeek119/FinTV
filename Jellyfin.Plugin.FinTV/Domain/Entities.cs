@@ -1,5 +1,7 @@
 namespace Jellyfin.Plugin.FinTV.Domain;
 
+using System.Text.Json.Serialization;
+
 public class Channel
 {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -40,16 +42,21 @@ public class Channel
 
     public string? FilterJson { get; set; }
 
+    [JsonIgnore]
     public LogoSet? LogoSet { get; set; }
 
+    [JsonIgnore]
     public CommercialPreset? CommercialPreset { get; set; }
 
     public Lineup? DefaultLineup { get; set; }
 
+    [JsonIgnore]
     public ICollection<LineupOverride> Overrides { get; set; } = new List<LineupOverride>();
 
+    [JsonIgnore]
     public ICollection<PlayoutItem> PlayoutItems { get; set; } = new List<PlayoutItem>();
 
+    [JsonIgnore]
     public ICollection<PlayoutHistoryEntry> History { get; set; } = new List<PlayoutHistoryEntry>();
 }
 
@@ -80,6 +87,7 @@ public class LogoSetEntry
 
     public string? DisplayName { get; set; }
 
+    [JsonIgnore]
     public LogoSet? LogoSet { get; set; }
 }
 
@@ -93,6 +101,7 @@ public class Lineup
 
     public bool IsDefault { get; set; } = true;
 
+    [JsonIgnore]
     public Channel? Channel { get; set; }
 
     public ICollection<LineupSlot> Slots { get; set; } = new List<LineupSlot>();
@@ -112,6 +121,7 @@ public class LineupOverride
 
     public string Name { get; set; } = string.Empty;
 
+    [JsonIgnore]
     public Channel? Channel { get; set; }
 
     public ICollection<LineupSlot> Slots { get; set; } = new List<LineupSlot>();
@@ -127,8 +137,10 @@ public class LineupSlot
 
     public int SlotIndex { get; set; }
 
+    [JsonIgnore]
     public Lineup? Lineup { get; set; }
 
+    [JsonIgnore]
     public LineupOverride? LineupOverride { get; set; }
 
     public ICollection<SlotCandidate> Candidates { get; set; } = new List<SlotCandidate>();
@@ -152,6 +164,7 @@ public class SlotCandidate
 
     public int SortOrder { get; set; }
 
+    [JsonIgnore]
     public LineupSlot? LineupSlot { get; set; }
 }
 
@@ -181,6 +194,7 @@ public class PlayoutItem
 
     public VirtualContentSource VirtualSource { get; set; }
 
+    [JsonIgnore]
     public Channel? Channel { get; set; }
 }
 
@@ -196,6 +210,7 @@ public class PlayoutHistoryEntry
 
     public string Title { get; set; } = string.Empty;
 
+    [JsonIgnore]
     public Channel? Channel { get; set; }
 }
 
@@ -215,6 +230,7 @@ public class CommercialPreset
 
     public int MidRollCount { get; set; } = 1;
 
+    [JsonIgnore]
     public ICollection<Channel> Channels { get; set; } = new List<Channel>();
 }
 
@@ -247,5 +263,6 @@ public class CommercialChapter
 
     public bool DetectedByBlackframe { get; set; }
 
+    [JsonIgnore]
     public Commercial? Commercial { get; set; }
 }

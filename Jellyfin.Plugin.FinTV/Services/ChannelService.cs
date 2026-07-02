@@ -17,8 +17,6 @@ public class ChannelService
     public async Task<List<Channel>> GetAllAsync(CancellationToken cancellationToken = default)
     {
         return await _db.Channels
-            .Include(c => c.DefaultLineup)
-            .Include(c => c.LogoSet)
             .OrderBy(c => c.Number)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
