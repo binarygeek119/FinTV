@@ -4,6 +4,21 @@
     const CONTENT_TYPES = ['TV Show', 'Movie', 'Music Video', 'Music', 'Weather'];
     const CANDIDATE_KINDS = ['Jellyfin Item', 'Collection', 'Filter Query'];
     const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const CONTENT_TYPE_VALUES = {
+        0: 0, 1: 1, 2: 2, 3: 3, 4: 4,
+        tvShow: 0, movie: 1, musicVideo: 2, music: 3, weather: 4,
+        TvShow: 0, Movie: 1, MusicVideo: 2, Music: 3, Weather: 4
+    };
+    const ASPECT_RATIO_VALUES = {
+        0: 0, 1: 1,
+        sixteenNine: 0, fourThree: 1,
+        SixteenNine: 0, FourThree: 1
+    };
+    const BUG_PLACEMENT_VALUES = {
+        0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5,
+        auto: 0, topLeft: 1, topRight: 2, bottomLeft: 3, bottomRight: 4, none: 5,
+        Auto: 0, TopLeft: 1, TopRight: 2, BottomLeft: 3, BottomRight: 4, None: 5
+    };
 
     let channels = [];
     let logoSets = [];
@@ -94,6 +109,77 @@
 
     function normalizeApiResponse(value) {
         return value == null ? value : normalizeApiValue(value);
+    }
+
+    function resolveEnumValue(map, value, fallback) {
+        if (value == null || value === '') {
+            return fallback;
+        }
+
+        if (typeof value === 'number' && Number.isFinite(value)) {
+            return value;
+        }
+
+        const key = String(value);
+        if (Object.prototype.hasOwnProperty.call(map, key)) {
+            return map[key];
+        }
+
+        const parsed = parseInt(key, 10);
+        return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
+    function contentTypeLabel(value) {
+        const index = resolveEnumValue(CONTENT_TYPE_VALUES, value, null);
+        return index == null ? String(value) : (CONTENT_TYPES[index] || String(value));
+    }
+
+    function normalizeChannel(channel) {
+        if (!channel) {
+            return channel;
+        }
+
+        channel.contentType = resolveEnumValue(CONTENT_TYPE_VALUES, channel.contentType, 0);
+        channel.aspectRatio = resolveEnumValue(ASPECT_RATIO_VALUES, channel.aspectRatio, 0);
+        channel.bugPlacement = resolveEnumValue(BUG_PLACEMENT_VALUES, channel.bugPlacement, 0);
+        return channel;
+    }
+
+    function setSelectEnum(selectId, map, value, fallback) {
+        const select = $(selectId);
+        if (!select) {
+            return fallback;
+        }
+
+        const resolved = resolveEnumValue(map, value, fallback);
+        select.value = String(resolved);
+        return resolved;
+    }
+
+    function readSelectEnum(selectId, map, fallback) {
+        const select = $(selectId);
+        if (!select) {
+            return fallback;
+        }
+
+        return resolveEnumValue(map, select.value, fallback);
+    }
+
+    function buildChannelPayload(form) {
+        return {
+            Number: form.number,
+            Name: form.name,
+            ContentType: form.contentType,
+            AspectRatio: form.aspectRatio,
+            ScanlinesEnabled: form.scanlinesEnabled,
+            BugPlacement: form.bugPlacement,
+            AudioLanguage: form.audioLanguage,
+            LogoSetId: form.logoSetId,
+            LogoFileName: form.logoFileName,
+            WeatherLatitude: form.weatherLatitude,
+            WeatherLongitude: form.weatherLongitude,
+            Enabled: form.enabled
+        };
     }
 
     function api(path, options) {
@@ -371,7 +457,7 @@
         return channels.filter((c) =>
             c.name.toLowerCase().includes(q) ||
             formatChannelNumber(c.number).includes(q) ||
-            CONTENT_TYPES[c.contentType].toLowerCase().includes(q));
+            contentTypeLabel(c.contentType).toLowerCase().includes(q));
     }
 
     function renderChannelsList() {
@@ -387,7 +473,7 @@
             <tbody>${list.map((c) => `<tr data-id="${c.id}" class="${editingChannelId === c.id ? 'selected' : ''}">
                 <td><strong>${formatChannelNumber(c.number)}</strong></td>
                 <td>${escapeHtml(c.name)}</td>
-                <td><span class="badge badge-type">${CONTENT_TYPES[c.contentType] || c.contentType}</span></td>
+                <td><span class="badge badge-type">${contentTypeLabel(c.contentType)}</span></td>
                 <td><span class="badge ${c.enabled ? 'badge-on' : 'badge-off'}">${c.enabled ? 'On' : 'Off'}</span></td>
                 <td class="row-actions">
                     <button type="button" data-edit="${c.id}">Edit</button>
@@ -413,7 +499,7 @@
     }
 
     async function loadChannels() {
-        channels = await api('/channels');
+        channels = (await api('/channels') || []).map(normalizeChannel);
         renderChannelsList();
 
         const select = $('lineup-channel-select');
@@ -502,10 +588,10 @@
 
         $('ch-number').value = c.number;
         $('ch-name').value = c.name;
-        $('ch-content-type').value = c.contentType;
-        $('ch-aspect').value = c.aspectRatio;
+        setSelectEnum('ch-content-type', CONTENT_TYPE_VALUES, c.contentType, 0);
+        setSelectEnum('ch-aspect', ASPECT_RATIO_VALUES, c.aspectRatio, 0);
         $('ch-scanlines').checked = c.scanlinesEnabled;
-        $('ch-bug').value = c.bugPlacement;
+        setSelectEnum('ch-bug', BUG_PLACEMENT_VALUES, c.bugPlacement, 0);
         $('ch-audio').value = c.audioLanguage || 'eng';
         $('ch-lat').value = formatWeatherCoordinate(c.weatherLatitude);
         $('ch-lon').value = formatWeatherCoordinate(c.weatherLongitude);
@@ -537,22 +623,22 @@
         $('ch-lat').value = weatherCoords.lat == null ? '' : String(weatherCoords.lat);
         $('ch-lon').value = weatherCoords.lon == null ? '' : String(weatherCoords.lon);
 
-        const payload = {
+        const payload = buildChannelPayload({
             number,
             name: $('ch-name').value.trim(),
-            contentType: parseInt($('ch-content-type').value, 10),
-            aspectRatio: parseInt($('ch-aspect').value, 10),
+            contentType: readSelectEnum('ch-content-type', CONTENT_TYPE_VALUES, 0),
+            aspectRatio: readSelectEnum('ch-aspect', ASPECT_RATIO_VALUES, 0),
             scanlinesEnabled: $('ch-scanlines').checked,
-            bugPlacement: parseInt($('ch-bug').value, 10),
+            bugPlacement: readSelectEnum('ch-bug', BUG_PLACEMENT_VALUES, 0),
             audioLanguage: $('ch-audio').value.trim(),
             logoSetId: $('ch-logo-set').value ? $('ch-logo-set').value : null,
             logoFileName: $('ch-logo-file').value || null,
             weatherLatitude: weatherCoords.lat,
             weatherLongitude: weatherCoords.lon,
             enabled: $('ch-enabled').checked
-        };
+        });
 
-        if (!payload.name) {
+        if (!payload.Name) {
             toast('Channel name is required.', 'error');
             return;
         }

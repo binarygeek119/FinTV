@@ -76,8 +76,11 @@ public class ChannelService
         existing.AspectRatio = updated.AspectRatio;
         existing.ScanlinesEnabled = updated.ScanlinesEnabled;
         existing.LogoSetId = updated.LogoSetId;
-        existing.ChannelLogoPath = updated.ChannelLogoPath;
         existing.LogoFileName = updated.LogoFileName;
+        if (!string.IsNullOrWhiteSpace(updated.ChannelLogoPath))
+        {
+            existing.ChannelLogoPath = updated.ChannelLogoPath;
+        }
         existing.BugPlacement = updated.BugPlacement;
         existing.CommercialPresetId = updated.CommercialPresetId;
         existing.AudioLanguage = updated.AudioLanguage;

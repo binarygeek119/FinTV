@@ -73,15 +73,15 @@ public class ChannelsController : ControllerBase
     /// <summary>
     /// Creates a new channel with a default 48-slot lineup.
     /// </summary>
-    /// <param name="channel">Channel definition.</param>
+    /// <param name="request">Channel definition.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The created channel.</returns>
     [HttpPost]
-    public async Task<ActionResult<Channel>> Create([FromBody] Channel channel, CancellationToken cancellationToken)
+    public async Task<ActionResult<Channel>> Create([FromBody] ChannelUpsertRequest request, CancellationToken cancellationToken)
     {
         try
         {
-            var created = await _channels.CreateAsync(channel, cancellationToken);
+            var created = await _channels.CreateAsync(request.ToChannel(), cancellationToken);
             return CreatedAtAction(nameof(Get), new { id = created.Id }, created);
         }
         catch (ArgumentException ex)
@@ -94,15 +94,15 @@ public class ChannelsController : ControllerBase
     /// Updates an existing channel.
     /// </summary>
     /// <param name="id">Channel identifier.</param>
-    /// <param name="channel">Updated channel values.</param>
+    /// <param name="request">Updated channel values.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The updated channel.</returns>
     [HttpPut("{id:guid}")]
-    public async Task<ActionResult<Channel>> Update(Guid id, [FromBody] Channel channel, CancellationToken cancellationToken)
+    public async Task<ActionResult<Channel>> Update(Guid id, [FromBody] ChannelUpsertRequest request, CancellationToken cancellationToken)
     {
         try
         {
-            var updated = await _channels.UpdateAsync(id, channel, cancellationToken);
+            var updated = await _channels.UpdateAsync(id, request.ToChannel(), cancellationToken);
             return updated is null ? NotFound() : updated;
         }
         catch (ArgumentException ex)

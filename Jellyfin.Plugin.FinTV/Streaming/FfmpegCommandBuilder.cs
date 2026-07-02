@@ -44,7 +44,7 @@ public class FfmpegCommandBuilder
         string? albumArtPath)
     {
         var (width, height) = GetResolution(channel);
-        var logo = ResolveBugPath(channel);
+        var logo = channel.BugPlacement == BugPlacementMode.None ? null : ResolveBugPath(channel);
         var filter = BuildMusicFilter(width, height, logo, albumArtPath, channel.ScanlinesEnabled && channel.AspectRatio == AspectRatioMode.FourThree);
 
         var args = new List<string>
@@ -184,7 +184,9 @@ public class FfmpegCommandBuilder
             filters.Add("format=yuv420p,geq=lum='if(not(mod(Y,4)),lum(X,Y)*0.82,lum(X,Y))'");
         }
 
-        var bug = ResolveBugPath(channel) ?? bugImagePath;
+        var bug = channel.BugPlacement == BugPlacementMode.None
+            ? null
+            : (ResolveBugPath(channel) ?? bugImagePath);
         if (!string.IsNullOrWhiteSpace(bug) && File.Exists(bug))
         {
             var overlay = GetBugOverlay(channel, width, height);
@@ -232,6 +234,7 @@ public class FfmpegCommandBuilder
             BugPlacementMode.TopRight => $"W-w-{margin}:{margin}",
             BugPlacementMode.BottomLeft => $"{margin}:H-h-{margin}",
             BugPlacementMode.BottomRight => $"W-w-{margin}:H-h-{margin}",
+            BugPlacementMode.None => string.Empty,
             BugPlacementMode.Auto => $"W-w-{margin}:{margin}",
             _ => $"W-w-{margin}:{margin}"
         };
