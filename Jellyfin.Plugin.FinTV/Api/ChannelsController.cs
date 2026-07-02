@@ -57,6 +57,16 @@ public class ChannelsController : ControllerBase
     }
 
     /// <summary>
+    /// Gets channels that currently have one or more active IPTV viewers.
+    /// </summary>
+    /// <returns>Active stream counts keyed by channel.</returns>
+    [HttpGet("on-air")]
+    public ActionResult<object> GetOnAir()
+    {
+        return Ok(new { channels = _stream.GetActiveStreams() });
+    }
+
+    /// <summary>
     /// Gets the playout item currently airing on a channel, if any.
     /// </summary>
     /// <param name="id">Channel identifier.</param>

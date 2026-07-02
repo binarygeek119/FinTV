@@ -28,6 +28,8 @@
     let lineupOverrides = [];
     let itemTitleCache = {};
     let channelFilter = '';
+    let channelOnAir = {};
+    let onAirRefreshTimer = null;
     let channelPresets = [];
     let presetNumberingMode = 0;
     let configPage = null;
@@ -451,6 +453,52 @@
         }
     }
 
+    function channelViewerCount(channelId) {
+        return channelOnAir[String(channelId).toLowerCase()] || 0;
+    }
+
+    function renderChannelStatusBadges(channel) {
+        const viewers = channelViewerCount(channel.id);
+        const onAir = viewers > 0;
+        const viewerLabel = viewers > 1 ? ` (${viewers})` : '';
+        return `<div class="status-badges">
+            <span class="badge ${channel.enabled ? 'badge-on' : 'badge-off'}">${channel.enabled ? 'On' : 'Off'}</span>
+            <span class="badge ${onAir ? 'badge-air' : 'badge-idle'}">${onAir ? `On Air${viewerLabel}` : 'Off Air'}</span>
+        </div>`;
+    }
+
+    async function loadChannelOnAirStatus() {
+        try {
+            const data = await api('/channels/on-air');
+            const next = {};
+            (data?.channels || []).forEach((entry) => {
+                const id = entry.channelId || entry.id;
+                const count = Number(entry.viewerCount ?? entry.viewers ?? 0);
+                if (id && count > 0) {
+                    next[String(id).toLowerCase()] = count;
+                }
+            });
+            channelOnAir = next;
+        } catch {
+            channelOnAir = {};
+        }
+
+        renderChannelsList();
+    }
+
+    function startOnAirPolling() {
+        stopOnAirPolling();
+        loadChannelOnAirStatus();
+        onAirRefreshTimer = setInterval(loadChannelOnAirStatus, 10000);
+    }
+
+    function stopOnAirPolling() {
+        if (onAirRefreshTimer) {
+            clearInterval(onAirRefreshTimer);
+            onAirRefreshTimer = null;
+        }
+    }
+
     function filteredChannels() {
         if (!channelFilter) return channels;
         const q = channelFilter.toLowerCase();
@@ -474,7 +522,7 @@
                 <td><strong>${formatChannelNumber(c.number)}</strong></td>
                 <td>${escapeHtml(c.name)}</td>
                 <td><span class="badge badge-type">${contentTypeLabel(c.contentType)}</span></td>
-                <td><span class="badge ${c.enabled ? 'badge-on' : 'badge-off'}">${c.enabled ? 'On' : 'Off'}</span></td>
+                <td>${renderChannelStatusBadges(c)}</td>
                 <td class="row-actions">
                     <button type="button" data-edit="${c.id}">Edit</button>
                     <button type="button" data-lineup="${c.id}">Lineup</button>
@@ -1227,6 +1275,8 @@
 
         qa('.fintv-tabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
         qa('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + name));
+        stopOnAirPolling();
+        if (name === 'channels') startOnAirPolling();
         if (name === 'setup') loadSetup();
         if (name === 'weather') loadWeather();
         if (name === 'presets') loadPresets();
@@ -1354,6 +1404,7 @@
         }
 
         bindEvents();
+        startOnAirPolling();
         return refresh().catch((err) => toast(err.message, 'error'));
     }
 

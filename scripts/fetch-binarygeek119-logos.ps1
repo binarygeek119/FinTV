@@ -13,7 +13,8 @@ $LogoPrefixes = @(
     "Movies/",
     "Shows/",
     "Music Videos Channels/",
-    "The Holiday Channel/"
+    "The Holiday Channel/",
+    "Weather/"
 )
 $ImageSuffixes = @(".png", ".jpg", ".jpeg", ".webp")
 

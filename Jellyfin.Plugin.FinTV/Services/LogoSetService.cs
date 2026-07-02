@@ -23,7 +23,8 @@ public class LogoSetService
         "Movies/",
         "Shows/",
         "Music Videos Channels/",
-        "The Holiday Channel/"
+        "The Holiday Channel/",
+        "Weather/"
     ];
 
     private readonly FinTvDbContext _db;

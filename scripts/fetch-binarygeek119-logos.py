@@ -19,6 +19,7 @@ LOGO_PREFIXES = (
     "Shows/",
     "Music Videos Channels/",
     "The Holiday Channel/",
+    "Weather/",
 )
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 

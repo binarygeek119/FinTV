@@ -52,8 +52,9 @@ public class IptvController : ControllerBase
     [HttpGet("epg.xml")]
     public async Task<IActionResult> GetEpg(CancellationToken cancellationToken)
     {
-        var content = await _epg.GenerateXmlTvAsync(cancellationToken);
-        return Content(content, "application/xml");
+        var baseUrl = EpgService.GetPublicBaseUrl(Request, _appHost);
+        var content = await _epg.GenerateXmlTvBytesAsync(baseUrl, cancellationToken);
+        return File(content, "application/xml; charset=utf-8");
     }
 
     /// <summary>

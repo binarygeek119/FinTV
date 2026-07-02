@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using System.Xml;
 using System.Xml.Linq;
 using Jellyfin.Plugin.FinTV.Data;
 using Jellyfin.Plugin.FinTV.Domain;
@@ -11,6 +12,8 @@ namespace Jellyfin.Plugin.FinTV.Services;
 
 public class EpgService
 {
+    private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
+
     private readonly FinTvDbContext _db;
 
     public EpgService(FinTvDbContext db)
@@ -18,7 +21,18 @@ public class EpgService
         _db = db;
     }
 
-    public async Task<string> GenerateXmlTvAsync(CancellationToken cancellationToken = default)
+    public async Task<byte[]> GenerateXmlTvBytesAsync(string baseUrl, CancellationToken cancellationToken = default)
+    {
+        var doc = await BuildXmlTvDocumentAsync(baseUrl, cancellationToken);
+        return SerializeUtf8(doc);
+    }
+
+    public async Task<string> GenerateXmlTvAsync(string baseUrl, CancellationToken cancellationToken = default)
+    {
+        return Utf8NoBom.GetString(await GenerateXmlTvBytesAsync(baseUrl, cancellationToken));
+    }
+
+    private async Task<XDocument> BuildXmlTvDocumentAsync(string baseUrl, CancellationToken cancellationToken)
     {
         var channels = await _db.Channels.Where(c => c.Enabled).OrderBy(c => c.Number).AsNoTracking().ToListAsync(cancellationToken);
         var start = DateTime.UtcNow.AddHours(-3);
@@ -35,7 +49,7 @@ public class EpgService
                 "channel",
                 new XAttribute("id", channel.Id.ToString("N")),
                 new XElement("display-name", channel.Name),
-                new XElement("icon", new XAttribute("src", GetLogoUrl(channel)))));
+                new XElement("icon", new XAttribute("src", GetLogoUrl(channel, baseUrl)))));
         }
 
         var items = await _db.PlayoutItems
@@ -53,14 +67,25 @@ public class EpgService
                 new XElement("title", item.Title)));
         }
 
-        var doc = new XDocument(new XDeclaration("1.0", "UTF-8", null), root);
-        var sb = new StringBuilder();
-        using (var writer = new StringWriter(sb))
+        return new XDocument(new XDeclaration("1.0", "UTF-8", null), root);
+    }
+
+    private static byte[] SerializeUtf8(XDocument doc)
+    {
+        var settings = new XmlWriterSettings
+        {
+            Encoding = Utf8NoBom,
+            Indent = true,
+            OmitXmlDeclaration = false
+        };
+
+        using var ms = new MemoryStream();
+        using (var writer = XmlWriter.Create(ms, settings))
         {
             doc.Save(writer);
         }
 
-        return sb.ToString();
+        return ms.ToArray();
     }
 
     public async Task<string> GenerateM3uAsync(string baseUrl, CancellationToken cancellationToken = default)

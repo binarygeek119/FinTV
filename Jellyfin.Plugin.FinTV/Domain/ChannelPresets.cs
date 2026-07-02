@@ -34,7 +34,7 @@ public static class ChannelPresets
         Preset(120, 1.2m, "Retro TV", ChannelContentType.TvShow, "TV Shows", "1910's - 1960's TV shows and movies", "fintv-retro", "Shows/Retro_TV.png"),
         Preset(121, 1.3m, "[Open Swim]", ChannelContentType.TvShow, "TV Shows", "Cartoons and kid shows and movies", "fintv-open-swim", "Shows/[open_swim].png"),
         Preset(122, 1.4m, "Flip Television", ChannelContentType.TvShow, "TV Shows", "Reality TV", "fintv-reality", "Shows/Flip_Television.png"),
-        Preset(123, 1.5m, "BinaryGeek119 News & Weather", ChannelContentType.Weather, "TV Shows", "News and weather channel", "fintv-news-weather", logoPath: null, useLogo: false, weather: true),
+        Preset(123, 1.5m, "BinaryGeek119 News & Weather", ChannelContentType.Weather, "TV Shows", "News and weather channel", "fintv-news-weather", "Weather/WeatherStar4000.png", weather: true),
         Preset(124, 1.6m, "Past Tense News", ChannelContentType.TvShow, "TV Shows", "Retro news", "fintv-past-tense-news", logoPath: null, useLogo: false),
         Preset(125, 1.7m, "Cops And Robbers", ChannelContentType.TvShow, "TV Shows", "Crime themed channel", "fintv-crime", "Shows/cops_and_robbers.png"),
         Preset(128, 1.8m, "Slappy", ChannelContentType.TvShow, "TV Shows", "Comedy themed channel", "fintv-comedy", "Shows/Slappy.png"),
