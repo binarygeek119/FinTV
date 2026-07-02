@@ -92,15 +92,21 @@
   </Target>
 
   <Target Name="CopyAllPlaywrightDriversToPublish" AfterTargets="Publish">
-    <ItemGroup Condition="Exists('$(OutputPath).playwright')">
-      <PlaywrightPublish Include="$(OutputPath).playwright\**\*.*" />
-      <PlaywrightPublish Include="$(OutputPath)playwright.ps1" Condition="Exists('$(OutputPath)playwright.ps1')" />
-      <PlaywrightPublish Include="$(OutputPath)playwright.sh" Condition="Exists('$(OutputPath)playwright.sh')" />
+    <ItemGroup Condition="Exists('$(PlaywrightBrowsersRoot)')">
+      <AllPlaywrightDriverPublishFiles Include="$(PlaywrightBrowsersRoot)\**\*.*" />
     </ItemGroup>
-    <Copy SourceFiles="@(PlaywrightPublish)"
-          DestinationFiles="@(PlaywrightPublish->'$(PublishDir)%(RecursiveDir)%(Filename)%(Extension)')"
+    <Copy SourceFiles="@(AllPlaywrightDriverPublishFiles)"
+          DestinationFiles="@(AllPlaywrightDriverPublishFiles->'$(PublishDir).playwright\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true"
-          Condition="'$(PublishDir)' != '' AND '@(PlaywrightPublish)' != ''" />
+          Condition="'$(PublishDir)' != '' AND '@(AllPlaywrightDriverPublishFiles)' != ''" />
+    <Copy SourceFiles="$(PlaywrightPackageRoot)buildTransitive\playwright.ps1"
+          DestinationFiles="$(PublishDir)playwright.ps1"
+          SkipUnchangedFiles="true"
+          Condition="'$(PublishDir)' != '' AND Exists('$(PlaywrightPackageRoot)buildTransitive\playwright.ps1')" />
+    <Copy SourceFiles="$(PlaywrightPackageRoot)buildTransitive\playwright.sh"
+          DestinationFiles="$(PublishDir)playwright.sh"
+          SkipUnchangedFiles="true"
+          Condition="'$(PublishDir)' != '' AND Exists('$(PlaywrightPackageRoot)buildTransitive\playwright.sh')" />
   </Target>
 
 </Project>

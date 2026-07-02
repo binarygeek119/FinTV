@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BUILD_YAML = ROOT / "build.yaml"
 LOGOS_DIR = ROOT / "Jellyfin.Plugin.FinTV" / "Assets" / "logos" / "binarygeek119"
 CSPROJ = ROOT / "Jellyfin.Plugin.FinTV" / "Jellyfin.Plugin.FinTV.csproj"
+PLAYWRIGHT_NODE_PLATFORMS = ("win32_x64", "linux-x64")
 
 
 def read_playwright_version() -> str:
@@ -44,8 +45,27 @@ def playwright_artifacts(version: str) -> list[str]:
     browsers_root = package_root / ".playwright"
     artifacts: list[str] = []
 
-    if browsers_root.exists():
-        for path in sorted(browsers_root.rglob("*")):
+    if not browsers_root.exists():
+        return artifacts
+
+    license_path = browsers_root / "node" / "LICENSE"
+    if license_path.exists():
+        rel = license_path.relative_to(package_root).as_posix()
+        artifacts.append(f'  - "{rel}"')
+
+    for platform in PLAYWRIGHT_NODE_PLATFORMS:
+        platform_root = browsers_root / "node" / platform
+        if not platform_root.exists():
+            continue
+
+        for path in sorted(platform_root.rglob("*")):
+            if path.is_file():
+                rel = path.relative_to(package_root).as_posix()
+                artifacts.append(f'  - "{rel}"')
+
+    package_root_files = browsers_root / "package"
+    if package_root_files.exists():
+        for path in sorted(package_root_files.rglob("*")):
             if path.is_file():
                 rel = path.relative_to(package_root).as_posix()
                 artifacts.append(f'  - "{rel}"')

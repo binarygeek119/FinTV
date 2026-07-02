@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.31"
+version: "0.0.2.32"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -78,6 +78,7 @@ artifacts:
   - "logos/binarygeek119/Weather/WeatherStar3000.png"
   - "logos/binarygeek119/Weather/WeatherStar4000.png"
 changelog: |-
+  - Fix plugin publish failing when Playwright driver artifacts were missing from the zip
   - Use Playwright official Docker image for weather channels on Linux
   - Keep local Playwright Chromium on Windows for weather channels
   - Bundle cross-platform Playwright drivers in the plugin zip
