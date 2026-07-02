@@ -156,10 +156,11 @@
                     <button id="btn-save-lineup" class="raised button-submit emby-button">Save Lineup</button>
                     <button id="btn-rebuild-lineup" class="emby-button">Rebuild Playout</button>
                 </div>
-                <p class="hint">Click a 30-minute slot to edit candidates. Slots with overrides show a badge on preview.</p>
+                <p id="lineup-hint" class="hint">Click a 30-minute slot to edit candidates. Slots with overrides show a badge on preview.</p>
+                <div id="lineup-weather-banner" class="preview-banner hidden"></div>
                 <div id="lineup-preview-banner" class="preview-banner hidden"></div>
                 <div id="lineup-grid" class="lineup-grid"></div>
-                <div class="card section-card">
+                <div id="lineup-overrides-section" class="card section-card">
                     <div class="section-header">
                         <h3>Override Lineups</h3>
                         <button id="btn-add-override" class="emby-button">Add Override</button>

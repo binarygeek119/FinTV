@@ -40,9 +40,21 @@ public class LineupsController : ControllerBase
     [HttpGet("{channelId:guid}")]
     public async Task<ActionResult<object>> GetDefault(Guid channelId, CancellationToken cancellationToken)
     {
+        var channel = await _channels.GetByIdAsync(channelId, cancellationToken);
+        if (channel is null)
+        {
+            return NotFound();
+        }
+
         var lineup = await _lineups.GetDefaultLineupAsync(channelId, cancellationToken);
         var overrides = await _lineups.GetOverridesAsync(channelId, cancellationToken);
-        return Ok(new { lineup, overrides });
+        return Ok(new
+        {
+            lineup,
+            overrides,
+            contentType = channel.ContentType,
+            isWeather = channel.ContentType == ChannelContentType.Weather
+        });
     }
 
     /// <summary>
@@ -116,6 +128,30 @@ public class LineupsController : ControllerBase
         }
 
         var date = request.Date ?? DateOnly.FromDateTime(DateTime.Now);
+        if (channel.ContentType == ChannelContentType.Weather)
+        {
+            return Ok(new
+            {
+                date,
+                isWeather = true,
+                title = "Local Weather",
+                description = "Live WeatherStar feed streaming 24/7. Lineup slots are not used for weather channels.",
+                slots = Enumerable.Range(0, 48).Select(slotIndex => new
+                {
+                    slotIndex,
+                    candidateCount = 1,
+                    candidates = new[]
+                    {
+                        new
+                        {
+                            title = "Local Weather (live 24/7)",
+                            kind = "weather"
+                        }
+                    }
+                })
+            });
+        }
+
         var slots = await _lineups.ResolveSlotsForDateAsync(channelId, date, cancellationToken);
         return Ok(new
         {

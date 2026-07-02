@@ -12,12 +12,18 @@ public class ChannelPresetService
     private readonly FinTvDbContext _db;
     private readonly ChannelService _channels;
     private readonly LogoSetService _logoSets;
+    private readonly LineupGeneratorService _lineupGenerator;
 
-    public ChannelPresetService(FinTvDbContext db, ChannelService channels, LogoSetService logoSets)
+    public ChannelPresetService(
+        FinTvDbContext db,
+        ChannelService channels,
+        LogoSetService logoSets,
+        LineupGeneratorService lineupGenerator)
     {
         _db = db;
         _channels = channels;
         _logoSets = logoSets;
+        _lineupGenerator = lineupGenerator;
     }
 
     /// <summary>
@@ -116,6 +122,11 @@ public class ChannelPresetService
                 channel.Enabled = true;
                 ApplyLogo(channel, preset, logoSet);
                 ApplyWeatherDefaults(channel, preset);
+                if (channel.ContentType == ChannelContentType.Weather)
+                {
+                    await BuildWeatherPlayoutAsync(channel, cancellationToken);
+                }
+
                 result.Updated.Add(new ChannelPresetActionResult
                 {
                     Id = preset.Id,
@@ -140,6 +151,11 @@ public class ChannelPresetService
             ApplyWeatherDefaults(newChannel, preset);
 
             var created = await _channels.CreateAsync(newChannel, cancellationToken);
+            if (created.ContentType == ChannelContentType.Weather)
+            {
+                await BuildWeatherPlayoutAsync(created, cancellationToken);
+            }
+
             existingNumbers.Add(new { Number = created.Number, Id = created.Id });
             result.Created.Add(new ChannelPresetActionResult
             {
@@ -197,6 +213,14 @@ public class ChannelPresetService
 
         channel.WeatherLatitude ??= 41.60574;
         channel.WeatherLongitude ??= -93.55002;
+    }
+
+    private async Task BuildWeatherPlayoutAsync(Channel channel, CancellationToken cancellationToken)
+    {
+        var days = Plugin.Instance?.Configuration.PlayoutDaysToBuild ?? 3;
+        var start = DateTime.UtcNow.Date;
+        var end = start.AddDays(days);
+        await _lineupGenerator.BuildPlayoutAsync(channel, start, end, cancellationToken);
     }
 
     private static int CreateSeed(decimal number)

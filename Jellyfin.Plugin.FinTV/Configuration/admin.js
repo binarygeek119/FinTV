@@ -26,6 +26,7 @@
     let editingChannelId = null;
     let lineupSlots = [];
     let lineupOverrides = [];
+    let lineupIsWeather = false;
     let itemTitleCache = {};
     let channelFilter = '';
     let channelOnAir = {};
@@ -751,16 +752,85 @@
         if (!selectedChannelId) return;
 
         const data = await api('/lineups/' + selectedChannelId);
+        lineupIsWeather = !!(data.isWeather || getLineupChannel()?.contentType === CONTENT_TYPE_VALUES.Weather);
         lineupSlots = (data.lineup && data.lineup.slots) || [];
         lineupOverrides = data.overrides || [];
         if (lineupSlots.length === 0) {
             lineupSlots = Array.from({ length: 48 }, (_, i) => ({ slotIndex: i, candidates: [] }));
         }
 
+        updateLineupToolbarState();
+
+        if (lineupIsWeather) {
+            renderWeatherLineupGrid();
+            renderOverrideList();
+            $('lineup-preview-banner').classList.add('hidden');
+            await previewLineup(true);
+            return;
+        }
+
         await collectItemIdsFromSlots(lineupSlots);
         renderLineupGrid();
         renderOverrideList();
         $('lineup-preview-banner').classList.add('hidden');
+    }
+
+    function getLineupChannel() {
+        return channels.find((c) => c.id === selectedChannelId);
+    }
+
+    function updateLineupToolbarState() {
+        const hint = $('lineup-hint');
+        const saveBtn = $('btn-save-lineup');
+        const addOverrideBtn = $('btn-add-override');
+        const overridesSection = $('lineup-overrides-section');
+        const weatherBanner = $('lineup-weather-banner');
+        const channel = getLineupChannel();
+
+        if (lineupIsWeather) {
+            const lat = channel?.weatherLatitude;
+            const lon = channel?.weatherLongitude;
+            const coords = lat != null && lon != null
+                ? `${Number(lat).toFixed(5)}, ${Number(lon).toFixed(5)}`
+                : 'default coordinates';
+
+            if (hint) {
+                hint.textContent = 'Weather channels stream live local weather 24/7. The lineup grid below shows the guide schedule; slots are filled automatically with Local Weather.';
+            }
+
+            if (weatherBanner) {
+                weatherBanner.classList.remove('hidden');
+                weatherBanner.textContent = `Weather channel · Live WeatherStar capture · Coordinates: ${coords}. Edit latitude/longitude on the Channels tab. Configure the WeatherStar URL on the Weather tab.`;
+            }
+
+            saveBtn?.classList.add('hidden');
+            addOverrideBtn?.classList.add('hidden');
+            overridesSection?.classList.add('hidden');
+            return;
+        }
+
+        if (hint) {
+            hint.textContent = 'Click a 30-minute slot to edit candidates. Slots with overrides show a badge on preview.';
+        }
+
+        weatherBanner?.classList.add('hidden');
+        saveBtn?.classList.remove('hidden');
+        addOverrideBtn?.classList.remove('hidden');
+        overridesSection?.classList.remove('hidden');
+    }
+
+    function renderWeatherLineupGrid() {
+        const grid = $('lineup-grid');
+        grid.innerHTML = lineupSlots.sort((a, b) => a.slotIndex - b.slotIndex).map((s) =>
+            `<div class="slot-card has-items weather-slot" data-slot="${s.slotIndex}">
+                <div class="time">${slotTime(s.slotIndex)}</div>
+                <div class="summary">Local Weather</div>
+                <div class="count">Live 24/7</div>
+            </div>`).join('');
+
+        grid.querySelectorAll('.slot-card').forEach((card) => {
+            card.onclick = () => toast('Weather channels use a live 24/7 feed. Edit coordinates on the Channels tab.', 'info');
+        });
     }
 
     function renderLineupGrid() {
@@ -808,6 +878,11 @@
     }
 
     function openSlotEditor(index) {
+        if (lineupIsWeather) {
+            toast('Weather channels use a live 24/7 feed and do not use lineup candidates.', 'info');
+            return;
+        }
+
         const slot = lineupSlots.find((s) => s.slotIndex === index) || { slotIndex: index, candidates: [] };
         slot.candidates = slot.candidates || [];
         const channel = channels.find((c) => c.id === selectedChannelId);
@@ -958,18 +1033,27 @@
         }
     }
 
-    async function previewLineup() {
+    async function previewLineup(silent) {
         const dateVal = $('lineup-preview-date').value || todayIsoDate();
         try {
             const data = await api('/lineups/' + selectedChannelId + '/preview', {
                 method: 'POST',
                 body: JSON.stringify({ date: dateVal })
             });
+
+            if (data.isWeather) {
+                $('lineup-preview-banner').classList.remove('hidden');
+                $('lineup-preview-banner').textContent = `Preview for ${data.date}: 48/48 slots — ${data.title || 'Local Weather'} (live 24/7).`;
+                return;
+            }
+
             const filled = (data.slots || []).filter((s) => s.candidateCount > 0).length;
             $('lineup-preview-banner').classList.remove('hidden');
             $('lineup-preview-banner').textContent = `Preview for ${data.date}: ${filled}/48 slots have candidates.`;
         } catch (err) {
-            toast(err.message, 'error');
+            if (!silent) {
+                toast(err.message, 'error');
+            }
         }
     }
 

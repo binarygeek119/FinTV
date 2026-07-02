@@ -106,6 +106,9 @@ table.data-table tbody tr.selected { background: rgba(59, 130, 246, .16); }
 .slot-card { background: var(--fintv-surface); border: 1px solid var(--fintv-border); border-radius: 8px; padding: .55rem .65rem; min-height: 96px; cursor: pointer; transition: border-color .12s, transform .12s; }
 .slot-card:hover { border-color: var(--fintv-accent); transform: translateY(-1px); }
 .slot-card.has-items { border-color: rgba(34, 197, 94, .45); }
+.slot-card.weather-slot { cursor: default; }
+.slot-card.weather-slot:hover { transform: none; }
+.slot-card.weather-slot .summary { color: #d1fae5; }
 .slot-card.empty { opacity: .75; }
 .slot-card .time { font-size: .78rem; color: #93c5fd; margin-bottom: .35rem; font-weight: 600; }
 .slot-card .summary { font-size: .82rem; color: var(--fintv-muted); line-height: 1.35; }
@@ -146,6 +149,7 @@ code { background: var(--fintv-surface-2); padding: .2rem .45rem; border-radius:
 .toast { background: var(--fintv-surface); border: 1px solid var(--fintv-border); border-left: 4px solid var(--fintv-accent); border-radius: 8px; padding: .65rem .85rem; box-shadow: 0 8px 24px rgba(0,0,0,.35); animation: toast-in .2s ease; }
 .toast.success { border-left-color: var(--fintv-success); }
 .toast.error { border-left-color: var(--fintv-danger); }
+.toast.info { border-left-color: #60a5fa; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
 
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 9000; display: flex; align-items: center; justify-content: center; padding: 1rem; }
