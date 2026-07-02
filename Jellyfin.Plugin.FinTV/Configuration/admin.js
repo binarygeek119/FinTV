@@ -75,6 +75,27 @@
         throw new Error((err && err.message) || 'Request failed');
     }
 
+    function normalizeApiValue(value) {
+        if (Array.isArray(value)) {
+            return value.map(normalizeApiValue);
+        }
+
+        if (!value || typeof value !== 'object') {
+            return value;
+        }
+
+        const normalized = {};
+        Object.keys(value).forEach((key) => {
+            const camelKey = key.length ? key.charAt(0).toLowerCase() + key.slice(1) : key;
+            normalized[camelKey] = normalizeApiValue(value[key]);
+        });
+        return normalized;
+    }
+
+    function normalizeApiResponse(value) {
+        return value == null ? value : normalizeApiValue(value);
+    }
+
     function api(path, options) {
         options = options || {};
         const url = resolveUrl('FinTV/api' + (path.startsWith('/') ? path : '/' + path));
@@ -98,7 +119,9 @@
                 ajaxOptions.data = body;
             }
 
-            return ApiClient.ajax(ajaxOptions).catch(readApiFailure);
+            return ApiClient.ajax(ajaxOptions)
+                .then(normalizeApiResponse)
+                .catch(readApiFailure);
         }
 
         const fetchOptions = {
@@ -125,7 +148,7 @@
             }
 
             const text = await res.text();
-            return text ? JSON.parse(text) : null;
+            return normalizeApiResponse(text ? JSON.parse(text) : null);
         });
     }
 
