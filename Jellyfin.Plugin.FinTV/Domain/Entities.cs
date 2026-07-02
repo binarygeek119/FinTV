@@ -48,6 +48,7 @@ public class Channel
     [JsonIgnore]
     public CommercialPreset? CommercialPreset { get; set; }
 
+    [JsonIgnore]
     public Lineup? DefaultLineup { get; set; }
 
     [JsonIgnore]
