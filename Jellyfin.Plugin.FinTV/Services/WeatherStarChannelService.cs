@@ -18,15 +18,18 @@ public class WeatherStarChannelService
     private readonly ILogger<WeatherStarChannelService> _logger;
     private readonly FfmpegCommandBuilder _ffmpegBuilder;
     private readonly IMediaEncoder _mediaEncoder;
+    private readonly PlaywrightRuntimeService _playwrightRuntime;
 
     public WeatherStarChannelService(
         ILogger<WeatherStarChannelService> logger,
         FfmpegCommandBuilder ffmpegBuilder,
-        IMediaEncoder mediaEncoder)
+        IMediaEncoder mediaEncoder,
+        PlaywrightRuntimeService playwrightRuntime)
     {
         _logger = logger;
         _ffmpegBuilder = ffmpegBuilder;
         _mediaEncoder = mediaEncoder;
+        _playwrightRuntime = playwrightRuntime;
     }
 
     public async Task StreamAsync(Domain.Channel channel, Stream output, CancellationToken cancellationToken)
@@ -40,8 +43,8 @@ public class WeatherStarChannelService
 
         try
         {
-            using var playwright = await Playwright.CreateAsync();
-            await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions { Headless = true });
+            using var playwright = await _playwrightRuntime.CreateAsync(cancellationToken);
+            await using var browser = await playwright.Chromium.LaunchAsync(_playwrightRuntime.CreateLaunchOptions());
             await using var context = await browser.NewContextAsync(new BrowserNewContextOptions
             {
                 ViewportSize = new ViewportSize { Width = width, Height = height }

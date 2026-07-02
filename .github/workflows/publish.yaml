@@ -38,6 +38,9 @@ jobs:
       - name: Fetch bundled Binarygeek119 logos
         run: python3 scripts/fetch-binarygeek119-logos.py Jellyfin.Plugin.FinTV/Assets/logos/binarygeek119
 
+      - name: Restore NuGet packages
+        run: dotnet restore Jellyfin.Plugin.FinTV/Jellyfin.Plugin.FinTV.csproj
+
       - name: Update build.yaml logo artifacts
         run: python3 scripts/update-build-artifacts.py
 

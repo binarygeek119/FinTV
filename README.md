@@ -20,7 +20,7 @@ Inspired by [ErsatzTV/legacy](https://github.com/ErsatzTV/legacy) scheduling con
 
 - Jellyfin **12.0+** (including 12.0 RC builds)
 - FFmpeg (bundled with Jellyfin)
-- For WeatherStar channel: Playwright Chromium (installed on first use)
+- For WeatherStar channel: Playwright Chromium (auto-installed on first weather tune; Linux may need OS deps — see below)
 
 > **Jellyfin 10.11 users:** use [FinTV v0.0.1.3](https://github.com/binarygeek119/FinTV/releases/tag/v0.0.1.3) instead. v0.0.2.0+ targets Jellyfin 12 on .NET 10.
 
@@ -104,7 +104,19 @@ Compatible with community packs such as [Open-Commercial-Pack](https://github.co
 
 ### Weather channel
 
-Create a channel with content type **Weather**, set latitude/longitude, enable it, and rebuild playout. Uses [weatherstar4k](https://github.com/thornjad/weatherstar4k) styling via embedded weather display.
+Create a channel with content type **Weather**, set latitude/longitude, enable it, and rebuild playout. FinTV captures a headless WeatherStar page with Playwright and streams it as MPEG-TS.
+
+**First tune:** FinTV downloads Chromium automatically into `{JellyfinData}/plugins/configurations/FinTV/playwright-browsers`.
+
+**Headless Linux server:** install Playwright OS dependencies once (requires sudo):
+
+```bash
+sudo bash scripts/install-playwright-linux-deps.sh
+```
+
+Or: `sudo npx playwright install-deps chromium`
+
+**Windows/Linux service account:** install FinTV from the plugin catalog, restart Jellyfin, then tune a weather channel once so Chromium can download under the Jellyfin data folder.
 
 ### Music channels
 
