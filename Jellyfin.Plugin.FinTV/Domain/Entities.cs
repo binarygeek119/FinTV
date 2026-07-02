@@ -175,6 +175,8 @@ public class PlayoutItem
 
     public Guid ChannelId { get; set; }
 
+    public Guid? CommercialId { get; set; }
+
     public Guid? JellyfinItemId { get; set; }
 
     public DateTime Start { get; set; }
@@ -239,11 +241,47 @@ public class Commercial
 {
     public Guid Id { get; set; } = Guid.NewGuid();
 
+    public CommercialSource Source { get; set; } = CommercialSource.Jellyfin;
+
     public Guid JellyfinItemId { get; set; }
+
+    public string? YouTubeUrl { get; set; }
+
+    public string? YouTubeVideoId { get; set; }
+
+    public string? CommercialBrainzVideoSbid { get; set; }
 
     public string Title { get; set; } = string.Empty;
 
     public TimeSpan Duration { get; set; }
+
+    public string? Brand { get; set; }
+
+    public int? Year { get; set; }
+
+    public int? Decade { get; set; }
+
+    public string? Network { get; set; }
+
+    public string? ChannelName { get; set; }
+
+    public int? AgeLimit { get; set; }
+
+    public string? TagsJson { get; set; }
+
+    public bool IsBanned { get; set; }
+
+    public bool IsAdultRated { get; set; }
+
+    public bool IsLateNight { get; set; }
+
+    public bool IsSpoof { get; set; }
+
+    public bool IsFake { get; set; }
+
+    public bool IsReal { get; set; }
+
+    public bool IsAiEnhanced { get; set; }
 
     public DateTime? LastScannedAt { get; set; }
 

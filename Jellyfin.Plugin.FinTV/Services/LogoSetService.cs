@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Jellyfin.Plugin.FinTV.Data;
 using Jellyfin.Plugin.FinTV.Domain;
@@ -124,6 +125,7 @@ public class LogoSetService
         await ScanLocalLogoFolderAsync(set, storagePath, cancellationToken);
         set.LastSyncedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(cancellationToken);
+        await RepairChannelLogosAsync(set, cancellationToken);
         return set;
     }
 
@@ -196,12 +198,6 @@ public class LogoSetService
         _logger.LogInformation("Indexed {Count} logos for set {Set}", files.Count, set.Name);
     }
 
-    public string? ResolveLogoPath(LogoSet set, string relativePath)
-    {
-        var path = Path.Combine(set.StoragePath, relativePath.Replace('/', Path.DirectorySeparatorChar));
-        return File.Exists(path) ? path : null;
-    }
-
     public LogoSetEntry? FindEntry(LogoSet set, string? relativePath, string? channelName = null)
     {
         if (!string.IsNullOrWhiteSpace(relativePath))
@@ -244,7 +240,8 @@ public class LogoSetService
 
     public void ApplyLogoToChannel(Channel channel, LogoSet logoSet, string? relativePath, string channelName)
     {
-        var entry = FindEntry(logoSet, relativePath, channelName);
+        var entry = FindEntry(logoSet, relativePath, channelName)
+            ?? FindEntryByName(logoSet, channelName);
         if (entry is null)
         {
             return;
@@ -254,6 +251,359 @@ public class LogoSetService
         channel.LogoFileName = entry.FileName;
         channel.ChannelLogoPath = ResolveLogoPath(logoSet, entry.RelativePath);
         channel.BugPlacement = BugPlacementMode.Auto;
+    }
+
+    public bool TryBindChannelLogo(Channel channel, LogoSet logoSet)
+    {
+        LogoSetEntry? entry = null;
+        if (!string.IsNullOrWhiteSpace(channel.LogoFileName))
+        {
+            entry = logoSet.Entries.FirstOrDefault(e =>
+                e.FileName.Equals(channel.LogoFileName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        entry ??= FindEntry(logoSet, null, channel.Name);
+        if (entry is null)
+        {
+            return false;
+        }
+
+        channel.LogoSetId = logoSet.Id;
+        channel.LogoFileName = entry.FileName;
+        channel.ChannelLogoPath = ResolveLogoPath(logoSet, entry.RelativePath);
+        return !string.IsNullOrWhiteSpace(channel.ChannelLogoPath);
+    }
+
+    public async Task<RepairChannelLogosResult> RepairChannelLogosAsync(
+        LogoSet? logoSet = null,
+        CancellationToken cancellationToken = default)
+    {
+        logoSet ??= await EnsureBinarygeek119SetAsync(cancellationToken);
+        logoSet = await _db.LogoSets
+            .Include(s => s.Entries)
+            .FirstOrDefaultAsync(s => s.Id == logoSet.Id, cancellationToken)
+            ?? logoSet;
+
+        var channels = await _db.Channels.ToListAsync(cancellationToken);
+        var result = new RepairChannelLogosResult { TotalChannels = channels.Count };
+
+        foreach (var channel in channels)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var preset = FindPresetForChannel(channel);
+            var hadLogo = channel.LogoSetId.HasValue && !string.IsNullOrWhiteSpace(channel.LogoFileName);
+
+            if (preset is not null && preset.UseBinarygeek119Logo)
+            {
+                ApplyLogoToChannel(channel, logoSet, preset.LogoRelativePath, preset.Name);
+            }
+            else if (!hadLogo)
+            {
+                TryBindChannelLogo(channel, logoSet);
+            }
+
+            if (channel.LogoSetId.HasValue && string.IsNullOrWhiteSpace(channel.ChannelLogoPath))
+            {
+                TryBindChannelLogo(channel, logoSet);
+            }
+
+            var hasLogo = channel.LogoSetId.HasValue && !string.IsNullOrWhiteSpace(channel.LogoFileName);
+            if (hasLogo && !hadLogo)
+            {
+                result.Repaired.Add(channel.Name);
+            }
+            else if (!hasLogo)
+            {
+                result.Missing.Add(channel.Name);
+            }
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+        return result;
+    }
+
+    internal static ChannelPresetDefinition? FindPresetForChannel(Channel channel)
+    {
+        var byLegacy = ChannelPresets.All.FirstOrDefault(p => p.LegacyNumber == channel.Number);
+        if (byLegacy is not null)
+        {
+            return byLegacy;
+        }
+
+        var bySubchannel = ChannelPresets.All.FirstOrDefault(p => p.SubchannelNumber == channel.Number);
+        if (bySubchannel is not null)
+        {
+            return bySubchannel;
+        }
+
+        var normalizedName = NormalizeLogoName(channel.Name);
+        if (string.IsNullOrWhiteSpace(normalizedName))
+        {
+            return null;
+        }
+
+        var exactName = ChannelPresets.All.FirstOrDefault(p => NormalizeLogoName(p.Name) == normalizedName);
+        if (exactName is not null)
+        {
+            return exactName;
+        }
+
+        if (channel.ContentType == ChannelContentType.Weather)
+        {
+            return ChannelPresets.All.FirstOrDefault(p => p.IsWeatherChannel);
+        }
+
+        if (normalizedName.Contains("newsweather", StringComparison.Ordinal)
+            || normalizedName.Contains("newandweather", StringComparison.Ordinal))
+        {
+            return ChannelPresets.All.FirstOrDefault(p => p.Id == "fintv-weatherstar4000")
+                ?? ChannelPresets.All.FirstOrDefault(p => p.Id == "fintv-news");
+        }
+
+        return ChannelPresets.All.FirstOrDefault(p =>
+            normalizedName.Contains(NormalizeLogoName(p.Name), StringComparison.Ordinal)
+            || NormalizeLogoName(p.Name).Contains(normalizedName, StringComparison.Ordinal));
+    }
+
+    public static bool IsCustomSet(LogoSet set)
+        => string.Equals(set.SourceUrl, "custom", StringComparison.OrdinalIgnoreCase);
+
+    public async Task<LogoSet?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        return await _db.LogoSets
+            .Include(s => s.Entries)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.Id == id, cancellationToken);
+    }
+
+    public async Task<LogoSet> CreateCustomSetAsync(string name, CancellationToken cancellationToken = default)
+    {
+        var trimmed = name.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            throw new InvalidOperationException("Logo set name is required.");
+        }
+
+        if (await _db.LogoSets.AnyAsync(s => s.Name == trimmed, cancellationToken))
+        {
+            throw new InvalidOperationException($"A logo set named \"{trimmed}\" already exists.");
+        }
+
+        var plugin = Plugin.Instance ?? throw new InvalidOperationException("Plugin not initialized.");
+        Directory.CreateDirectory(plugin.LogosFolder);
+
+        var folderName = SanitizeFolderName(trimmed);
+        if (string.IsNullOrWhiteSpace(folderName))
+        {
+            folderName = Guid.NewGuid().ToString("N")[..8];
+        }
+
+        var storagePath = Path.Combine(plugin.LogosFolder, "custom", folderName);
+        var suffix = 1;
+        while (Directory.Exists(storagePath) || await _db.LogoSets.AnyAsync(s => s.StoragePath == storagePath, cancellationToken))
+        {
+            storagePath = Path.Combine(plugin.LogosFolder, "custom", $"{folderName}-{suffix++}");
+        }
+
+        Directory.CreateDirectory(storagePath);
+
+        var set = new LogoSet
+        {
+            Name = trimmed,
+            SourceUrl = "custom",
+            StoragePath = storagePath,
+            LastSyncedAt = DateTime.UtcNow
+        };
+
+        _db.LogoSets.Add(set);
+        await _db.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Created custom logo set {Name} at {Path}", trimmed, storagePath);
+        return set;
+    }
+
+    public async Task<LogoSetEntry> UploadCustomLogoAsync(
+        Guid setId,
+        Stream content,
+        string originalFileName,
+        string displayName,
+        CancellationToken cancellationToken = default)
+    {
+        var set = await _db.LogoSets.Include(s => s.Entries).FirstOrDefaultAsync(s => s.Id == setId, cancellationToken)
+            ?? throw new InvalidOperationException("Logo set not found.");
+
+        if (!IsCustomSet(set))
+        {
+            throw new InvalidOperationException("Only custom logo sets support uploads.");
+        }
+
+        if (!IsImageFile(originalFileName))
+        {
+            throw new InvalidOperationException("Logo must be a PNG, JPG, JPEG, or WEBP image.");
+        }
+
+        var trimmedName = displayName.Trim();
+        if (string.IsNullOrWhiteSpace(trimmedName))
+        {
+            trimmedName = Path.GetFileNameWithoutExtension(originalFileName);
+        }
+
+        Directory.CreateDirectory(set.StoragePath);
+        var extension = Path.GetExtension(originalFileName);
+        if (string.IsNullOrWhiteSpace(extension))
+        {
+            extension = ".png";
+        }
+
+        var fileName = BuildUniqueFileName(set, trimmedName, extension);
+        var relativePath = fileName;
+        var destination = Path.Combine(set.StoragePath, fileName);
+
+        await using (var output = File.Create(destination))
+        {
+            await content.CopyToAsync(output, cancellationToken);
+        }
+
+        var entry = new LogoSetEntry
+        {
+            LogoSetId = set.Id,
+            FileName = fileName,
+            RelativePath = relativePath,
+            DisplayName = trimmedName
+        };
+
+        set.Entries.Add(entry);
+        _db.LogoSetEntries.Add(entry);
+        set.LastSyncedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(cancellationToken);
+        return entry;
+    }
+
+    public async Task<LogoSetEntry> UpdateCustomLogoAsync(
+        Guid setId,
+        Guid entryId,
+        string displayName,
+        CancellationToken cancellationToken = default)
+    {
+        var set = await _db.LogoSets.FirstOrDefaultAsync(s => s.Id == setId, cancellationToken)
+            ?? throw new InvalidOperationException("Logo set not found.");
+
+        if (!IsCustomSet(set))
+        {
+            throw new InvalidOperationException("Only custom logo sets can be edited.");
+        }
+
+        var entry = await _db.LogoSetEntries.FirstOrDefaultAsync(e => e.Id == entryId && e.LogoSetId == setId, cancellationToken)
+            ?? throw new InvalidOperationException("Logo not found.");
+
+        var trimmedName = displayName.Trim();
+        if (string.IsNullOrWhiteSpace(trimmedName))
+        {
+            throw new InvalidOperationException("Logo name is required.");
+        }
+
+        entry.DisplayName = trimmedName;
+        set.LastSyncedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(cancellationToken);
+        return entry;
+    }
+
+    public async Task DeleteCustomLogoAsync(Guid setId, Guid entryId, CancellationToken cancellationToken = default)
+    {
+        var set = await _db.LogoSets.FirstOrDefaultAsync(s => s.Id == setId, cancellationToken)
+            ?? throw new InvalidOperationException("Logo set not found.");
+
+        if (!IsCustomSet(set))
+        {
+            throw new InvalidOperationException("Only custom logo sets can be edited.");
+        }
+
+        var entry = await _db.LogoSetEntries.FirstOrDefaultAsync(e => e.Id == entryId && e.LogoSetId == setId, cancellationToken)
+            ?? throw new InvalidOperationException("Logo not found.");
+
+        var path = ResolveLogoPath(set, entry.RelativePath);
+        if (path is not null && File.Exists(path))
+        {
+            File.Delete(path);
+        }
+
+        _db.LogoSetEntries.Remove(entry);
+        set.LastSyncedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task DeleteCustomSetAsync(Guid setId, CancellationToken cancellationToken = default)
+    {
+        var set = await _db.LogoSets.Include(s => s.Entries).FirstOrDefaultAsync(s => s.Id == setId, cancellationToken)
+            ?? throw new InvalidOperationException("Logo set not found.");
+
+        if (!IsCustomSet(set))
+        {
+            throw new InvalidOperationException("Only custom logo sets can be deleted.");
+        }
+
+        var inUse = await _db.Channels.AnyAsync(c => c.LogoSetId == setId, cancellationToken);
+        if (inUse)
+        {
+            throw new InvalidOperationException("This logo set is assigned to one or more channels. Clear those assignments first.");
+        }
+
+        if (Directory.Exists(set.StoragePath))
+        {
+            Directory.Delete(set.StoragePath, true);
+        }
+
+        _db.LogoSetEntries.RemoveRange(set.Entries);
+        _db.LogoSets.Remove(set);
+        await _db.SaveChangesAsync(cancellationToken);
+    }
+
+    public string? ResolveLogoPath(LogoSet set, string relativePath)
+    {
+        var path = Path.Combine(set.StoragePath, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        return File.Exists(path) ? path : null;
+    }
+
+    private static string BuildUniqueFileName(LogoSet set, string displayName, string extension)
+    {
+        var baseName = SanitizeFileName(displayName);
+        if (string.IsNullOrWhiteSpace(baseName))
+        {
+            baseName = "logo";
+        }
+
+        var fileName = baseName + extension;
+        var counter = 1;
+        while (set.Entries.Any(entry => entry.FileName.Equals(fileName, StringComparison.OrdinalIgnoreCase))
+            || File.Exists(Path.Combine(set.StoragePath, fileName)))
+        {
+            fileName = $"{baseName}-{counter++}{extension}";
+        }
+
+        return fileName;
+    }
+
+    private static string SanitizeFolderName(string value)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var cleaned = new string(value
+            .Trim()
+            .Select(ch => invalid.Contains(ch) ? '-' : ch)
+            .ToArray())
+            .Trim('-', ' ');
+
+        return cleaned.Replace(" ", "-");
+    }
+
+    private static string SanitizeFileName(string value)
+    {
+        var invalid = Path.GetInvalidFileNameChars();
+        var cleaned = new string(value
+            .Trim()
+            .Select(ch => invalid.Contains(ch) ? '_' : ch)
+            .ToArray())
+            .Trim('_', ' ', '.');
+
+        return cleaned.Replace(" ", "_");
     }
 
     private async Task DownloadBinarygeek119SetFromGitHubAsync(string storagePath, CancellationToken cancellationToken)

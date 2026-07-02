@@ -66,6 +66,11 @@ public partial class BlackframeChapterTask : IScheduledTask
         foreach (var commercial in commercials)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (commercial.Source != CommercialSource.Jellyfin || commercial.JellyfinItemId == Guid.Empty)
+            {
+                continue;
+            }
+
             var item = libraryManager.GetItemById(commercial.JellyfinItemId);
             if (item is null)
             {

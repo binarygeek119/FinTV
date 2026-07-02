@@ -64,20 +64,22 @@ public class FinTvDbContext : DbContext
             entity.HasMany(e => e.Candidates).WithOne(e => e.LineupSlot).HasForeignKey(e => e.LineupSlotId).OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<Commercial>(entity =>
+        {
+            entity.HasIndex(e => e.JellyfinItemId);
+            entity.HasIndex(e => e.CommercialBrainzVideoSbid).IsUnique();
+            entity.HasMany(e => e.Chapters).WithOne(e => e.Commercial).HasForeignKey(e => e.CommercialId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<PlayoutItem>(entity =>
         {
             entity.HasIndex(e => new { e.ChannelId, e.Start, e.Finish });
+            entity.HasIndex(e => e.CommercialId);
         });
 
         modelBuilder.Entity<PlayoutHistoryEntry>(entity =>
         {
             entity.HasIndex(e => new { e.ChannelId, e.AiredAt });
-        });
-
-        modelBuilder.Entity<Commercial>(entity =>
-        {
-            entity.HasIndex(e => e.JellyfinItemId).IsUnique();
-            entity.HasMany(e => e.Chapters).WithOne(e => e.Commercial).HasForeignKey(e => e.CommercialId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<LogoSetEntry>(entity =>

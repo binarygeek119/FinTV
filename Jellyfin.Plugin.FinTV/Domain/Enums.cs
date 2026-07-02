@@ -60,6 +60,19 @@ public enum VirtualContentSource
     MusicArtSlide = 2
 }
 
+public enum CommercialSource
+{
+    Jellyfin = 0,
+    CommercialBrainz = 1
+}
+
+public enum CommercialPoolMode
+{
+    JellyfinOnly = 0,
+    CommercialBrainzOnly = 1,
+    Both = 2
+}
+
 public enum EbsBackgroundMusicSource
 {
     /// <summary>

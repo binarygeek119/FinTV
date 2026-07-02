@@ -38,6 +38,9 @@ jobs:
       - name: Fetch bundled Binarygeek119 logos
         run: python3 scripts/fetch-binarygeek119-logos.py Jellyfin.Plugin.FinTV/Assets/logos/binarygeek119
 
+      - name: Fetch bundled yt-dlp
+        run: python3 scripts/fetch-yt-dlp.py Jellyfin.Plugin.FinTV/Assets/tools/yt-dlp
+
       - name: Restore NuGet packages
         run: dotnet restore Jellyfin.Plugin.FinTV/Jellyfin.Plugin.FinTV.csproj
 

@@ -38,6 +38,57 @@ public class FfmpegCommandBuilder
         };
     }
 
+    public IReadOnlyList<string> BuildRemoteMediaCommand(
+        Channel channel,
+        string inputPath,
+        double startSeconds,
+        double durationSeconds,
+        string? bugImagePath)
+    {
+        var (width, height) = GetResolution(channel);
+        var vf = BuildVideoFilterChain(channel, width, height, bugImagePath);
+        var isRemoteInput = inputPath.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            || inputPath.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+
+        var args = new List<string>
+        {
+            "-hide_banner",
+            "-loglevel", "warning"
+        };
+
+        if (isRemoteInput)
+        {
+            args.AddRange(new[]
+            {
+                "-reconnect", "1",
+                "-reconnect_streamed", "1",
+                "-reconnect_delay_max", "5"
+            });
+        }
+
+        args.AddRange(new[]
+        {
+            "-ss", startSeconds.ToString("F3", CultureInfo.InvariantCulture),
+            "-t", durationSeconds.ToString("F3", CultureInfo.InvariantCulture),
+            "-i", inputPath,
+            "-vf", vf,
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-profile:v", "high",
+            "-level", "4.1",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-ac", "2",
+            "-ar", "48000",
+            "-f", "mpegts",
+            "-mpegts_flags", "+initial_discontinuity",
+            "pipe:1"
+        });
+
+        return args;
+    }
+
     public IReadOnlyList<string> BuildMusicCommand(
         Channel channel,
         string audioPath,

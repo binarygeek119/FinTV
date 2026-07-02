@@ -51,4 +51,6 @@ msbuild.wrn
 
 # Bundled logos fetched at build time
 Jellyfin.Plugin.FinTV/Assets/logos/
+# Bundled yt-dlp fetched at build time
+Jellyfin.Plugin.FinTV/Assets/tools/yt-dlp/
 release-artifact/

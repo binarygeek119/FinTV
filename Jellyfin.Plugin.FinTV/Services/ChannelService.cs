@@ -8,10 +8,12 @@ namespace Jellyfin.Plugin.FinTV.Services;
 public class ChannelService
 {
     private readonly FinTvDbContext _db;
+    private readonly LogoSetService _logoSets;
 
-    public ChannelService(FinTvDbContext db)
+    public ChannelService(FinTvDbContext db, LogoSetService logoSets)
     {
         _db = db;
+        _logoSets = logoSets;
     }
 
     public async Task<List<Channel>> GetAllAsync(CancellationToken cancellationToken = default)
@@ -57,6 +59,7 @@ public class ChannelService
         };
 
         _db.Channels.Add(channel);
+        await BindChannelLogoAsync(channel, cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
         return channel;
     }
@@ -81,6 +84,8 @@ public class ChannelService
         {
             existing.ChannelLogoPath = updated.ChannelLogoPath;
         }
+
+        await BindChannelLogoAsync(existing, cancellationToken);
         existing.BugPlacement = updated.BugPlacement;
         existing.CommercialPresetId = updated.CommercialPresetId;
         existing.AudioLanguage = updated.AudioLanguage;
@@ -144,5 +149,24 @@ public class ChannelService
         }
 
         return normalized;
+    }
+
+    private async Task BindChannelLogoAsync(Channel channel, CancellationToken cancellationToken)
+    {
+        if (!channel.LogoSetId.HasValue)
+        {
+            return;
+        }
+
+        var logoSet = await _db.LogoSets
+            .Include(s => s.Entries)
+            .FirstOrDefaultAsync(s => s.Id == channel.LogoSetId, cancellationToken);
+
+        if (logoSet is null)
+        {
+            return;
+        }
+
+        _logoSets.TryBindChannelLogo(channel, logoSet);
     }
 }

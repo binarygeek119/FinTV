@@ -32,6 +32,11 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddScoped<SmartSelectionService>();
         serviceCollection.AddScoped<LineupGeneratorService>();
         serviceCollection.AddScoped<CommercialService>();
+        serviceCollection.AddScoped<CommercialBrainzClient>();
+        serviceCollection.AddScoped<CommercialBrainzFilterService>();
+        serviceCollection.AddScoped<CommercialBrainzSyncService>();
+        serviceCollection.AddSingleton<YtDlpLocator>();
+        serviceCollection.AddScoped<YouTubeCommercialStreamService>();
         serviceCollection.AddScoped<EpgService>();
         serviceCollection.AddScoped<LogoSetService>();
         serviceCollection.AddScoped<JellyfinCatalogService>();

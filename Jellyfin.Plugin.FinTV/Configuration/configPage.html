@@ -129,7 +129,7 @@
                         <span>Channel numbering</span>
                         <select id="preset-numbering-mode" class="emby-select">
                             <option value="0">Legacy whole numbers (119, 120, 203…)</option>
-                            <option value="1">Subchannels (119.1–119.5, 124.1–124.3, 126.1–126.3, 203.1–203.4, 312.1–312.3)</option>
+                            <option value="1">Subchannels (119.1–119.6, 124.1–124.3, 126.1–126.3, 203.1–203.4, 312.1–312.3)</option>
                         </select>
                     </label>
                     <p class="hint" id="preset-numbering-help">Legacy mode uses the original Binarygeek119 dial positions. Subchannel mode uses legacy-major numbering such as 119.1, 124.2, and 203.4.</p>
@@ -171,19 +171,68 @@
             </section>
 
             <section id="tab-commercials" class="tab-panel">
-                <p>Tag commercial files in Jellyfin with <code>fintv-commercial</code>.</p>
+                <p>Tag commercial files in Jellyfin with <code>fintv-commercial</code>, or sync YouTube commercials from <a href="https://commercialbrainz.duckdns.org/" target="_blank" rel="noopener">CommercialBrainz</a>.</p>
                 <div class="toolbar">
-                    <button id="btn-sync-commercials" class="emby-button">Sync Commercial Library</button>
+                    <button id="btn-sync-commercials" class="emby-button">Sync Jellyfin Library</button>
                     <button id="btn-scan-blackframes" class="raised button-submit emby-button">Run Blackframe Scan</button>
+                </div>
+                <div class="card section-card">
+                    <h3>CommercialBrainz YouTube Pool</h3>
+                    <p class="hint">CommercialBrainz sync stores YouTube metadata only. At break time FinTV streams each spot directly into the channel (no local download). Windows and Linux builds bundle <code>yt-dlp</code>; a system install in <code>PATH</code> is used as fallback.</p>
+                    <div class="form-grid">
+                        <label class="field"><span>Enabled</span><input id="cb-enabled" type="checkbox" class="emby-checkbox"></label>
+                        <label class="field"><span>Base URL</span><input id="cb-base-url" type="url" class="emby-input" placeholder="https://commercialbrainz.duckdns.org"></label>
+                        <label class="field"><span>API token (optional)</span><input id="cb-api-token" type="password" class="emby-input" placeholder="Leave blank to keep saved token"></label>
+                        <label class="field"><span>Commercial pool</span>
+                            <select id="cb-pool-mode" class="emby-select">
+                                <option value="2">Jellyfin + CommercialBrainz</option>
+                                <option value="0">Jellyfin only</option>
+                                <option value="1">CommercialBrainz only</option>
+                            </select>
+                        </label>
+                        <label class="field"><span>Max sync results</span><input id="cb-max-sync" type="number" min="1" max="5000" class="emby-input" value="500"></label>
+                        <label class="field"><span>Min year</span><input id="cb-min-year" type="number" class="emby-input" placeholder="1980"></label>
+                        <label class="field"><span>Max year</span><input id="cb-max-year" type="number" class="emby-input" placeholder="1999"></label>
+                        <label class="field"><span>Decades (comma-separated)</span><input id="cb-decades" type="text" class="emby-input" placeholder="1980, 1990"></label>
+                        <label class="field"><span>Brands (comma-separated)</span><input id="cb-brands" type="text" class="emby-input" placeholder="McDonald's, Pepsi"></label>
+                        <label class="field"><span>Include tags</span><input id="cb-tags" type="text" class="emby-input" placeholder="fast food, holiday"></label>
+                        <label class="field"><span>Exclude tags</span><input id="cb-exclude-tags" type="text" class="emby-input" placeholder="banned"></label>
+                        <label class="field"><span>Genres / categories</span><input id="cb-genres" type="text" class="emby-input" placeholder="Comedy, Sports"></label>
+                        <label class="field"><span>Networks</span><input id="cb-networks" type="text" class="emby-input" placeholder="NBC, CBS"></label>
+                        <label class="field"><span>Target channels</span><input id="cb-channel-names" type="text" class="emby-input" placeholder="Nick at Nite, MTV"></label>
+                        <label class="field"><span>Min age limit</span><input id="cb-min-age" type="number" min="0" class="emby-input"></label>
+                        <label class="field"><span>Max age limit</span><input id="cb-max-age" type="number" min="0" class="emby-input"></label>
+                    </div>
+                    <div class="checkbox-grid">
+                        <label><input id="cb-allow-spoof" type="checkbox" class="emby-checkbox" checked> Allow spoof</label>
+                        <label><input id="cb-allow-fake" type="checkbox" class="emby-checkbox" checked> Allow fake</label>
+                        <label><input id="cb-allow-real" type="checkbox" class="emby-checkbox" checked> Allow real</label>
+                        <label><input id="cb-allow-ai" type="checkbox" class="emby-checkbox" checked> Allow AI-enhanced</label>
+                        <label><input id="cb-allow-latenight" type="checkbox" class="emby-checkbox" checked> Allow late night</label>
+                        <label><input id="cb-allow-adult" type="checkbox" class="emby-checkbox"> Allow adult-rated</label>
+                        <label><input id="cb-allow-banned" type="checkbox" class="emby-checkbox"> Allow banned</label>
+                    </div>
+                    <div class="actions">
+                        <button type="button" id="btn-save-brainz" class="raised button-submit emby-button">Save CommercialBrainz Filters</button>
+                        <button type="button" id="btn-preview-brainz" class="emby-button">Preview Matches</button>
+                        <button type="button" id="btn-sync-brainz" class="emby-button">Sync CommercialBrainz</button>
+                    </div>
+                    <div id="brainz-status" class="status-card"></div>
+                    <div id="brainz-preview" class="data-table-wrap"></div>
                 </div>
                 <div id="commercial-status" class="status-card"></div>
                 <div id="commercial-list" class="data-table-wrap"></div>
             </section>
 
             <section id="tab-logos" class="tab-panel">
-                <p>Import the <a href="https://github.com/binarygeek119/open-channel-logos/tree/fintv2" target="_blank" rel="noopener">Binarygeek119 Set (fintv2 branch)</a>.</p>
+                <p>Import the <a href="https://github.com/binarygeek119/open-channel-logos/tree/fintv2" target="_blank" rel="noopener">Binarygeek119 Set (fintv2 branch)</a>, or create your own custom logo set.</p>
                 <p class="hint">Channel bugs live under Shows, Movies, and Music Videos Channels. The <code>EBS/</code> folder is separate: those full-screen slates play when a channel has no scheduled media, with background music from your Jellyfin music libraries (configured in Live TV Setup).</p>
-                <button id="btn-sync-logos" class="emby-button">Import / Refresh Logo Set</button>
+                <div class="toolbar">
+                    <button id="btn-sync-logos" class="emby-button">Import / Refresh Binarygeek119 Set</button>
+                    <button id="btn-repair-logos" class="emby-button">Apply Logos to Channels</button>
+                    <button id="btn-create-logo-set" class="raised button-submit emby-button">Create Custom Set</button>
+                </div>
+                <div id="logo-repair-status" class="status-card hidden"></div>
                 <div id="logo-set-info"></div>
             </section>
 

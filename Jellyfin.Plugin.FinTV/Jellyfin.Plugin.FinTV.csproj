@@ -30,6 +30,7 @@
 
   <PropertyGroup>
     <SkipLogoFetch>false</SkipLogoFetch>
+    <SkipYtDlpFetch>false</SkipYtDlpFetch>
   </PropertyGroup>
 
   <ItemGroup>
@@ -41,6 +42,11 @@
   <Target Name="FetchBinarygeek119Logos" BeforeTargets="PrepareForBuild" Condition="'$(SkipLogoFetch)' != 'true'">
     <Exec Condition="'$(OS)' == 'Windows_NT'" Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)..\scripts\fetch-binarygeek119-logos.ps1&quot; -OutputDir &quot;$(MSBuildThisFileDirectory)Assets\logos\binarygeek119&quot;" />
     <Exec Condition="'$(OS)' != 'Windows_NT'" Command="python3 &quot;$(MSBuildThisFileDirectory)..\scripts\fetch-binarygeek119-logos.py&quot; &quot;$(MSBuildThisFileDirectory)Assets\logos\binarygeek119&quot;" />
+  </Target>
+
+  <Target Name="FetchYtDlp" BeforeTargets="PrepareForBuild" Condition="'$(SkipYtDlpFetch)' != 'true'">
+    <Exec Condition="'$(OS)' == 'Windows_NT'" Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)..\scripts\fetch-yt-dlp.ps1&quot; -OutputDir &quot;$(MSBuildThisFileDirectory)Assets\tools\yt-dlp&quot;" />
+    <Exec Condition="'$(OS)' != 'Windows_NT'" Command="python3 &quot;$(MSBuildThisFileDirectory)..\scripts\fetch-yt-dlp.py&quot; &quot;$(MSBuildThisFileDirectory)Assets\tools\yt-dlp&quot;" />
   </Target>
 
   <Target Name="AddBundledLogosToPublish" AfterTargets="ComputeFilesToPublish">
@@ -65,6 +71,30 @@
       <BundledLogoPublish Include="$(MSBuildThisFileDirectory)Assets\logos\binarygeek119\**\*.*" />
     </ItemGroup>
     <Copy SourceFiles="@(BundledLogoPublish)" DestinationFiles="@(BundledLogoPublish->'$(PublishDir)logos\binarygeek119\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="AddBundledYtDlpToPublish" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <BundledYtDlp Include="$(MSBuildThisFileDirectory)Assets\tools\yt-dlp\**\*" Condition="Exists('$(MSBuildThisFileDirectory)Assets\tools\yt-dlp')" />
+      <ResolvedFileToPublish Include="@(BundledYtDlp)">
+        <RelativePath>tools\yt-dlp\%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+
+  <Target Name="CopyBundledYtDlpToOutput" AfterTargets="Build" Condition="Exists('$(MSBuildThisFileDirectory)Assets\tools\yt-dlp')">
+    <ItemGroup>
+      <BundledYtDlpOutput Include="$(MSBuildThisFileDirectory)Assets\tools\yt-dlp\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(BundledYtDlpOutput)" DestinationFiles="@(BundledYtDlpOutput->'$(OutputPath)tools\yt-dlp\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyBundledYtDlpToPublishDir" AfterTargets="Publish" Condition="Exists('$(MSBuildThisFileDirectory)Assets\tools\yt-dlp')">
+    <ItemGroup>
+      <BundledYtDlpPublish Include="$(MSBuildThisFileDirectory)Assets\tools\yt-dlp\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(BundledYtDlpPublish)" DestinationFiles="@(BundledYtDlpPublish->'$(PublishDir)tools\yt-dlp\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
 
   <PropertyGroup>

@@ -76,19 +76,16 @@ public class ChannelPresetService
             .AsNoTracking()
             .Select(c => new { c.Number, c.Id })
             .ToListAsync(cancellationToken);
-        LogoSet? logoSet = null;
 
-        if (presets.Any(p => p.UseBinarygeek119Logo))
+        LogoSet? logoSet = null;
+        try
         {
-            try
-            {
-                logoSet = await _logoSets.EnsureBinarygeek119SetAsync(cancellationToken);
-            }
-            catch
-            {
-                logoSet = (await _logoSets.GetAllAsync(cancellationToken))
-                    .FirstOrDefault(s => s.Name == ChannelPresets.Binarygeek119LogoSetName);
-            }
+            logoSet = await _logoSets.EnsureBinarygeek119SetAsync(cancellationToken);
+        }
+        catch
+        {
+            logoSet = (await _logoSets.GetAllAsync(cancellationToken))
+                .FirstOrDefault(s => s.Name == ChannelPresets.Binarygeek119LogoSetName);
         }
 
         var result = new ApplyChannelPresetsResult();
@@ -169,6 +166,11 @@ public class ChannelPresetService
         if (result.Updated.Count > 0)
         {
             await _db.SaveChangesAsync(cancellationToken);
+        }
+
+        if (logoSet is not null)
+        {
+            await _logoSets.RepairChannelLogosAsync(logoSet, cancellationToken);
         }
 
         return result;

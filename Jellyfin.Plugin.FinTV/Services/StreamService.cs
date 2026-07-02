@@ -40,6 +40,7 @@ public class StreamService
         var catalog = scope.ServiceProvider.GetRequiredService<JellyfinCatalogService>();
         var weather = scope.ServiceProvider.GetRequiredService<WeatherStarChannelService>();
         var ebs = scope.ServiceProvider.GetRequiredService<EbsService>();
+        var youtubeCommercials = scope.ServiceProvider.GetRequiredService<YouTubeCommercialStreamService>();
 
         var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
         if (channel is null)
@@ -77,6 +78,10 @@ public class StreamService
                     if (current.IsVirtual && current.VirtualSource == VirtualContentSource.MusicArtSlide)
                     {
                         await StreamMusicItemAsync(channel, current, catalog, ffmpegPath, output, cancellationToken);
+                    }
+                    else if (current.CommercialId.HasValue)
+                    {
+                        await StreamCommercialItemAsync(channel, current, catalog, youtubeCommercials, ffmpegPath, output, cancellationToken);
                     }
                     else if (current.JellyfinItemId.HasValue)
                     {
@@ -216,6 +221,57 @@ public class StreamService
         var args = _ffmpeg.BuildMediaCommand(channel, inputPath, offset, duration, catalog.GetPrimaryImagePath(mediaItem));
 
         await RunFfmpegToStreamAsync(ffmpegPath, args, output, cancellationToken);
+    }
+
+    private async Task StreamCommercialItemAsync(
+        Channel channel,
+        PlayoutItem item,
+        JellyfinCatalogService catalog,
+        YouTubeCommercialStreamService youtubeCommercials,
+        string ffmpegPath,
+        Stream output,
+        CancellationToken cancellationToken)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
+        var commercial = await db.Commercials.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == item.CommercialId, cancellationToken);
+
+        if (commercial is null)
+        {
+            throw new InvalidOperationException($"Commercial {item.CommercialId} not found.");
+        }
+
+        if (commercial.Source == CommercialSource.Jellyfin)
+        {
+            var libraryManager = scope.ServiceProvider.GetRequiredService<ILibraryManager>();
+            var mediaItem = libraryManager.GetItemById(commercial.JellyfinItemId);
+            if (mediaItem is null)
+            {
+                throw new InvalidOperationException($"Media item {commercial.JellyfinItemId} not found.");
+            }
+
+            var inputPath = catalog.GetMediaPath(mediaItem);
+            if (string.IsNullOrWhiteSpace(inputPath) || !File.Exists(inputPath))
+            {
+                throw new FileNotFoundException($"Media path missing for {commercial.Title}.");
+            }
+
+            var offset = Math.Max(0, (DateTime.UtcNow - item.Start).TotalSeconds + item.InPoint.TotalSeconds);
+            var duration = Math.Max(1, (item.Finish - DateTime.UtcNow).TotalSeconds);
+            var args = _ffmpeg.BuildMediaCommand(channel, inputPath, offset, duration, catalog.GetPrimaryImagePath(mediaItem));
+            await RunFfmpegToStreamAsync(ffmpegPath, args, output, cancellationToken);
+            return;
+        }
+
+        await youtubeCommercials.StreamCommercialAsync(
+            channel,
+            commercial,
+            _ffmpeg,
+            ffmpegPath,
+            Math.Max(1, (item.Finish - DateTime.UtcNow).TotalSeconds),
+            output,
+            cancellationToken);
     }
 
     private async Task StreamMusicItemAsync(

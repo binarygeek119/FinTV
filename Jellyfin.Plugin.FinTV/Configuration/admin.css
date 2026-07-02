@@ -49,7 +49,9 @@ body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 0; b
 .section-header { display: flex; justify-content: space-between; align-items: center; gap: .75rem; margin-bottom: .5rem; }
 .section-header h3 { margin: 0; }
 
-.form-grid { display: grid; gap: .85rem; }
+.form-grid { display: grid; gap: .85rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.checkbox-grid { display: grid; gap: .45rem .85rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin: .85rem 0; }
+.checkbox-grid label { display: flex; align-items: center; gap: .45rem; font-size: .88rem; color: var(--fintv-muted); }
 .field { display: grid; gap: .35rem; }
 .field > span { font-size: .85rem; color: var(--fintv-muted); }
 .field-group { display: grid; gap: .85rem; padding: .75rem; border: 1px dashed var(--fintv-border); border-radius: 8px; }
@@ -152,8 +154,17 @@ code { background: var(--fintv-surface-2); padding: .2rem .45rem; border-radius:
 .toast.info { border-left-color: #60a5fa; }
 @keyframes toast-in { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
 
+.logo-upload-row { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(180px, 1.2fr) auto; gap: .65rem; align-items: end; margin-bottom: 1rem; }
+.logo-entry-row { display: grid; grid-template-columns: minmax(160px, 1fr) minmax(140px, 1fr) minmax(180px, 1.2fr) auto auto; gap: .65rem; align-items: end; padding: .65rem 0; border-bottom: 1px solid var(--fintv-border); }
+.logo-entry-row:last-child { border-bottom: 0; }
+.logo-entry-row label, .logo-upload-row label { display: grid; gap: .35rem; font-size: .82rem; color: var(--fintv-muted); }
+.logo-entry-actions { display: flex; gap: .35rem; flex-wrap: wrap; }
+@media (max-width: 760px) {
+    .logo-upload-row, .logo-entry-row { grid-template-columns: 1fr; }
+}
 .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 9000; display: flex; align-items: center; justify-content: center; padding: 1rem; }
 .modal { background: var(--fintv-surface); border: 1px solid var(--fintv-border); border-radius: 12px; width: min(720px, 100%); max-height: calc(100vh - 2rem); display: grid; grid-template-rows: auto 1fr auto; overflow: hidden; }
+.modal-wide { width: min(960px, 100%); }
 .modal-header { display: flex; justify-content: space-between; align-items: center; padding: .85rem 1rem; border-bottom: 1px solid var(--fintv-border); }
 .modal-header h3 { margin: 0; font-size: 1.05rem; }
 .modal-body { padding: 1rem; overflow: auto; }

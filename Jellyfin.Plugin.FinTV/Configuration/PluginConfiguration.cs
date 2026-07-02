@@ -43,6 +43,8 @@ public class PluginConfiguration : BasePluginConfiguration
     public string WeatherStarBaseUrl { get; set; } = "https://weather.jmthornton.net";
 
     public BlackframeTaskState BlackframeTaskState { get; set; } = new();
+
+    public CommercialBrainzSettings CommercialBrainz { get; set; } = new();
 }
 
 public class BlackframeTaskState

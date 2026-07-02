@@ -67,7 +67,10 @@ public class CommercialService
                 _db.PlayoutItems.Add(new PlayoutItem
                 {
                     ChannelId = channel.Id,
-                    JellyfinItemId = commercial.JellyfinItemId,
+                    CommercialId = commercial.Id,
+                    JellyfinItemId = commercial.Source == CommercialSource.Jellyfin && commercial.JellyfinItemId != Guid.Empty
+                        ? commercial.JellyfinItemId
+                        : null,
                     Start = cursor,
                     Finish = end,
                     Title = commercial.Title,
@@ -82,7 +85,18 @@ public class CommercialService
 
     public async Task<List<Commercial>> PickCommercialsAsync(int count, CancellationToken cancellationToken)
     {
-        var all = await _db.Commercials.AsNoTracking().ToListAsync(cancellationToken);
+        var config = Plugin.Instance?.Configuration;
+        var poolMode = config?.CommercialBrainz?.PoolMode ?? CommercialPoolMode.Both;
+
+        var query = _db.Commercials.AsNoTracking().AsQueryable();
+        query = poolMode switch
+        {
+            CommercialPoolMode.JellyfinOnly => query.Where(c => c.Source == CommercialSource.Jellyfin),
+            CommercialPoolMode.CommercialBrainzOnly => query.Where(c => c.Source == CommercialSource.CommercialBrainz),
+            _ => query
+        };
+
+        var all = await query.ToListAsync(cancellationToken);
         if (all.Count == 0)
         {
             return new List<Commercial>();
@@ -107,12 +121,16 @@ public class CommercialService
         var items = _libraryManager.GetItemsResult(query).Items;
         foreach (var item in items)
         {
-            var existing = await _db.Commercials.FirstOrDefaultAsync(c => c.JellyfinItemId == item.Id, cancellationToken);
+            var existing = await _db.Commercials
+                .FirstOrDefaultAsync(
+                    c => c.Source == CommercialSource.Jellyfin && c.JellyfinItemId == item.Id,
+                    cancellationToken);
             var duration = _catalog.GetRuntime(item);
             if (existing is null)
             {
                 _db.Commercials.Add(new Commercial
                 {
+                    Source = CommercialSource.Jellyfin,
                     JellyfinItemId = item.Id,
                     Title = item.Name,
                     Duration = duration

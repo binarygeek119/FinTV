@@ -241,6 +241,31 @@
         });
     }
 
+    async function apiForm(path, formData, method) {
+        const url = resolveUrl('FinTV/api' + (path.startsWith('/') ? path : '/' + path));
+        const fetchOptions = {
+            method: method || 'POST',
+            credentials: 'same-origin',
+            headers: {
+                accept: 'application/json'
+            },
+            body: formData
+        };
+
+        const res = await fetch(url, fetchOptions);
+        if (!res.ok) {
+            const text = await res.text();
+            throw new Error(parseErrorMessage(text || res.statusText));
+        }
+
+        if (res.status === 204) {
+            return null;
+        }
+
+        const text = await res.text();
+        return normalizeApiResponse(text ? JSON.parse(text) : null);
+    }
+
     function toast(message, type) {
         const el = document.createElement('div');
         el.className = 'toast' + (type ? ' ' + type : '');
@@ -1120,9 +1145,135 @@
         }
     }
 
+    function parseCommaList(value) {
+        return (value || '').split(',').map((part) => part.trim()).filter(Boolean);
+    }
+
+    function parseDecadeList(value) {
+        return parseCommaList(value)
+            .map((part) => parseInt(part, 10))
+            .filter((num) => Number.isFinite(num) && num >= 1900);
+    }
+
+    function readBrainzSettingsFromForm() {
+        return {
+            enabled: !!$('cb-enabled')?.checked,
+            baseUrl: $('cb-base-url')?.value?.trim() || '',
+            apiToken: $('cb-api-token')?.value?.trim() || '',
+            poolMode: parseInt($('cb-pool-mode')?.value, 10) || 2,
+            maxSyncResults: parseInt($('cb-max-sync')?.value, 10) || 500,
+            minYear: $('cb-min-year')?.value ? parseInt($('cb-min-year').value, 10) : null,
+            maxYear: $('cb-max-year')?.value ? parseInt($('cb-max-year').value, 10) : null,
+            decades: parseDecadeList($('cb-decades')?.value),
+            brands: parseCommaList($('cb-brands')?.value),
+            tags: parseCommaList($('cb-tags')?.value),
+            excludeTags: parseCommaList($('cb-exclude-tags')?.value),
+            genres: parseCommaList($('cb-genres')?.value),
+            networks: parseCommaList($('cb-networks')?.value),
+            channelNames: parseCommaList($('cb-channel-names')?.value),
+            minAgeLimit: $('cb-min-age')?.value ? parseInt($('cb-min-age').value, 10) : null,
+            maxAgeLimit: $('cb-max-age')?.value ? parseInt($('cb-max-age').value, 10) : null,
+            allowSpoof: !!$('cb-allow-spoof')?.checked,
+            allowFake: !!$('cb-allow-fake')?.checked,
+            allowReal: !!$('cb-allow-real')?.checked,
+            allowAiEnhanced: !!$('cb-allow-ai')?.checked,
+            allowLateNight: !!$('cb-allow-latenight')?.checked,
+            allowAdultRated: !!$('cb-allow-adult')?.checked,
+            allowBanned: !!$('cb-allow-banned')?.checked
+        };
+    }
+
+    function applyBrainzSettings(settings) {
+        if (!settings) return;
+        if ($('cb-enabled')) $('cb-enabled').checked = !!settings.enabled;
+        if ($('cb-base-url')) $('cb-base-url').value = settings.baseUrl || 'https://commercialbrainz.duckdns.org';
+        if ($('cb-api-token')) $('cb-api-token').value = '';
+        if ($('cb-pool-mode')) $('cb-pool-mode').value = String(settings.poolMode ?? 2);
+        if ($('cb-max-sync')) $('cb-max-sync').value = settings.maxSyncResults || 500;
+        if ($('cb-min-year')) $('cb-min-year').value = settings.minYear ?? '';
+        if ($('cb-max-year')) $('cb-max-year').value = settings.maxYear ?? '';
+        if ($('cb-decades')) $('cb-decades').value = (settings.decades || []).join(', ');
+        if ($('cb-brands')) $('cb-brands').value = (settings.brands || []).join(', ');
+        if ($('cb-tags')) $('cb-tags').value = (settings.tags || []).join(', ');
+        if ($('cb-exclude-tags')) $('cb-exclude-tags').value = (settings.excludeTags || []).join(', ');
+        if ($('cb-genres')) $('cb-genres').value = (settings.genres || []).join(', ');
+        if ($('cb-networks')) $('cb-networks').value = (settings.networks || []).join(', ');
+        if ($('cb-channel-names')) $('cb-channel-names').value = (settings.channelNames || []).join(', ');
+        if ($('cb-min-age')) $('cb-min-age').value = settings.minAgeLimit ?? '';
+        if ($('cb-max-age')) $('cb-max-age').value = settings.maxAgeLimit ?? '';
+        if ($('cb-allow-spoof')) $('cb-allow-spoof').checked = settings.allowSpoof !== false;
+        if ($('cb-allow-fake')) $('cb-allow-fake').checked = settings.allowFake !== false;
+        if ($('cb-allow-real')) $('cb-allow-real').checked = settings.allowReal !== false;
+        if ($('cb-allow-ai')) $('cb-allow-ai').checked = settings.allowAiEnhanced !== false;
+        if ($('cb-allow-latenight')) $('cb-allow-latenight').checked = settings.allowLateNight !== false;
+        if ($('cb-allow-adult')) $('cb-allow-adult').checked = !!settings.allowAdultRated;
+        if ($('cb-allow-banned')) $('cb-allow-banned').checked = !!settings.allowBanned;
+        renderBrainzStatus(settings.syncState, settings.hasApiToken);
+    }
+
+    function renderBrainzStatus(syncState, hasApiToken) {
+        const el = $('brainz-status');
+        if (!el) return;
+        const state = syncState || {};
+        el.textContent = [
+            `API token saved: ${hasApiToken ? 'yes' : 'no'}`,
+            `Sync running: ${state.isRunning ? 'yes' : 'no'}`,
+            `Last matched: ${state.lastMatchedCount ?? 0}`,
+            `Last fetched: ${state.lastFetchedCount ?? 0}`,
+            `Library count: ${state.libraryCount ?? 0}`,
+            state.lastCompletedAt ? `Last sync: ${state.lastCompletedAt}` : 'Last sync: never',
+            state.lastError ? `Last error: ${state.lastError}` : ''
+        ].filter(Boolean).join('\n');
+    }
+
+    function renderBrainzPreview(preview) {
+        const el = $('brainz-preview');
+        if (!el) return;
+        if (!preview) {
+            el.innerHTML = '';
+            return;
+        }
+        const samples = preview.samples || preview.Samples || [];
+        el.innerHTML = `<div class="preview-banner">${preview.matchedCount ?? preview.MatchedCount ?? 0} matches from ${preview.fetchedCount ?? preview.FetchedCount ?? 0} fetched videos</div>` +
+            (samples.length ? `<table class="data-table"><thead><tr><th>Title</th><th>Brand</th><th>Year</th><th>Network</th></tr></thead><tbody>${samples.map((item) => `<tr>
+                <td>${escapeHtml(item.title || item.Title || '')}</td>
+                <td>${escapeHtml(item.brand || item.Brand || '')}</td>
+                <td>${escapeHtml(String(item.year ?? item.Year ?? ''))}</td>
+                <td>${escapeHtml(item.network || item.Network || '')}</td>
+            </tr>`).join('')}</tbody></table>` : '<div class="empty-state">No preview samples.</div>');
+    }
+
+    async function loadBrainzSettings() {
+        const settings = await api('/commercials/brainz/settings').catch(() => null);
+        applyBrainzSettings(settings);
+    }
+
+    async function saveBrainzSettings() {
+        const payload = readBrainzSettingsFromForm();
+        const saved = await api('/commercials/brainz/settings', { method: 'PUT', body: payload });
+        applyBrainzSettings(saved);
+        toast('CommercialBrainz filters saved.', 'success');
+    }
+
+    async function previewBrainz() {
+        await saveBrainzSettings();
+        const preview = await api('/commercials/brainz/preview', { method: 'POST' });
+        renderBrainzPreview(preview);
+        toast(`Preview: ${preview.matchedCount ?? preview.MatchedCount ?? 0} matches`, 'success');
+    }
+
+    async function syncBrainz() {
+        await saveBrainzSettings();
+        await api('/commercials/brainz/sync', { method: 'POST' });
+        toast('CommercialBrainz sync started.', 'success');
+        await loadBrainzSettings();
+        await loadCommercials();
+    }
+
     async function loadCommercials() {
         const list = await api('/commercials');
         const status = await api('/commercials/scan-status');
+        await loadBrainzSettings();
         $('commercial-status').textContent = status ? JSON.stringify(status, null, 2) : 'No scan running.';
 
         if (!list || !list.length) {
@@ -1131,26 +1282,277 @@
         }
 
         $('commercial-list').innerHTML = `<table class="data-table">
-            <thead><tr><th>Title</th><th>Duration</th><th>Chapters</th></tr></thead>
+            <thead><tr><th>Source</th><th>Title</th><th>Brand</th><th>Duration</th><th>Year</th><th>Chapters</th></tr></thead>
             <tbody>${list.map((c) => `<tr>
+                <td><span class="badge badge-type">${escapeHtml((c.source === 1 || c.source === 'CommercialBrainz') ? 'Brainz' : 'Jellyfin')}</span></td>
                 <td>${escapeHtml(c.title)}</td>
+                <td>${escapeHtml(c.brand || '')}</td>
                 <td>${Math.round((c.duration && c.duration.totalSeconds) || 0)}s</td>
+                <td>${escapeHtml(String(c.year ?? ''))}</td>
                 <td>${(c.chapters || []).length}</td>
             </tr>`).join('')}</tbody></table>`;
     }
 
     async function loadLogos() {
         const sets = await api('/logos/sets') || [];
+        logoSets = sets;
         if (!sets.length) {
-            $('logo-set-info').innerHTML = '<div class="empty-state">No logo sets imported yet.</div>';
+            $('logo-set-info').innerHTML = '<div class="empty-state">No logo sets yet. Import Binarygeek119 or create a custom set.</div>';
             return;
         }
 
         $('logo-set-info').innerHTML = sets.map((s) => {
             const files = (s.entries || []).slice(0, 48).map((e) =>
                 `<span class="badge badge-type" style="margin:.15rem">${escapeHtml(e.displayName || e.fileName)}</span>`).join('');
-            return `<div class="card"><h3>${escapeHtml(s.name)}</h3><p class="hint">${(s.entries || []).length} logos indexed · assign per channel in the Channels editor</p><div>${files || '<span class="hint">No files found</span>'}</div></div>`;
+            const customBadge = s.isCustom ? '<span class="badge badge-on" style="margin-left:.35rem">Custom</span>' : '';
+            const actions = s.isCustom
+                ? `<div class="actions" style="margin-top:.65rem">
+                        <button type="button" class="emby-button btn-manage-logo-set" data-set-id="${escapeHtml(s.id)}">Manage Logos</button>
+                        <button type="button" class="emby-button btn-delete-logo-set" data-set-id="${escapeHtml(s.id)}">Delete Set</button>
+                   </div>`
+                : '';
+            return `<div class="card"><h3>${escapeHtml(s.name)}${customBadge}</h3><p class="hint">${(s.entries || []).length} logos indexed · assign per channel in the Channels editor</p><div>${files || '<span class="hint">No files found</span>'}</div>${actions}</div>`;
         }).join('');
+
+        qa('.btn-manage-logo-set').forEach((btn) => {
+            btn.onclick = () => openCustomLogoSetModal(btn.dataset.setId);
+        });
+        qa('.btn-delete-logo-set').forEach((btn) => {
+            btn.onclick = () => deleteCustomLogoSet(btn.dataset.setId);
+        });
+    }
+
+    async function repairChannelLogos() {
+        try {
+            const result = await api('/logos/repair-channels', { method: 'POST' });
+            const status = $('logo-repair-status');
+            if (status) {
+                status.classList.remove('hidden');
+                const repaired = result.repaired || result.Repaired || [];
+                const missing = result.missing || result.Missing || [];
+                status.textContent = [
+                    `Repaired ${repaired.length} channel(s).`,
+                    repaired.length ? `Updated: ${repaired.join(', ')}` : '',
+                    missing.length ? `Still missing artwork: ${missing.join(', ')}` : 'All channels now have logo assignments.'
+                ].filter(Boolean).join('\n');
+            }
+            toast(`Applied logos to ${(result.repaired || result.Repaired || []).length} channel(s).`, 'success');
+        } catch (err) {
+            toast(err.message, 'error');
+        }
+    }
+
+    function openCreateLogoSetModal() {
+        openModal(
+            'Create Custom Logo Set',
+            `<label class="field"><span>Set name</span><input id="new-logo-set-name" type="text" class="emby-input" placeholder="My Channel Logos"></label>
+             <p class="hint">After creating the set, you can upload named PNG/JPG/WEBP logos and assign them to channels.</p>`,
+            `<button type="button" class="emby-button" id="modal-cancel-logo-set">Cancel</button>
+             <button type="button" class="raised button-submit emby-button" id="modal-save-logo-set">Create Set</button>`
+        );
+
+        $('modal-cancel-logo-set').onclick = closeModal;
+        $('modal-save-logo-set').onclick = () => createCustomLogoSet();
+    }
+
+    async function createCustomLogoSet() {
+        const name = ($('new-logo-set-name')?.value || '').trim();
+        if (!name) {
+            toast('Set name is required.', 'error');
+            return;
+        }
+
+        try {
+            const set = await api('/logos/sets/custom', { method: 'POST', body: { name: name } });
+            closeModal();
+            toast(`Created logo set "${name}".`, 'success');
+            await loadLogos();
+            if (set && set.id) {
+                openCustomLogoSetModal(set.id);
+            }
+        } catch (err) {
+            toast(err.message, 'error');
+        }
+    }
+
+    async function deleteCustomLogoSet(setId) {
+        const set = logoSets.find((s) => s.id === setId);
+        if (!set) {
+            return;
+        }
+
+        if (!confirm(`Delete custom logo set "${set.name}"? This cannot be undone.`)) {
+            return;
+        }
+
+        try {
+            await api('/logos/sets/' + setId, { method: 'DELETE' });
+            toast('Logo set deleted.', 'success');
+            await loadLogos();
+        } catch (err) {
+            toast(err.message, 'error');
+        }
+    }
+
+    async function openCustomLogoSetModal(setId) {
+        const set = await api('/logos/sets/' + setId);
+        if (!set) {
+            toast('Logo set not found.', 'error');
+            return;
+        }
+
+        const modal = document.querySelector('#modal-backdrop .modal');
+        if (modal) {
+            modal.classList.add('modal-wide');
+        }
+
+        const rows = (set.entries || []).map((entry) => `
+            <div class="logo-entry-row" data-entry-id="${escapeHtml(entry.id)}">
+                <label><span>Logo name</span><input type="text" class="emby-input logo-entry-name" value="${escapeHtml(entry.displayName || entry.fileName)}"></label>
+                <label><span>File</span><input type="text" class="emby-input" value="${escapeHtml(entry.fileName)}" readonly></label>
+                <label><span>Replace image</span><input type="file" class="logo-entry-file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"></label>
+                <div class="logo-entry-actions">
+                    <button type="button" class="emby-button btn-save-logo-entry">Save Name</button>
+                    <button type="button" class="emby-button btn-upload-logo-entry">Upload</button>
+                    <button type="button" class="emby-button btn-danger btn-delete-logo-entry">Delete</button>
+                </div>
+            </div>`).join('');
+
+        openModal(
+            `Manage Logos · ${set.name}`,
+            `<div class="logo-upload-row">
+                <label><span>Logo name</span><input id="new-logo-display-name" type="text" class="emby-input" placeholder="FlashBack TV"></label>
+                <label><span>Image file</span><input id="new-logo-file" type="file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"></label>
+                <button type="button" class="raised button-submit emby-button" id="btn-add-custom-logo">Add Logo</button>
+            </div>
+            <div id="custom-logo-entries">${rows || '<div class="empty-state">No logos uploaded yet.</div>'}</div>`,
+            `<button type="button" class="emby-button" id="modal-close-logo-manager">Close</button>`
+        );
+
+        $('modal-close-logo-manager').onclick = () => {
+            if (modal) {
+                modal.classList.remove('modal-wide');
+            }
+            closeModal();
+            loadLogos();
+        };
+
+        $('btn-add-custom-logo').onclick = () => uploadCustomLogo(setId, {
+            displayNameInput: $('new-logo-display-name'),
+            fileInput: $('new-logo-file'),
+            refresh: () => openCustomLogoSetModal(setId)
+        });
+
+        qa('.logo-entry-row').forEach((row) => {
+            const entryId = row.dataset.entryId;
+            row.querySelector('.btn-save-logo-entry').onclick = () => saveCustomLogoName(setId, entryId, row.querySelector('.logo-entry-name').value, setId);
+            row.querySelector('.btn-upload-logo-entry').onclick = () => {
+                const fileInput = row.querySelector('.logo-entry-file');
+                if (!fileInput.files || !fileInput.files[0]) {
+                    toast('Choose a replacement image first.', 'error');
+                    return;
+                }
+
+                replaceCustomLogo(setId, entryId, row.querySelector('.logo-entry-name').value, fileInput.files[0], setId);
+            };
+            row.querySelector('.btn-delete-logo-entry').onclick = () => deleteCustomLogoEntry(setId, entryId, setId);
+        });
+    }
+
+    async function uploadCustomLogo(setId, options) {
+        const displayName = (options.displayNameInput?.value || '').trim();
+        const file = options.fileInput?.files && options.fileInput.files[0];
+        if (!displayName) {
+            toast('Logo name is required.', 'error');
+            return;
+        }
+
+        if (!file) {
+            toast('Choose an image file.', 'error');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('displayName', displayName);
+        formData.append('file', file);
+
+        try {
+            await apiForm('/logos/sets/' + setId + '/logos', formData, 'POST');
+            toast('Logo uploaded.', 'success');
+            if (options.displayNameInput) {
+                options.displayNameInput.value = '';
+            }
+            if (options.fileInput) {
+                options.fileInput.value = '';
+            }
+            if (options.refresh) {
+                await options.refresh();
+            } else {
+                await loadLogos();
+            }
+        } catch (err) {
+            toast(err.message, 'error');
+        }
+    }
+
+    async function saveCustomLogoName(setId, entryId, displayName, refreshSetId) {
+        try {
+            await api('/logos/sets/' + setId + '/entries/' + entryId, {
+                method: 'PUT',
+                body: { displayName: displayName }
+            });
+            toast('Logo name saved.', 'success');
+            if (refreshSetId) {
+                await openCustomLogoSetModal(refreshSetId);
+            } else {
+                await loadLogos();
+            }
+        } catch (err) {
+            toast(err.message, 'error');
+        }
+    }
+
+    async function replaceCustomLogo(setId, entryId, displayName, file, refreshSetId) {
+        try {
+            await api('/logos/sets/' + setId + '/entries/' + entryId, { method: 'DELETE' });
+        } catch (err) {
+            toast(err.message, 'error');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('displayName', displayName);
+        formData.append('file', file);
+
+        try {
+            await apiForm('/logos/sets/' + setId + '/logos', formData, 'POST');
+            toast('Logo replaced.', 'success');
+            if (refreshSetId) {
+                await openCustomLogoSetModal(refreshSetId);
+            } else {
+                await loadLogos();
+            }
+        } catch (err) {
+            toast(err.message, 'error');
+        }
+    }
+
+    async function deleteCustomLogoEntry(setId, entryId, refreshSetId) {
+        if (!confirm('Delete this logo?')) {
+            return;
+        }
+
+        try {
+            await api('/logos/sets/' + setId + '/entries/' + entryId, { method: 'DELETE' });
+            toast('Logo deleted.', 'success');
+            if (refreshSetId) {
+                await openCustomLogoSetModal(refreshSetId);
+            } else {
+                await loadLogos();
+            }
+        } catch (err) {
+            toast(err.message, 'error');
+        }
     }
 
     async function loadPresets() {
@@ -1450,9 +1852,14 @@
         click('btn-scan-blackframes', () => api('/commercials/scan-blackframes', { method: 'POST' })
             .then(() => { toast('Blackframe scan started.', 'success'); return loadCommercials(); })
             .catch((e) => toast(e.message, 'error')));
+        click('btn-save-brainz', () => saveBrainzSettings().catch((e) => toast(e.message, 'error')));
+        click('btn-preview-brainz', () => previewBrainz().catch((e) => toast(e.message, 'error')));
+        click('btn-sync-brainz', () => syncBrainz().catch((e) => toast(e.message, 'error')));
         click('btn-sync-logos', () => api('/logos/sets/binarygeek119/sync', { method: 'POST' })
             .then(() => { toast('Logo set refreshed.', 'success'); return loadLogos(); })
             .catch((e) => toast(e.message, 'error')));
+        click('btn-repair-logos', () => repairChannelLogos());
+        click('btn-create-logo-set', openCreateLogoSetModal);
         click('btn-rebuild-all', () => api('/tasks/rebuild-all', { method: 'POST' })
             .then(() => { toast('Rebuild all playouts started.', 'success'); $('task-status').textContent = 'Rebuild queued for all channels.'; })
             .catch((e) => toast(e.message, 'error')));

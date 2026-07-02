@@ -5,13 +5,30 @@ namespace Jellyfin.Plugin.FinTV.Data;
 
 internal static class SchemaMigrator
 {
-    private const string MigrationKey = "channel-number-decimal";
+    private const string ChannelNumberMigrationKey = "channel-number-decimal";
+    private const string CommercialBrainzMigrationKey = "commercial-brainz-v1";
 
     public static async Task MigrateAsync(FinTvDbContext db, ILogger logger, CancellationToken cancellationToken)
     {
         await db.Database.EnsureCreatedAsync(cancellationToken);
+        await EnsureSchemaTableAsync(db, cancellationToken);
 
-        await db.Database.ExecuteSqlRawAsync(
+        if (!await IsMigrationAppliedAsync(db, ChannelNumberMigrationKey, cancellationToken))
+        {
+            await MigrateChannelNumberColumnAsync(db, logger, cancellationToken);
+            await MarkMigrationAppliedAsync(db, ChannelNumberMigrationKey, cancellationToken);
+        }
+
+        if (!await IsMigrationAppliedAsync(db, CommercialBrainzMigrationKey, cancellationToken))
+        {
+            await MigrateCommercialBrainzAsync(db, logger, cancellationToken);
+            await MarkMigrationAppliedAsync(db, CommercialBrainzMigrationKey, cancellationToken);
+        }
+    }
+
+    private static Task EnsureSchemaTableAsync(FinTvDbContext db, CancellationToken cancellationToken)
+    {
+        return db.Database.ExecuteSqlRawAsync(
             """
             CREATE TABLE IF NOT EXISTS "__FinTvSchema" (
                 "Key" TEXT NOT NULL PRIMARY KEY,
@@ -19,28 +36,18 @@ internal static class SchemaMigrator
             );
             """,
             cancellationToken);
+    }
 
+    private static async Task<bool> IsMigrationAppliedAsync(
+        FinTvDbContext db,
+        string migrationKey,
+        CancellationToken cancellationToken)
+    {
         var applied = await db.Database
-            .SqlQueryRaw<long>("SELECT COUNT(*) AS \"Value\" FROM \"__FinTvSchema\" WHERE \"Key\" = {0}", MigrationKey)
+            .SqlQueryRaw<long>("SELECT COUNT(*) AS \"Value\" FROM \"__FinTvSchema\" WHERE \"Key\" = {0}", migrationKey)
             .FirstAsync(cancellationToken);
 
-        if (applied > 0)
-        {
-            return;
-        }
-
-        var tableExists = await db.Database
-            .SqlQueryRaw<long>("SELECT COUNT(*) AS \"Value\" FROM sqlite_master WHERE type = 'table' AND name = 'Channels'")
-            .FirstAsync(cancellationToken);
-
-        if (tableExists == 0)
-        {
-            await MarkMigrationAppliedAsync(db, cancellationToken);
-            return;
-        }
-
-        await MigrateChannelNumberColumnAsync(db, logger, cancellationToken);
-        await MarkMigrationAppliedAsync(db, cancellationToken);
+        return applied > 0;
     }
 
     private static async Task MigrateChannelNumberColumnAsync(
@@ -48,6 +55,15 @@ internal static class SchemaMigrator
         ILogger logger,
         CancellationToken cancellationToken)
     {
+        var tableExists = await db.Database
+            .SqlQueryRaw<long>("SELECT COUNT(*) AS \"Value\" FROM sqlite_master WHERE type = 'table' AND name = 'Channels'")
+            .FirstAsync(cancellationToken);
+
+        if (tableExists == 0)
+        {
+            return;
+        }
+
         var numberType = await GetColumnTypeAsync(db, "Channels", "Number", cancellationToken);
         var hasNumber = await ColumnExistsAsync(db, "Channels", "Number", cancellationToken);
         var hasNumberReal = await ColumnExistsAsync(db, "Channels", "NumberReal", cancellationToken);
@@ -101,6 +117,90 @@ internal static class SchemaMigrator
             "ALTER TABLE \"Channels\" RENAME COLUMN \"NumberReal\" TO \"Number\"",
             cancellationToken);
         await EnsureChannelNumberIndexAsync(db, cancellationToken);
+    }
+
+    private static async Task MigrateCommercialBrainzAsync(
+        FinTvDbContext db,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        if (!await TableExistsAsync(db, "Commercials", cancellationToken))
+        {
+            return;
+        }
+
+        logger.LogInformation("Applying CommercialBrainz schema migration");
+
+        await AddColumnIfMissingAsync(db, "Commercials", "Source", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+        await AddColumnIfMissingAsync(db, "Commercials", "YouTubeUrl", "TEXT", cancellationToken);
+        await AddColumnIfMissingAsync(db, "Commercials", "YouTubeVideoId", "TEXT", cancellationToken);
+        await AddColumnIfMissingAsync(db, "Commercials", "CommercialBrainzVideoSbid", "TEXT", cancellationToken);
+        await AddColumnIfMissingAsync(db, "Commercials", "Brand", "TEXT", cancellationToken);
+        await AddColumnIfMissingAsync(db, "Commercials", "Year", "INTEGER", cancellationToken);
+        await AddColumnIfMissingAsync(db, "Commercials", "Decade", "INTEGER", cancellationToken);
+        await AddColumnIfMissingAsync(db, "Commercials", "Network", "TEXT", cancellationToken);
+        await AddColumnIfMissingAsync(db, "Commercials", "ChannelName", "TEXT", cancellationToken);
+        await AddColumnIfMissingAsync(db, "Commercials", "AgeLimit", "INTEGER", cancellationToken);
+        await AddColumnIfMissingAsync(db, "Commercials", "TagsJson", "TEXT", cancellationToken);
+        await AddColumnIfMissingAsync(db, "Commercials", "IsBanned", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+        await AddColumnIfMissingAsync(db, "Commercials", "IsAdultRated", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+        await AddColumnIfMissingAsync(db, "Commercials", "IsLateNight", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+        await AddColumnIfMissingAsync(db, "Commercials", "IsSpoof", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+        await AddColumnIfMissingAsync(db, "Commercials", "IsFake", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+        await AddColumnIfMissingAsync(db, "Commercials", "IsReal", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+        await AddColumnIfMissingAsync(db, "Commercials", "IsAiEnhanced", "INTEGER NOT NULL DEFAULT 0", cancellationToken);
+
+        await db.Database.ExecuteSqlRawAsync("DROP INDEX IF EXISTS \"IX_Commercials_JellyfinItemId\";", cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            CREATE INDEX IF NOT EXISTS "IX_Commercials_JellyfinItemId" ON "Commercials" ("JellyfinItemId");
+            """,
+            cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_Commercials_CommercialBrainzVideoSbid"
+            ON "Commercials" ("CommercialBrainzVideoSbid")
+            WHERE "CommercialBrainzVideoSbid" IS NOT NULL;
+            """,
+            cancellationToken);
+
+        if (await TableExistsAsync(db, "PlayoutItems", cancellationToken))
+        {
+            await AddColumnIfMissingAsync(db, "PlayoutItems", "CommercialId", "TEXT", cancellationToken);
+            await db.Database.ExecuteSqlRawAsync(
+                """
+                CREATE INDEX IF NOT EXISTS "IX_PlayoutItems_CommercialId" ON "PlayoutItems" ("CommercialId");
+                """,
+                cancellationToken);
+        }
+    }
+
+    private static async Task AddColumnIfMissingAsync(
+        FinTvDbContext db,
+        string table,
+        string column,
+        string definition,
+        CancellationToken cancellationToken)
+    {
+        if (await ColumnExistsAsync(db, table, column, cancellationToken))
+        {
+            return;
+        }
+
+        await db.Database.ExecuteSqlRawAsync(
+            $"ALTER TABLE \"{table}\" ADD COLUMN \"{column}\" {definition};",
+            cancellationToken);
+    }
+
+    private static async Task<bool> TableExistsAsync(FinTvDbContext db, string table, CancellationToken cancellationToken)
+    {
+        var count = await db.Database
+            .SqlQueryRaw<long>(
+                "SELECT COUNT(*) AS \"Value\" FROM sqlite_master WHERE type = 'table' AND name = {0}",
+                table)
+            .FirstAsync(cancellationToken);
+
+        return count > 0;
     }
 
     private static Task DropChannelNumberIndexAsync(FinTvDbContext db, CancellationToken cancellationToken)
@@ -164,14 +264,14 @@ internal static class SchemaMigrator
                 || columnType.Contains("DECIMAL", StringComparison.OrdinalIgnoreCase));
     }
 
-    private static Task MarkMigrationAppliedAsync(FinTvDbContext db, CancellationToken cancellationToken)
+    private static Task MarkMigrationAppliedAsync(FinTvDbContext db, string migrationKey, CancellationToken cancellationToken)
     {
         return db.Database.ExecuteSqlRawAsync(
             """
             INSERT OR IGNORE INTO "__FinTvSchema" ("Key", "AppliedAt")
             VALUES ({0}, {1});
             """,
-            new object[] { MigrationKey, DateTime.UtcNow.ToString("O") },
+            new object[] { migrationKey, DateTime.UtcNow.ToString("O") },
             cancellationToken);
     }
 }
