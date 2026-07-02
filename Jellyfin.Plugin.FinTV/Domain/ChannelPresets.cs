@@ -37,6 +37,7 @@ public static class ChannelPresets
         Preset(123, 1.5m, "BinaryGeek119 News & Weather", ChannelContentType.Weather, "TV Shows", "News and weather channel", "fintv-news-weather", "Weather/WeatherStar4000.png", weather: true),
         Preset(124, 1.6m, "Past Tense News", ChannelContentType.TvShow, "TV Shows", "Retro news", "fintv-past-tense-news", logoPath: null, useLogo: false),
         Preset(125, 1.7m, "Cops And Robbers", ChannelContentType.TvShow, "TV Shows", "Crime themed channel", "fintv-crime", "Shows/cops_and_robbers.png"),
+        Preset(126, 5.1m, "WeatherStar4000", ChannelContentType.Weather, "Weather", "Live local weather via WeatherStar 4000", "fintv-weatherstar4000", "Weather/WeatherStar4000.png", weather: true),
         Preset(128, 1.8m, "Slappy", ChannelContentType.TvShow, "TV Shows", "Comedy themed channel", "fintv-comedy", "Shows/Slappy.png"),
         Preset(129, 1.9m, "Winning", ChannelContentType.TvShow, "TV Shows", "Game shows channel", "fintv-game-shows", "Shows/winning.png"),
         Preset(130, 2.1m, "GET LEARNEDED", ChannelContentType.TvShow, "TV Shows", "Educational TV shows and movies", "fintv-education", "Shows/GET_LEARNEDED.png"),
