@@ -13,7 +13,7 @@ public enum ChannelPresetNumberingMode
     Legacy = 0,
 
     /// <summary>
-    /// Category-based subchannels (1.1, 1.2, 3.1, 4.2, etc.).
+    /// Legacy-major subchannels (119.1, 124.2, 126.3, 203.1, 312.3, etc.).
     /// </summary>
     Subchannels = 1
 }
@@ -30,25 +30,24 @@ public static class ChannelPresets
     /// </summary>
     public static IReadOnlyList<ChannelPresetDefinition> All { get; } =
     [
-        Preset(119, 1.1m, "FlashBack TV", ChannelContentType.TvShow, "TV Shows", "1970's - 2000's TV shows and movies", "fintv-flashback", "Shows/FlashBack_TV.png"),
-        Preset(120, 1.2m, "Retro TV", ChannelContentType.TvShow, "TV Shows", "1910's - 1960's TV shows and movies", "fintv-retro", "Shows/Retro_TV.png"),
-        Preset(121, 1.3m, "[Open Swim]", ChannelContentType.TvShow, "TV Shows", "Cartoons and kid shows and movies", "fintv-open-swim", "Shows/[open_swim].png"),
-        Preset(122, 1.4m, "Flip Television", ChannelContentType.TvShow, "TV Shows", "Reality TV", "fintv-reality", "Shows/Flip_Television.png"),
-        Preset(123, 1.5m, "BinaryGeek119 News & Weather", ChannelContentType.Weather, "TV Shows", "News and weather channel", "fintv-news-weather", "Weather/WeatherStar4000.png", weather: true),
-        Preset(124, 1.6m, "Past Tense News", ChannelContentType.TvShow, "TV Shows", "Retro news", "fintv-past-tense-news", logoPath: null, useLogo: false),
-        Preset(125, 1.7m, "Cops And Robbers", ChannelContentType.TvShow, "TV Shows", "Crime themed channel", "fintv-crime", "Shows/cops_and_robbers.png"),
-        Preset(126, 5.1m, "WeatherStar4000", ChannelContentType.Weather, "Weather", "Live local weather via WeatherStar 4000", "fintv-weatherstar4000", "Weather/WeatherStar4000.png", weather: true),
-        Preset(128, 1.8m, "Slappy", ChannelContentType.TvShow, "TV Shows", "Comedy themed channel", "fintv-comedy", "Shows/Slappy.png"),
-        Preset(129, 1.9m, "Winning", ChannelContentType.TvShow, "TV Shows", "Game shows channel", "fintv-game-shows", "Shows/winning.png"),
-        Preset(130, 2.1m, "GET LEARNEDED", ChannelContentType.TvShow, "TV Shows", "Educational TV shows and movies", "fintv-education", "Shows/GET_LEARNEDED.png"),
-        Preset(133, 2.2m, "YouTube TV", ChannelContentType.TvShow, "TV Shows", "YouTube channels", "fintv-youtube", logoPath: null, useLogo: false),
-        Preset(203, 3.1m, "Creature Double Feature", ChannelContentType.Movie, "Movies", "Creature and monster movies", "fintv-creature", "Movies/Creature_Double_Feature.png"),
-        Preset(204, 3.2m, "Hero TV", ChannelContentType.Movie, "Movies", "Super hero movies", "fintv-hero", "Movies/Hero_TV.png"),
-        Preset(205, 3.3m, "That's Funny", ChannelContentType.Movie, "Movies", "Comedian movies and TV shows", "fintv-funny", logoPath: null, useLogo: false),
-        Preset(207, 3.4m, "The Holiday Channel", ChannelContentType.Movie, "Movies", "Holiday themed TV shows and movies", "fintv-holiday", "The Holiday Channel/christmas-marry.png"),
-        Preset(312, 4.1m, "The Parody Channel", ChannelContentType.MusicVideo, "Music Videos", "Parody music videos", "fintv-parody", "Music Videos Channels/The-Parody-Channel.png"),
-        Preset(313, 4.2m, "Rap On Tap", ChannelContentType.MusicVideo, "Music Videos", "Rap and hip hop music videos", "fintv-rap", "Music Videos Channels/Rap-On-Tap.png"),
-        Preset(314, 4.3m, "HeadPhone Jack", ChannelContentType.MusicVideo, "Music Videos", "All other music videos", "fintv-music-video", "Music Videos Channels/HeadPhone_Jack.png"),
+        Preset(119, 119.1m, "FlashBack TV", ChannelContentType.TvShow, "TV Shows", "1970's - 2000's tv shows and movies", "fintv-flashback", "Shows/FlashBack_TV.png"),
+        Preset(120, 119.2m, "Retro TV", ChannelContentType.TvShow, "TV Shows", "1910's - 1960's tv shows and movies", "fintv-retro", "Shows/Retro_TV.png"),
+        Preset(121, 119.3m, "[Open Swim]", ChannelContentType.TvShow, "TV Shows", "Cartoons and kid shows and movies", "fintv-open-swim", "Shows/[open_swim].png"),
+        Preset(122, 119.4m, "Flip Television", ChannelContentType.TvShow, "TV Shows", "Reality TV", "fintv-reality", "Shows/Flip_Television.png"),
+        Preset(123, 119.5m, "BinaryGeek119 News & Weather", ChannelContentType.Weather, "TV Shows", "News and weather channel", "fintv-news-weather", "Weather/WeatherStar4000.png", weather: true),
+        Preset(124, 124.1m, "Past Tense News", ChannelContentType.TvShow, "TV Shows", "Retro news", "fintv-past-tense-news", logoPath: null, useLogo: false),
+        Preset(125, 124.2m, "Cops And Robbers", ChannelContentType.TvShow, "TV Shows", "Crime themed channel", "fintv-crime", "Shows/cops_and_robbers.png"),
+        Preset(128, 124.3m, "Slappy", ChannelContentType.TvShow, "TV Shows", "Comedy themed channel", "fintv-comedy", "Shows/Slappy.png"),
+        Preset(129, 126.1m, "Winning", ChannelContentType.TvShow, "TV Shows", "Game shows channel", "fintv-game-shows", "Shows/winning.png"),
+        Preset(130, 126.2m, "GET LEARNEDED", ChannelContentType.TvShow, "TV Shows", "Educational tv shows and movies", "fintv-education", "Shows/GET_LEARNEDED.png"),
+        Preset(133, 126.3m, "YouTube TV", ChannelContentType.TvShow, "TV Shows", "Youtube channels", "fintv-youtube", logoPath: null, useLogo: false),
+        Preset(203, 203.1m, "Creature Double Feature", ChannelContentType.Movie, "Movies", "Creature, monster movies", "fintv-creature", "Movies/Creature_Double_Feature.png"),
+        Preset(204, 203.2m, "Hero TV", ChannelContentType.Movie, "Movies", "Super hero movies", "fintv-hero", "Movies/Hero_TV.png"),
+        Preset(205, 203.3m, "That's Funny", ChannelContentType.Movie, "Movies", "Comedian movies and tv shows", "fintv-funny", logoPath: null, useLogo: false),
+        Preset(207, 203.4m, "The Holiday Channel", ChannelContentType.Movie, "Movies", "Holiday themed tv shows and movies", "fintv-holiday", "The Holiday Channel/christmas-marry.png"),
+        Preset(312, 312.1m, "The Parody Channel", ChannelContentType.MusicVideo, "Music Videos", "Parody music videos", "fintv-parody", "Music Videos Channels/The-Parody-Channel.png"),
+        Preset(313, 312.2m, "Rap On Tap", ChannelContentType.MusicVideo, "Music Videos", "Rap and hip hop music videos", "fintv-rap", "Music Videos Channels/Rap-On-Tap.png"),
+        Preset(314, 312.3m, "HeadPhone Jack", ChannelContentType.MusicVideo, "Music Videos", "All other music videos", "fintv-music-video", "Music Videos Channels/HeadPhone_Jack.png"),
     ];
 
     /// <summary>
