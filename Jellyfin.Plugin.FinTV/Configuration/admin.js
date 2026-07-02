@@ -90,7 +90,31 @@
             throw new Error(parseErrorMessage(err.responseText));
         }
 
-        throw new Error((err && err.message) || 'Request failed');
+        const message = (err && err.message) || 'Request failed';
+        if (isNetworkError(message)) {
+            throw new Error('Jellyfin server is unreachable');
+        }
+
+        throw new Error(message);
+    }
+
+    function isNetworkError(err) {
+        const message = String((err && err.message) || err || '').toLowerCase();
+        return message.includes('failed to fetch')
+            || message.includes('network error')
+            || message.includes('connection refused')
+            || message.includes('load failed')
+            || message.includes('jellyfin server is unreachable');
+    }
+
+    function reportApiError(err, fallbackMessage) {
+        if (isNetworkError(err)) {
+            stopOnAirPolling();
+            toast('Jellyfin server is unreachable. Restart the server and refresh this page.', 'error');
+            return;
+        }
+
+        toast((err && err.message) || fallbackMessage || 'Request failed', 'error');
     }
 
     function normalizeApiValue(value) {
@@ -238,6 +262,12 @@
 
             const text = await res.text();
             return normalizeApiResponse(text ? JSON.parse(text) : null);
+        }).catch((err) => {
+            if (isNetworkError(err)) {
+                throw new Error('Jellyfin server is unreachable');
+            }
+
+            throw err;
         });
     }
 
@@ -505,8 +535,11 @@
                 }
             });
             channelOnAir = next;
-        } catch {
+        } catch (err) {
             channelOnAir = {};
+            if (isNetworkError(err)) {
+                stopOnAirPolling();
+            }
         }
 
         renderChannelsList();
@@ -573,16 +606,20 @@
     }
 
     async function loadChannels() {
-        channels = (await api('/channels') || []).map(normalizeChannel);
-        renderChannelsList();
+        try {
+            channels = (await api('/channels') || []).map(normalizeChannel);
+            renderChannelsList();
 
-        const select = $('lineup-channel-select');
-        select.innerHTML = channels.map((c) =>
-            `<option value="${c.id}">${formatChannelNumber(c.number)} - ${escapeHtml(c.name)}</option>`).join('');
-        if (!selectedChannelId && channels[0]) selectedChannelId = channels[0].id;
-        select.value = selectedChannelId || '';
+            const select = $('lineup-channel-select');
+            select.innerHTML = channels.map((c) =>
+                `<option value="${c.id}">${formatChannelNumber(c.number)} - ${escapeHtml(c.name)}</option>`).join('');
+            if (!selectedChannelId && channels[0]) selectedChannelId = channels[0].id;
+            select.value = selectedChannelId || '';
 
-        await refreshDashboardStats();
+            await refreshDashboardStats();
+        } catch (err) {
+            reportApiError(err, 'Could not load channels.');
+        }
     }
 
     function resetChannelForm() {
@@ -654,7 +691,13 @@
         const c = channels.find((x) => x.id === id);
         if (!c) return;
 
-        await loadLogoSetsForForm();
+        try {
+            await loadLogoSetsForForm();
+        } catch (err) {
+            reportApiError(err, 'Could not load logo sets.');
+            return;
+        }
+
         editingChannelId = id;
         showChannelForm(true);
         $('channel-form-title').textContent = `Edit ${c.name}`;
@@ -776,28 +819,32 @@
         selectedChannelId = $('lineup-channel-select').value;
         if (!selectedChannelId) return;
 
-        const data = await api('/lineups/' + selectedChannelId);
-        lineupIsWeather = !!(data.isWeather || getLineupChannel()?.contentType === CONTENT_TYPE_VALUES.Weather);
-        lineupSlots = (data.lineup && data.lineup.slots) || [];
-        lineupOverrides = data.overrides || [];
-        if (lineupSlots.length === 0) {
-            lineupSlots = Array.from({ length: 48 }, (_, i) => ({ slotIndex: i, candidates: [] }));
-        }
+        try {
+            const data = await api('/lineups/' + selectedChannelId);
+            lineupIsWeather = !!(data.isWeather || getLineupChannel()?.contentType === CONTENT_TYPE_VALUES.Weather);
+            lineupSlots = (data.lineup && data.lineup.slots) || [];
+            lineupOverrides = data.overrides || [];
+            if (lineupSlots.length === 0) {
+                lineupSlots = Array.from({ length: 48 }, (_, i) => ({ slotIndex: i, candidates: [] }));
+            }
 
-        updateLineupToolbarState();
+            updateLineupToolbarState();
 
-        if (lineupIsWeather) {
-            renderWeatherLineupGrid();
+            if (lineupIsWeather) {
+                renderWeatherLineupGrid();
+                renderOverrideList();
+                $('lineup-preview-banner').classList.add('hidden');
+                await previewLineup(true);
+                return;
+            }
+
+            await collectItemIdsFromSlots(lineupSlots);
+            renderLineupGrid();
             renderOverrideList();
             $('lineup-preview-banner').classList.add('hidden');
-            await previewLineup(true);
-            return;
+        } catch (err) {
+            reportApiError(err, 'Could not load lineup.');
         }
-
-        await collectItemIdsFromSlots(lineupSlots);
-        renderLineupGrid();
-        renderOverrideList();
-        $('lineup-preview-banner').classList.add('hidden');
     }
 
     function getLineupChannel() {
@@ -1271,37 +1318,42 @@
     }
 
     async function loadCommercials() {
-        const list = await api('/commercials');
-        const status = await api('/commercials/scan-status');
-        await loadBrainzSettings();
-        $('commercial-status').textContent = status ? JSON.stringify(status, null, 2) : 'No scan running.';
+        try {
+            const list = await api('/commercials');
+            const status = await api('/commercials/scan-status');
+            await loadBrainzSettings();
+            $('commercial-status').textContent = status ? JSON.stringify(status, null, 2) : 'No scan running.';
 
-        if (!list || !list.length) {
-            $('commercial-list').innerHTML = '<div class="empty-state">No commercials synced yet.</div>';
-            return;
+            if (!list || !list.length) {
+                $('commercial-list').innerHTML = '<div class="empty-state">No commercials synced yet.</div>';
+                return;
+            }
+
+            $('commercial-list').innerHTML = `<table class="data-table">
+                <thead><tr><th>Source</th><th>Title</th><th>Brand</th><th>Duration</th><th>Year</th><th>Chapters</th></tr></thead>
+                <tbody>${list.map((c) => `<tr>
+                    <td><span class="badge badge-type">${escapeHtml((c.source === 1 || c.source === 'CommercialBrainz') ? 'Brainz' : 'Jellyfin')}</span></td>
+                    <td>${escapeHtml(c.title)}</td>
+                    <td>${escapeHtml(c.brand || '')}</td>
+                    <td>${Math.round((c.duration && c.duration.totalSeconds) || 0)}s</td>
+                    <td>${escapeHtml(String(c.year ?? ''))}</td>
+                    <td>${(c.chapters || []).length}</td>
+                </tr>`).join('')}</tbody></table>`;
+        } catch (err) {
+            reportApiError(err, 'Could not load commercials.');
         }
-
-        $('commercial-list').innerHTML = `<table class="data-table">
-            <thead><tr><th>Source</th><th>Title</th><th>Brand</th><th>Duration</th><th>Year</th><th>Chapters</th></tr></thead>
-            <tbody>${list.map((c) => `<tr>
-                <td><span class="badge badge-type">${escapeHtml((c.source === 1 || c.source === 'CommercialBrainz') ? 'Brainz' : 'Jellyfin')}</span></td>
-                <td>${escapeHtml(c.title)}</td>
-                <td>${escapeHtml(c.brand || '')}</td>
-                <td>${Math.round((c.duration && c.duration.totalSeconds) || 0)}s</td>
-                <td>${escapeHtml(String(c.year ?? ''))}</td>
-                <td>${(c.chapters || []).length}</td>
-            </tr>`).join('')}</tbody></table>`;
     }
 
     async function loadLogos() {
-        const sets = await api('/logos/sets') || [];
-        logoSets = sets;
-        if (!sets.length) {
-            $('logo-set-info').innerHTML = '<div class="empty-state">No logo sets yet. Import Binarygeek119 or create a custom set.</div>';
-            return;
-        }
+        try {
+            const sets = await api('/logos/sets') || [];
+            logoSets = sets;
+            if (!sets.length) {
+                $('logo-set-info').innerHTML = '<div class="empty-state">No logo sets yet. Import Binarygeek119 or create a custom set.</div>';
+                return;
+            }
 
-        $('logo-set-info').innerHTML = sets.map((s) => {
+            $('logo-set-info').innerHTML = sets.map((s) => {
             const files = (s.entries || []).slice(0, 48).map((e) =>
                 `<span class="badge badge-type" style="margin:.15rem">${escapeHtml(e.displayName || e.fileName)}</span>`).join('');
             const customBadge = s.isCustom ? '<span class="badge badge-on" style="margin-left:.35rem">Custom</span>' : '';
@@ -1320,6 +1372,9 @@
         qa('.btn-delete-logo-set').forEach((btn) => {
             btn.onclick = () => deleteCustomLogoSet(btn.dataset.setId);
         });
+        } catch (err) {
+            reportApiError(err, 'Could not load logo sets.');
+        }
     }
 
     async function repairChannelLogos() {
@@ -1556,9 +1611,13 @@
     }
 
     async function loadPresets() {
-        presetNumberingMode = parseInt($('preset-numbering-mode').value, 10) || 0;
-        channelPresets = await api('/channels/presets?numberingMode=' + presetNumberingMode) || [];
-        renderPresetsList();
+        try {
+            presetNumberingMode = parseInt($('preset-numbering-mode').value, 10) || 0;
+            channelPresets = await api('/channels/presets?numberingMode=' + presetNumberingMode) || [];
+            renderPresetsList();
+        } catch (err) {
+            reportApiError(err, 'Could not load presets.');
+        }
     }
 
     function renderPresetsList() {
@@ -1662,7 +1721,7 @@
                 input.value = settings.weatherStarBaseUrl || '';
             }
         } catch (err) {
-            toast('Failed to load weather settings: ' + err.message, 'error');
+            reportApiError(err, 'Could not load weather settings.');
         }
     }
 
@@ -1896,7 +1955,7 @@
 
         bindEvents();
         startOnAirPolling();
-        return refresh().catch((err) => toast(err.message, 'error'));
+        return refresh().catch((err) => reportApiError(err, 'Could not load FinTV admin.'));
     }
 
     function resolveConfigPage(preferred) {
