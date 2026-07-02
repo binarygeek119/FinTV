@@ -28,6 +28,7 @@ public class ChannelPresetsController : ControllerBase
     /// <summary>
     /// Gets all ready-made channel presets and whether each already exists.
     /// </summary>
+    /// <param name="numberingMode">Legacy or subchannel numbering to display.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Preset rows.</returns>
     [HttpGet]

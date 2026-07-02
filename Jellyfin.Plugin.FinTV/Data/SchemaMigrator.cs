@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -7,6 +8,7 @@ internal static class SchemaMigrator
 {
     private const string ChannelNumberMigrationKey = "channel-number-decimal";
     private const string CommercialBrainzMigrationKey = "commercial-brainz-v1";
+    private static readonly Regex SqlIdentifierRegex = new("^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.Compiled);
 
     public static async Task MigrateAsync(FinTvDbContext db, ILogger logger, CancellationToken cancellationToken)
     {
@@ -187,9 +189,31 @@ internal static class SchemaMigrator
             return;
         }
 
-        await db.Database.ExecuteSqlRawAsync(
-            $"ALTER TABLE \"{table}\" ADD COLUMN \"{column}\" {definition};",
-            cancellationToken);
+        ValidateSqlIdentifier(table);
+        ValidateSqlIdentifier(column);
+        ValidateColumnDefinition(definition);
+
+        var sql = "ALTER TABLE \"" + table + "\" ADD COLUMN \"" + column + "\" " + definition + ";";
+        await db.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+    }
+
+    private static void ValidateSqlIdentifier(string value)
+    {
+        if (string.IsNullOrEmpty(value) || !SqlIdentifierRegex.IsMatch(value))
+        {
+            throw new InvalidOperationException("Invalid SQL identifier.");
+        }
+    }
+
+    private static void ValidateColumnDefinition(string definition)
+    {
+        if (string.IsNullOrWhiteSpace(definition)
+            || definition.Contains(';', StringComparison.Ordinal)
+            || definition.Contains('"', StringComparison.Ordinal)
+            || definition.Contains('\'', StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Invalid SQL column definition.");
+        }
     }
 
     private static async Task<bool> TableExistsAsync(FinTvDbContext db, string table, CancellationToken cancellationToken)

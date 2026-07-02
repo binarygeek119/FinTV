@@ -273,27 +273,61 @@
 
     async function apiForm(path, formData, method) {
         const url = resolveUrl('FinTV/api' + (path.startsWith('/') ? path : '/' + path));
+        const httpMethod = method || 'POST';
+
+        if (typeof ApiClient !== 'undefined' && typeof ApiClient.ajax === 'function') {
+            return ApiClient.ajax({
+                url: url,
+                type: httpMethod,
+                data: formData,
+                contentType: false,
+                processData: false,
+                dataType: 'json',
+                headers: {
+                    accept: 'application/json'
+                }
+            })
+                .then(normalizeApiResponse)
+                .catch(readApiFailure);
+        }
+
+        const headers = {
+            accept: 'application/json'
+        };
+        if (typeof ApiClient !== 'undefined' && typeof ApiClient.accessToken === 'function') {
+            const token = ApiClient.accessToken();
+            if (token) {
+                headers['X-Emby-Token'] = token;
+            }
+        }
+
         const fetchOptions = {
-            method: method || 'POST',
+            method: httpMethod,
             credentials: 'same-origin',
-            headers: {
-                accept: 'application/json'
-            },
+            headers: headers,
             body: formData
         };
 
-        const res = await fetch(url, fetchOptions);
-        if (!res.ok) {
+        try {
+            const res = await fetch(url, fetchOptions);
+            if (!res.ok) {
+                const text = await res.text();
+                throw new Error(parseErrorMessage(text || res.statusText));
+            }
+
+            if (res.status === 204) {
+                return null;
+            }
+
             const text = await res.text();
-            throw new Error(parseErrorMessage(text || res.statusText));
-        }
+            return normalizeApiResponse(text ? JSON.parse(text) : null);
+        } catch (err) {
+            if (isNetworkError(err)) {
+                throw new Error('Jellyfin server is unreachable');
+            }
 
-        if (res.status === 204) {
-            return null;
+            throw err;
         }
-
-        const text = await res.text();
-        return normalizeApiResponse(text ? JSON.parse(text) : null);
     }
 
     function toast(message, type) {

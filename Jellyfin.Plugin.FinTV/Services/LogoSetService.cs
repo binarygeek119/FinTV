@@ -278,48 +278,109 @@ public class LogoSetService
         LogoSet? logoSet = null,
         CancellationToken cancellationToken = default)
     {
-        logoSet ??= await EnsureBinarygeek119SetAsync(cancellationToken);
-        logoSet = await _db.LogoSets
-            .Include(s => s.Entries)
-            .FirstOrDefaultAsync(s => s.Id == logoSet.Id, cancellationToken)
-            ?? logoSet;
+        logoSet ??= await GetBinarygeek119SetForRepairAsync(cancellationToken);
 
+        var logoSets = await _db.LogoSets
+            .Include(s => s.Entries)
+            .ToListAsync(cancellationToken);
+        var logoSetsById = logoSets.ToDictionary(set => set.Id);
+        var validLogoSetIds = logoSetsById.Keys.ToHashSet();
+
+        if (!logoSetsById.ContainsKey(logoSet.Id))
+        {
+            logoSetsById[logoSet.Id] = logoSet;
+            validLogoSetIds.Add(logoSet.Id);
+        }
+
+        var binarygeek119Set = logoSetsById[logoSet.Id];
         var channels = await _db.Channels.ToListAsync(cancellationToken);
         var result = new RepairChannelLogosResult { TotalChannels = channels.Count };
 
         foreach (var channel in channels)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            SanitizeChannelLogoReference(channel, validLogoSetIds);
+
+            var hadLogo = HasResolvedLogo(channel);
             var preset = FindPresetForChannel(channel);
-            var hadLogo = channel.LogoSetId.HasValue && !string.IsNullOrWhiteSpace(channel.LogoFileName);
 
             if (preset is not null && preset.UseBinarygeek119Logo)
             {
-                ApplyLogoToChannel(channel, logoSet, preset.LogoRelativePath, preset.Name);
+                ApplyLogoToChannel(channel, binarygeek119Set, preset.LogoRelativePath, preset.Name);
             }
-            else if (!hadLogo)
+            else if (!channel.LogoSetId.HasValue || string.IsNullOrWhiteSpace(channel.LogoFileName))
             {
-                TryBindChannelLogo(channel, logoSet);
+                TryBindChannelLogo(channel, binarygeek119Set);
             }
 
             if (channel.LogoSetId.HasValue && string.IsNullOrWhiteSpace(channel.ChannelLogoPath))
             {
-                TryBindChannelLogo(channel, logoSet);
+                if (logoSetsById.TryGetValue(channel.LogoSetId.Value, out var assignedSet))
+                {
+                    TryBindChannelLogo(channel, assignedSet);
+                }
+                else
+                {
+                    ClearChannelLogo(channel);
+                }
             }
 
-            var hasLogo = channel.LogoSetId.HasValue && !string.IsNullOrWhiteSpace(channel.LogoFileName);
-            if (hasLogo && !hadLogo)
+            if (HasResolvedLogo(channel) && !hadLogo)
             {
                 result.Repaired.Add(channel.Name);
             }
-            else if (!hasLogo)
+            else if (!HasResolvedLogo(channel))
             {
                 result.Missing.Add(channel.Name);
             }
         }
 
-        await _db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex)
+        {
+            _logger.LogError(ex, "Failed to save channel logo repairs");
+            throw new InvalidOperationException("Failed to save channel logo assignments.", ex);
+        }
+
         return result;
+    }
+
+    private async Task<LogoSet> GetBinarygeek119SetForRepairAsync(CancellationToken cancellationToken)
+    {
+        const string setName = ChannelPresets.Binarygeek119LogoSetName;
+        var existing = await _db.LogoSets
+            .Include(s => s.Entries)
+            .FirstOrDefaultAsync(s => s.Name == setName, cancellationToken);
+
+        if (existing is not null && existing.Entries.Count > 0)
+        {
+            return existing;
+        }
+
+        return await EnsureBinarygeek119SetAsync(cancellationToken);
+    }
+
+    private static bool HasResolvedLogo(Channel channel)
+        => channel.LogoSetId.HasValue
+            && !string.IsNullOrWhiteSpace(channel.LogoFileName)
+            && !string.IsNullOrWhiteSpace(channel.ChannelLogoPath);
+
+    private static void SanitizeChannelLogoReference(Channel channel, IReadOnlySet<Guid> validLogoSetIds)
+    {
+        if (channel.LogoSetId.HasValue && !validLogoSetIds.Contains(channel.LogoSetId.Value))
+        {
+            ClearChannelLogo(channel);
+        }
+    }
+
+    private static void ClearChannelLogo(Channel channel)
+    {
+        channel.LogoSetId = null;
+        channel.LogoFileName = null;
+        channel.ChannelLogoPath = null;
     }
 
     internal static ChannelPresetDefinition? FindPresetForChannel(Channel channel)

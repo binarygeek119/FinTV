@@ -29,6 +29,7 @@ public class ChannelPresetService
     /// <summary>
     /// Lists presets with whether each channel number already exists.
     /// </summary>
+    /// <param name="numberingMode">Legacy or subchannel numbering to display.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Preset status rows grouped by category.</returns>
     public async Task<IReadOnlyList<ChannelPresetStatus>> GetStatusAsync(

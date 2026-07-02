@@ -201,8 +201,15 @@ public class LogosController : ControllerBase
     [HttpPost("repair-channels")]
     public async Task<ActionResult<RepairChannelLogosResult>> RepairChannelLogos(CancellationToken cancellationToken)
     {
-        var result = await _logoSets.RepairChannelLogosAsync(cancellationToken: cancellationToken);
-        return Ok(result);
+        try
+        {
+            var result = await _logoSets.RepairChannelLogosAsync(cancellationToken: cancellationToken);
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Problem(detail: ex.Message, statusCode: StatusCodes.Status500InternalServerError);
+        }
     }
 
     /// <summary>
