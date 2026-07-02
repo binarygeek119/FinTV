@@ -328,6 +328,7 @@
                 <td class="row-actions">
                     <button type="button" data-edit="${c.id}">Edit</button>
                     <button type="button" data-lineup="${c.id}">Lineup</button>
+                    <button type="button" class="btn-danger" data-delete="${c.id}">Delete</button>
                 </td>
             </tr>`).join('')}</tbody></table>`;
 
@@ -339,6 +340,10 @@
             e.stopPropagation();
             selectedChannelId = btn.dataset.lineup;
             switchTab('lineups');
+        });
+        wrap.querySelectorAll('[data-delete]').forEach((btn) => btn.onclick = (e) => {
+            e.stopPropagation();
+            deleteChannel(btn.dataset.delete);
         });
         wrap.querySelectorAll('tbody tr').forEach((row) => row.onclick = () => editChannel(row.dataset.id));
     }
@@ -492,16 +497,32 @@
         }
     }
 
-    async function deleteChannel() {
-        if (!editingChannelId) return;
-        const c = channels.find((x) => x.id === editingChannelId);
-        if (!c) return;
-        if (!confirm(`Delete channel ${formatChannelNumber(c.number)} - ${c.name}?`)) return;
+    async function deleteChannel(channelId) {
+        channelId = channelId || editingChannelId;
+        if (!channelId) {
+            return;
+        }
+
+        const c = channels.find((x) => x.id === channelId);
+        if (!c) {
+            return;
+        }
+
+        if (!confirm(`Delete channel ${formatChannelNumber(c.number)} - ${c.name}?`)) {
+            return;
+        }
 
         try {
-            await api('/channels/' + editingChannelId, { method: 'DELETE' });
+            await api('/channels/' + channelId, { method: 'DELETE' });
             toast('Channel deleted.', 'success');
-            showChannelForm(false);
+            if (editingChannelId === channelId) {
+                showChannelForm(false);
+            }
+
+            if (selectedChannelId === channelId) {
+                selectedChannelId = null;
+            }
+
             await loadChannels();
         } catch (err) {
             toast(err.message, 'error');
@@ -1062,7 +1083,7 @@
         click('btn-new-channel', () => openNewChannelForm());
         click('btn-close-channel', () => showChannelForm(false));
         click('btn-cancel-channel', () => showChannelForm(false));
-        click('btn-delete-channel', deleteChannel);
+        click('btn-delete-channel', () => deleteChannel(editingChannelId));
         const channelForm = $('channel-form');
         if (channelForm) {
             channelForm.onsubmit = saveChannel;
