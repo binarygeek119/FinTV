@@ -11,7 +11,7 @@ public class PluginConfiguration : BasePluginConfiguration
 
     public string? CommercialLibraryTag { get; set; } = "fintv-commercial";
 
-    public int PlayoutDaysToBuild { get; set; } = 3;
+    public int PlayoutDaysToBuild { get; set; } = 14;
 
     public int HistoryDaysToConsider { get; set; } = 7;
 
@@ -62,6 +62,31 @@ public class PluginConfiguration : BasePluginConfiguration
     public CommercialBrainzSettings CommercialBrainz { get; set; } = new();
 
     public AiSettings Ai { get; set; } = new();
+
+    public Ws4kpDockerSettings Ws4kp { get; set; } = new();
+
+    public Ws3kpDockerSettings Ws3kp { get; set; } = new();
+}
+
+public class Ws4kpDockerSettings : IWeatherStarDockerSettings
+{
+    public int HostPort { get; set; } = 8080;
+
+    public string Image { get; set; } = "ghcr.io/netbymatt/ws4kp";
+}
+
+public class Ws3kpDockerSettings : IWeatherStarDockerSettings
+{
+    public int HostPort { get; set; } = 8083;
+
+    public string Image { get; set; } = "ghcr.io/netbymatt/ws3kp";
+}
+
+public interface IWeatherStarDockerSettings
+{
+    int HostPort { get; set; }
+
+    string Image { get; set; }
 }
 
 public class AiSettings

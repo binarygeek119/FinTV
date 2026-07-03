@@ -46,6 +46,8 @@ public class Channel
 
     public string? AiFineTunePrompt { get; set; }
 
+    public string? AiPlayoutTemplateId { get; set; }
+
     [JsonIgnore]
     public LogoSet? LogoSet { get; set; }
 

@@ -355,12 +355,14 @@
                         <input id="ai-venice-model" type="text" class="emby-input" placeholder="gpt-4o-mini">
                     </label>
                     <p id="ai-key-status" class="hint"></p>
+                    <p class="hint">AI lineups build up to <strong>14 days</strong> of playout. FinTV auto-extends the schedule as each day ends. Use <strong>Apply + Rebuild Playout</strong> after applying a new lineup.</p>
                 </div>
                 <div class="card section-card">
                     <div class="section-header-row">
                         <h3>Channel lineups</h3>
                         <button type="button" id="btn-ai-generate-all" class="emby-button">Generate All Channels</button>
                     </div>
+                    <p class="hint">Pick a <strong>playout template</strong> to structure dayparts (morning cartoons, primetime, etc.). Channel rules define content scope; fine-tune adds extra instructions.</p>
                     <div id="ai-channels-list" class="ai-channels-list"></div>
                 </div>
                 <div id="ai-preview-panel" class="card section-card hidden">
@@ -377,27 +379,63 @@
 
             <section id="tab-weather" class="tab-panel">
                 <div class="card section-card">
-                    <h3>WeatherStar 4000</h3>
-                    <p class="hint hint-warning"><strong>Host WeatherStar4000 locally.</strong> Do not point production channels at a public WeatherStar URL. That puts unnecessary load on someone else&apos;s server and can stop working without notice.</p>
-                    <p class="hint">Run your own WeatherStar4000 instance on your LAN or the same machine as Jellyfin, then enter that base URL below. FinTV appends each weather channel&apos;s latitude and longitude as <code>?lat=…&amp;lon=…</code>.</p>
+                    <h3>Self-hosted WeatherStar (Docker)</h3>
+                    <p class="hint hint-warning"><strong>Host WeatherStar locally.</strong> Do not point production channels at a public demo URL.</p>
+                    <p class="hint">FinTV can start official Docker images for WeatherStar 4000+ and 3000+. Docker must be installed and the Jellyfin user must be able to run <code>docker</code>. If Jellyfin runs in Docker, mount <code>/var/run/docker.sock</code>.</p>
+                    <div class="weather-docker-grid">
+                        <div class="weather-docker-panel">
+                            <h4>WeatherStar 4000+ (ws4kp)</h4>
+                            <p class="hint"><a href="https://github.com/netbymatt/ws4kp" target="_blank" rel="noopener">netbymatt/ws4kp</a> · port 8080</p>
+                            <div id="ws4kp-docker-status" class="status-card"></div>
+                            <label class="field">
+                                <span>Host port</span>
+                                <input id="ws4kp-host-port" type="number" min="1" max="65535" class="emby-input" value="8080">
+                            </label>
+                            <label class="field">
+                                <span>Docker image</span>
+                                <input id="ws4kp-image" type="text" class="emby-input" value="ghcr.io/netbymatt/ws4kp">
+                            </label>
+                            <div class="actions">
+                                <button type="button" id="btn-ws4kp-start" class="raised button-submit emby-button">Start ws4kp</button>
+                                <button type="button" id="btn-ws4kp-stop" class="emby-button">Stop</button>
+                                <button type="button" id="btn-ws4kp-use-url" class="emby-button">Use ws4kp URL</button>
+                            </div>
+                        </div>
+                        <div class="weather-docker-panel">
+                            <h4>WeatherStar 3000+ (ws3kp)</h4>
+                            <p class="hint"><a href="https://github.com/netbymatt/ws3kp" target="_blank" rel="noopener">netbymatt/ws3kp</a> · port 8083</p>
+                            <div id="ws3kp-docker-status" class="status-card"></div>
+                            <label class="field">
+                                <span>Host port</span>
+                                <input id="ws3kp-host-port" type="number" min="1" max="65535" class="emby-input" value="8083">
+                            </label>
+                            <label class="field">
+                                <span>Docker image</span>
+                                <input id="ws3kp-image" type="text" class="emby-input" value="ghcr.io/netbymatt/ws3kp">
+                            </label>
+                            <div class="actions">
+                                <button type="button" id="btn-ws3kp-start" class="raised button-submit emby-button">Start ws3kp</button>
+                                <button type="button" id="btn-ws3kp-stop" class="emby-button">Stop</button>
+                                <button type="button" id="btn-ws3kp-use-url" class="emby-button">Use ws3kp URL</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card section-card">
+                    <h3>WeatherStar base URL</h3>
+                    <p class="hint">FinTV appends each weather channel&apos;s latitude and longitude as <code>?lat=…&amp;lon=…</code>. Use Start + Use URL above for local Docker, or enter a LAN URL manually.</p>
                     <p class="hint">For testing only, you may use a public hosted demo (not for production):</p>
                     <ul class="weather-resource-list">
                         <li><a href="https://weather.jmthornton.net/" target="_blank" rel="noopener">https://weather.jmthornton.net/</a> <button type="button" class="emby-button btn-inline weather-url-preset" data-url="https://weather.jmthornton.net">Use URL</button></li>
                         <li><a href="https://4000.weatherstar.dev/" target="_blank" rel="noopener">https://4000.weatherstar.dev/</a> <button type="button" class="emby-button btn-inline weather-url-preset" data-url="https://4000.weatherstar.dev">Use URL</button></li>
                         <li><a href="https://weatherstar3000.netbymatt.com/" target="_blank" rel="noopener">https://weatherstar3000.netbymatt.com/</a> <button type="button" class="emby-button btn-inline weather-url-preset" data-url="https://weatherstar3000.netbymatt.com">Use URL</button></li>
                     </ul>
-                    <p class="hint">Weather channels use headless Chromium via Playwright and the same EBS background music configured on the <strong>EBS</strong> tab. <strong>Windows:</strong> FinTV auto-installs Chromium on first tune. <strong>Linux:</strong> FinTV uses Playwright&apos;s official Docker image (<code>mcr.microsoft.com/playwright:v1.49.0-jammy</code>) — Docker must be installed and the Jellyfin user must be able to run <code>docker</code>. Localhost WeatherStar URLs are rewritten to <code>host.docker.internal</code> for container access.</p>
-                    <p class="hint">Self-host a WeatherStar build from one of these projects, then paste your local base URL above:</p>
-                    <ul class="weather-resource-list">
-                        <li><a href="https://github.com/TheGoldDiamond9/weatherstar4000" target="_blank" rel="noopener">TheGoldDiamond9 / weatherstar4000</a></li>
-                        <li><a href="https://github.com/thornjad/weatherstar4k" target="_blank" rel="noopener">thornjad / weatherstar4k</a></li>
-                        <li><a href="https://github.com/netbymatt/ws3kp" target="_blank" rel="noopener">netbymatt / ws3kp</a> (WeatherStar 3000)</li>
-                    </ul>
+                    <p class="hint">Weather channels use headless Chromium via Playwright and EBS background music. <strong>Linux:</strong> Playwright uses <code>mcr.microsoft.com/playwright:v1.49.0-jammy</code>. Localhost WeatherStar URLs are rewritten to <code>host.docker.internal</code> for container access.</p>
                     <label class="field">
-                        <span>WeatherStar4000 base URL</span>
-                        <input id="weather-base-url" type="url" class="emby-input" placeholder="http://192.168.1.50:8080">
+                        <span>WeatherStar base URL</span>
+                        <input id="weather-base-url" type="url" class="emby-input" placeholder="http://127.0.0.1:8080">
                     </label>
-                    <p class="hint">Example local URL: <code>http://127.0.0.1:8080</code> or <code>http://192.168.1.50:8080</code>. Do not include <code>lat</code> or <code>lon</code> here; FinTV adds them from each weather channel.</p>
+                    <p class="hint">Examples: <code>http://127.0.0.1:8080</code> (ws4kp), <code>http://127.0.0.1:8083</code> (ws3kp). Do not include <code>lat</code> or <code>lon</code> here.</p>
                     <div class="actions">
                         <button type="button" id="btn-save-weather" class="raised button-submit emby-button">Save Weather Settings</button>
                         <button type="button" id="btn-use-test-weather-url" class="emby-button">Use jmthornton test URL</button>

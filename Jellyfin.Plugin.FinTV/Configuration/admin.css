@@ -73,6 +73,12 @@ body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 0; b
 .weather-resource-list { margin: 0 0 .85rem 1.1rem; color: var(--fintv-muted); font-size: .9rem; }
 .weather-resource-list li { margin-bottom: .45rem; }
 .weather-resource-list a { color: #93c5fd; }
+.weather-docker-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin-bottom: 1rem; }
+.weather-docker-panel { border: 1px solid var(--fintv-border); border-radius: 10px; padding: .85rem; background: var(--fintv-surface-2); }
+.weather-docker-panel h4 { margin: 0 0 .5rem; }
+.weather-docker-panel .status-card { margin: .65rem 0; font-size: .88rem; }
+.ai-template-select { min-width: 180px; }
+.ai-daypart-badge { display: block; font-size: .72rem; color: #93c5fd; margin-top: .2rem; }
 .btn-inline { display: inline-block; margin-left: .35rem; padding: .15rem .55rem; font-size: .78rem; vertical-align: middle; }
 
 .actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .5rem; }

@@ -20,19 +20,22 @@ public class WeatherStarChannelService
     private readonly EbsService _ebs;
     private readonly IMediaEncoder _mediaEncoder;
     private readonly PlaywrightRuntimeService _playwrightRuntime;
+    private readonly WeatherStarDockerService _weatherDocker;
 
     public WeatherStarChannelService(
         ILogger<WeatherStarChannelService> logger,
         FfmpegCommandBuilder ffmpegBuilder,
         EbsService ebs,
         IMediaEncoder mediaEncoder,
-        PlaywrightRuntimeService playwrightRuntime)
+        PlaywrightRuntimeService playwrightRuntime,
+        WeatherStarDockerService weatherDocker)
     {
         _logger = logger;
         _ffmpegBuilder = ffmpegBuilder;
         _ebs = ebs;
         _mediaEncoder = mediaEncoder;
         _playwrightRuntime = playwrightRuntime;
+        _weatherDocker = weatherDocker;
     }
 
     public async Task StreamAsync(Domain.Channel channel, Stream output, CancellationToken cancellationToken)
@@ -40,6 +43,12 @@ public class WeatherStarChannelService
         var lat = channel.WeatherLatitude ?? 41.60574;
         var lon = channel.WeatherLongitude ?? -93.55002;
         var baseUrl = Plugin.Instance?.Configuration.WeatherStarBaseUrl;
+        var localVariant = _weatherDocker.ResolveLocalVariant(baseUrl);
+        if (localVariant.HasValue)
+        {
+            await _weatherDocker.EnsureRunningAsync(localVariant.Value, cancellationToken);
+        }
+
         var weatherPageUrl = _playwrightRuntime.AdjustWeatherPageUrlForRuntime(
             BuildWeatherPageUrl(lat, lon, baseUrl));
         var (width, height) = GetResolution(channel);

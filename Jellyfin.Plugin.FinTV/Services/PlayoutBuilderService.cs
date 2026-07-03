@@ -46,15 +46,50 @@ public class PlayoutBuilderService : BackgroundService
         await db.Database.EnsureCreatedAsync(cancellationToken);
         await commercialService.SyncCommercialLibraryAsync(cancellationToken);
 
-        var days = Plugin.Instance?.Configuration.PlayoutDaysToBuild ?? 3;
-        var start = DateTime.UtcNow.Date;
-        var end = start.AddDays(days);
+        var now = DateTime.UtcNow;
+        var horizonEnd = PlayoutScheduleHelper.GetHorizonEndUtc(now);
+        var trimBefore = now.AddDays(-2);
 
         var channels = await db.Channels.Where(c => c.Enabled).ToListAsync(cancellationToken);
         foreach (var channel in channels)
         {
-            await generator.BuildPlayoutAsync(channel, start, end, cancellationToken);
-            _logger.LogInformation("Built playout for channel {Channel}", channel.Name);
+            var stale = await db.PlayoutItems
+                .Where(p => p.ChannelId == channel.Id && p.Finish < trimBefore)
+                .ToListAsync(cancellationToken);
+            if (stale.Count > 0)
+            {
+                db.PlayoutItems.RemoveRange(stale);
+            }
+
+            var latestFinish = await db.PlayoutItems
+                .Where(p => p.ChannelId == channel.Id && p.Finish > now)
+                .Select(p => (DateTime?)p.Finish)
+                .MaxAsync(cancellationToken);
+
+            if (latestFinish.HasValue && latestFinish.Value >= horizonEnd)
+            {
+                await db.SaveChangesAsync(cancellationToken);
+                continue;
+            }
+
+            var appendStart = latestFinish ?? now;
+            if (appendStart < now)
+            {
+                appendStart = now;
+            }
+
+            await generator.BuildPlayoutAsync(
+                channel,
+                appendStart,
+                horizonEnd,
+                PlayoutBuildMode.ExtendHorizon,
+                cancellationToken);
+
+            _logger.LogInformation(
+                "Extended playout for channel {Channel} from {Start} to {End}",
+                channel.Name,
+                appendStart,
+                horizonEnd);
         }
     }
 }

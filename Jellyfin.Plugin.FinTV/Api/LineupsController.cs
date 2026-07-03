@@ -1,8 +1,10 @@
+using Jellyfin.Plugin.FinTV.Data;
 using Jellyfin.Plugin.FinTV.Domain;
 using Jellyfin.Plugin.FinTV.Services;
 using MediaBrowser.Common.Api;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Jellyfin.Plugin.FinTV.Api;
 
@@ -17,6 +19,7 @@ public class LineupsController : ControllerBase
     private readonly LineupService _lineups;
     private readonly LineupGeneratorService _generator;
     private readonly ChannelService _channels;
+    private readonly FinTvDbContext _db;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LineupsController"/> class.
@@ -24,11 +27,17 @@ public class LineupsController : ControllerBase
     /// <param name="lineups">Lineup service.</param>
     /// <param name="generator">Playout generator service.</param>
     /// <param name="channels">Channel service.</param>
-    public LineupsController(LineupService lineups, LineupGeneratorService generator, ChannelService channels)
+    /// <param name="db">Database context.</param>
+    public LineupsController(
+        LineupService lineups,
+        LineupGeneratorService generator,
+        ChannelService channels,
+        FinTvDbContext db)
     {
         _lineups = lineups;
         _generator = generator;
         _channels = channels;
+        _db = db;
     }
 
     /// <summary>
@@ -181,9 +190,36 @@ public class LineupsController : ControllerBase
         }
 
         var start = DateTime.UtcNow.Date;
-        var end = start.AddDays(Plugin.Instance?.Configuration.PlayoutDaysToBuild ?? 3);
-        await _generator.BuildPlayoutAsync(channel, start, end, cancellationToken);
+        var end = PlayoutScheduleHelper.GetHorizonEndUtc(start);
+        await _generator.BuildPlayoutAsync(channel, start, end, PlayoutBuildMode.ReplaceWindow, cancellationToken);
         return Accepted();
+    }
+
+    [HttpGet("{channelId:guid}/playout-horizon")]
+    public async Task<ActionResult<object>> GetPlayoutHorizon(Guid channelId, CancellationToken cancellationToken)
+    {
+        var channel = await _channels.GetByIdAsync(channelId, cancellationToken);
+        if (channel is null)
+        {
+            return NotFound();
+        }
+
+        var now = DateTime.UtcNow;
+        var horizonEnd = PlayoutScheduleHelper.GetHorizonEndUtc(now);
+        var latestFinish = await _db.PlayoutItems
+            .Where(p => p.ChannelId == channelId && p.Finish > now)
+            .Select(p => (DateTime?)p.Finish)
+            .MaxAsync(cancellationToken);
+
+        return Ok(new
+        {
+            playoutDaysToBuild = PlayoutScheduleHelper.GetPlayoutDaysToBuild(),
+            horizonEndUtc = horizonEnd,
+            latestScheduledFinishUtc = latestFinish,
+            daysBuilt = latestFinish.HasValue
+                ? Math.Max(0, (latestFinish.Value - now).TotalDays)
+                : 0
+        });
     }
 }
 

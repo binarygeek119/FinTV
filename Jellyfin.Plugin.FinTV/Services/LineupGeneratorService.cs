@@ -27,11 +27,16 @@ public class LineupGeneratorService
         _channelService = channelService;
     }
 
-    public async Task BuildPlayoutAsync(Channel channel, DateTime startUtc, DateTime endUtc, CancellationToken cancellationToken = default)
+    public async Task BuildPlayoutAsync(
+        Channel channel,
+        DateTime startUtc,
+        DateTime endUtc,
+        PlayoutBuildMode mode = PlayoutBuildMode.ReplaceWindow,
+        CancellationToken cancellationToken = default)
     {
         if (channel.ContentType == ChannelContentType.Weather)
         {
-            await BuildWeatherPlayoutAsync(channel, startUtc, endUtc, cancellationToken);
+            await BuildWeatherPlayoutAsync(channel, startUtc, endUtc, mode, cancellationToken);
             return;
         }
 
@@ -39,11 +44,14 @@ public class LineupGeneratorService
         var anchor = await _channelService.GetAnchorAsync<PlayoutAnchorState>(channel.Id, cancellationToken)
             ?? new PlayoutAnchorState();
 
-        var existing = await _db.PlayoutItems
-            .Where(p => p.ChannelId == channel.Id && p.Start >= startUtc && p.Start < endUtc)
-            .ToListAsync(cancellationToken);
+        if (mode == PlayoutBuildMode.ReplaceWindow)
+        {
+            var existing = await _db.PlayoutItems
+                .Where(p => p.ChannelId == channel.Id && p.Start >= startUtc && p.Start < endUtc)
+                .ToListAsync(cancellationToken);
 
-        _db.PlayoutItems.RemoveRange(existing);
+            _db.PlayoutItems.RemoveRange(existing);
+        }
 
         var cursor = startUtc;
         while (cursor < endUtc)
@@ -174,13 +182,21 @@ public class LineupGeneratorService
         await Task.CompletedTask;
     }
 
-    private async Task BuildWeatherPlayoutAsync(Channel channel, DateTime startUtc, DateTime endUtc, CancellationToken cancellationToken)
+    private async Task BuildWeatherPlayoutAsync(
+        Channel channel,
+        DateTime startUtc,
+        DateTime endUtc,
+        PlayoutBuildMode mode,
+        CancellationToken cancellationToken)
     {
-        var existing = await _db.PlayoutItems
-            .Where(p => p.ChannelId == channel.Id && p.Start >= startUtc && p.Start < endUtc)
-            .ToListAsync(cancellationToken);
+        if (mode == PlayoutBuildMode.ReplaceWindow)
+        {
+            var existing = await _db.PlayoutItems
+                .Where(p => p.ChannelId == channel.Id && p.Start >= startUtc && p.Start < endUtc)
+                .ToListAsync(cancellationToken);
 
-        _db.PlayoutItems.RemoveRange(existing);
+            _db.PlayoutItems.RemoveRange(existing);
+        }
 
         var cursor = startUtc;
         while (cursor < endUtc)

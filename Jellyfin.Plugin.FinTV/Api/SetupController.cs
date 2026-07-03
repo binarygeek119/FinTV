@@ -55,6 +55,11 @@ public class SetupController : ControllerBase
             ebsBackgroundMusicLibraryName = Plugin.Instance?.Configuration.EbsBackgroundMusicLibraryName ?? "Background Music",
             ebsBackgroundMusicLibraryId = Plugin.Instance?.Configuration.EbsBackgroundMusicLibraryId ?? string.Empty,
             weatherStarBaseUrl = Plugin.Instance?.Configuration.WeatherStarBaseUrl ?? WeatherStarChannelService.DefaultWeatherStarBaseUrl,
+            playoutDaysToBuild = PlayoutScheduleHelper.GetPlayoutDaysToBuild(),
+            ws4kpHostPort = Plugin.Instance?.Configuration.Ws4kp.HostPort ?? 8080,
+            ws4kpImage = Plugin.Instance?.Configuration.Ws4kp.Image ?? "ghcr.io/netbymatt/ws4kp",
+            ws3kpHostPort = Plugin.Instance?.Configuration.Ws3kp.HostPort ?? 8083,
+            ws3kpImage = Plugin.Instance?.Configuration.Ws3kp.Image ?? "ghcr.io/netbymatt/ws3kp",
             musicLibraries = _catalog.GetMusicLibraries().Select(l => new { id = l.Id, name = l.Name })
         });
     }

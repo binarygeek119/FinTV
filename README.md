@@ -106,6 +106,15 @@ Compatible with community packs such as [Open-Commercial-Pack](https://github.co
 
 Create a channel with content type **Weather**, set latitude/longitude, enable it, and rebuild playout. FinTV captures a headless WeatherStar page with Playwright and streams it as MPEG-TS.
 
+**Self-hosted WeatherStar (Docker):** On the FinTV **Weather** tab you can start official containers:
+
+| Container | Image | Default port |
+|-----------|-------|--------------|
+| ws4kp (WeatherStar 4000+) | `ghcr.io/netbymatt/ws4kp` | 8080 |
+| ws3kp (WeatherStar 3000+) | `ghcr.io/netbymatt/ws3kp` | 8083 |
+
+Click **Start** then **Use URL** to set the base URL to `http://127.0.0.1:8080` or `:8083`. FinTV auto-starts the matching container when you tune a weather channel with that local URL.
+
 **Windows:** FinTV downloads Chromium automatically into `{JellyfinData}/plugins/configurations/FinTV/playwright-browsers` on the first weather tune.
 
 **Linux:** FinTV starts Chromium from Playwright's official Docker image (`mcr.microsoft.com/playwright:v1.49.0-jammy`) and connects over CDP. Requirements:
@@ -116,9 +125,17 @@ Create a channel with content type **Weather**, set latitude/longitude, enable i
 
 On first weather tune, FinTV creates a container named `fintv-playwright-chromium`. If your WeatherStar URL uses `localhost` or `127.0.0.1`, FinTV rewrites it to `host.docker.internal` so the container can reach WeatherStar on the Jellyfin host.
 
-If Jellyfin itself runs in Docker, mount the Docker socket into the Jellyfin container (for example `-v /var/run/docker.sock:/var/run/docker.sock`) so FinTV can start the Playwright browser container.
+If Jellyfin itself runs in Docker, mount the Docker socket into the Jellyfin container (for example `-v /var/run/docker.sock:/var/run/docker.sock`) so FinTV can start the Playwright browser and WeatherStar containers.
 
 **Install FinTV, restart Jellyfin, then tune a weather channel once** to initialize the browser runtime on either platform.
+
+### AI lineup generation
+
+The **AI** tab can auto-build 48-slot daily lineups from your tagged Jellyfin library (OpenAI or Venice). Features include:
+
+- **Playout templates** — daypart schedules (Classic Cable, Kids All Day, Movie Marathon) guide what airs when
+- **14-day rolling playout** — applied lineups rebuild up to 14 days ahead; FinTV auto-extends the schedule hourly
+- Per-channel content mix (TV / movies / both) and fine-tune prompts
 
 ### Music channels
 
@@ -145,11 +162,17 @@ Copy build output to your Jellyfin plugins folder and restart the server.
 | `GET /FinTV/api/lineups/{channelId}` | Lineup editor |
 | `GET /FinTV/api/commercials` | Commercial library |
 | `GET /FinTV/api/setup/urls` | Live TV setup helper |
+| `GET /FinTV/api/weather/docker/status` | ws4kp/ws3kp Docker status |
+| `POST /FinTV/api/weather/docker/ws4kp/start` | Start WeatherStar 4000+ container |
+| `POST /FinTV/api/weather/docker/ws3kp/start` | Start WeatherStar 3000+ container |
+| `GET /FinTV/api/ai/playout-templates` | Built-in AI daypart templates |
+| `POST /FinTV/api/ai/channels/{id}/generate` | AI lineup preview |
 
 ## Credits
 
 - [ErsatzTV/legacy](https://github.com/ErsatzTV/legacy) — scheduling / playout architecture inspiration
 - [binarygeek119/open-channel-logos](https://github.com/binarygeek119/open-channel-logos) — channel logo set
+- [netbymatt/ws4kp](https://github.com/netbymatt/ws4kp) / [netbymatt/ws3kp](https://github.com/netbymatt/ws3kp) — self-hosted WeatherStar Docker images
 - [thornjad/weatherstar4k](https://github.com/thornjad/weatherstar4k) — WeatherStar 4000 display
 - [binarygeek119/Open-Commercial-Pack](https://github.com/binarygeek119/Open-Commercial-Pack) — commercial content packs
 

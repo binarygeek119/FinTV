@@ -136,10 +136,48 @@ public class AiController : ControllerBase
                     libraryTag = tag,
                     catalogMode = (int)ChannelAiRules.ResolveCatalogMode(c),
                     aiFineTunePrompt = c.AiFineTunePrompt ?? string.Empty,
+                    aiPlayoutTemplateId = c.AiPlayoutTemplateId ?? AiPlayoutTemplates.NoneId,
                     aiRuleBrief = ChannelAiRules.GetBrief(tag),
                     filledSlots = slotCounts.TryGetValue(c.Id, out var count) ? count : 0
                 };
             }));
+    }
+
+    [HttpGet("playout-templates")]
+    public ActionResult<object> GetPlayoutTemplates()
+    {
+        return Ok(AiPlayoutTemplates.ListAll().Select(t => new
+        {
+            id = t.Id,
+            name = t.Name,
+            description = t.Description,
+            dayparts = t.Dayparts.Select(d => new
+            {
+                name = d.Name,
+                slotRange = d.FormatSlotRange(),
+                brief = d.Brief
+            })
+        }));
+    }
+
+    [HttpPut("channels/{channelId:guid}/playout-template")]
+    public async Task<IActionResult> UpdatePlayoutTemplate(
+        Guid channelId,
+        [FromBody] AiPlayoutTemplateRequest request,
+        CancellationToken cancellationToken)
+    {
+        var channel = await _db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
+        if (channel is null)
+        {
+            return NotFound();
+        }
+
+        channel.AiPlayoutTemplateId = string.IsNullOrWhiteSpace(request.AiPlayoutTemplateId)
+            ? AiPlayoutTemplates.NoneId
+            : request.AiPlayoutTemplateId.Trim();
+
+        await _db.SaveChangesAsync(cancellationToken);
+        return NoContent();
     }
 
     [HttpPut("channels/{channelId:guid}/fine-tune")]
@@ -162,6 +200,13 @@ public class AiController : ControllerBase
         if (request.CatalogMode.HasValue)
         {
             channel.CatalogMode = request.CatalogMode.Value;
+        }
+
+        if (request.AiPlayoutTemplateId is not null)
+        {
+            channel.AiPlayoutTemplateId = string.IsNullOrWhiteSpace(request.AiPlayoutTemplateId)
+                ? AiPlayoutTemplates.NoneId
+                : request.AiPlayoutTemplateId.Trim();
         }
 
         await _db.SaveChangesAsync(cancellationToken);
@@ -226,7 +271,7 @@ public class AiController : ControllerBase
             try
             {
                 var preview = await _generator.GenerateAsync(channel.Id, null, cancellationToken);
-                await _generator.ApplyAsync(channel.Id, preview.LineupSlots, false, _playoutGenerator, cancellationToken);
+                await _generator.ApplyAsync(channel.Id, preview.LineupSlots, true, _playoutGenerator, cancellationToken);
                 results.Add(new { channelId = channel.Id, name = channel.Name, ok = true });
             }
             catch (Exception ex)
@@ -281,6 +326,13 @@ public class AiChannelSettingsRequest
     public string? AiFineTunePrompt { get; set; }
 
     public ChannelCatalogMode? CatalogMode { get; set; }
+
+    public string? AiPlayoutTemplateId { get; set; }
+}
+
+public class AiPlayoutTemplateRequest
+{
+    public string? AiPlayoutTemplateId { get; set; }
 }
 
 public class AiGenerateRequest

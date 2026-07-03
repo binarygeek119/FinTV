@@ -36,7 +36,9 @@
     let configPage = null;
     let aiSettings = null;
     let aiChannels = [];
+    let aiPlayoutTemplates = [];
     let aiPreview = null;
+    let weatherDockerStatus = null;
 
     function $(id) {
         if (configPage) {
@@ -1825,6 +1827,7 @@
                 keyStatus.textContent = `OpenAI key: ${aiSettings.hasOpenAiApiKey ? aiSettings.openAiApiKeyMasked : 'not set'} · Venice key: ${aiSettings.hasVeniceApiKey ? aiSettings.veniceApiKeyMasked : 'not set'}`;
             }
             aiChannels = await api('/ai/channels');
+            aiPlayoutTemplates = await api('/ai/playout-templates');
             renderAiChannels();
             updateAiUiState();
         } catch (err) {
@@ -1840,7 +1843,11 @@
             return;
         }
 
-        list.innerHTML = aiChannels.map((ch) => `
+        list.innerHTML = aiChannels.map((ch) => {
+            const templateOptions = (aiPlayoutTemplates || []).map((t) =>
+                `<option value="${escapeHtml(t.id)}" ${(ch.aiPlayoutTemplateId || 'none') === t.id ? 'selected' : ''}>${escapeHtml(t.name)}</option>`
+            ).join('');
+            return `
             <div class="ai-channel-row" data-ai-channel="${ch.id}">
                 <div class="row-top">
                     <div>
@@ -1856,6 +1863,10 @@
                                 <option value="2" ${ch.catalogMode === 2 ? 'selected' : ''}>Both</option>
                             </select>
                         </label>
+                        <label class="field" style="margin:0">
+                            <span>Playout template</span>
+                            <select class="emby-input ai-playout-template ai-template-select" data-channel="${ch.id}">${templateOptions}</select>
+                        </label>
                         <button type="button" class="emby-button ai-action ai-save-channel" data-channel="${ch.id}">Save</button>
                         <button type="button" class="emby-button ai-action ai-generate-channel" data-channel="${ch.id}">Generate</button>
                     </div>
@@ -1865,7 +1876,8 @@
                     <span>Fine-tune prompt</span>
                     <textarea class="emby-input ai-fine-tune" data-channel="${ch.id}" placeholder="Optional extra instructions for this channel">${escapeHtml(ch.aiFineTunePrompt || '')}</textarea>
                 </label>
-            </div>`).join('');
+            </div>`;
+        }).join('');
 
         list.querySelectorAll('.ai-save-channel').forEach((btn) => {
             btn.onclick = () => saveAiChannelSettings(btn.dataset.channel);
@@ -1916,7 +1928,8 @@
                 method: 'PUT',
                 body: JSON.stringify({
                     aiFineTunePrompt: row.querySelector('.ai-fine-tune')?.value || '',
-                    catalogMode: Number(row.querySelector('.ai-catalog-mode')?.value || '0')
+                    catalogMode: Number(row.querySelector('.ai-catalog-mode')?.value || '0'),
+                    aiPlayoutTemplateId: row.querySelector('.ai-playout-template')?.value || 'none'
                 })
             });
             toast('Channel AI settings saved.', 'success');
@@ -1948,7 +1961,10 @@
         if (!aiPreview || !panel) return;
         panel.classList.remove('hidden');
         $('ai-preview-title').textContent = `Preview: ${aiPreview.channelName}`;
-        $('ai-preview-summary').textContent = `AI chose from ${aiPreview.catalogSummary.includedInPrompt} of ${aiPreview.catalogSummary.totalAvailable} tagged items · ${AI_CATALOG_MODES[aiPreview.catalogMode] || 'Mixed'} mode`;
+        const templateLabel = aiPreview.playoutTemplateName && aiPreview.playoutTemplateId !== 'none'
+            ? ` · Template: ${aiPreview.playoutTemplateName}`
+            : '';
+        $('ai-preview-summary').textContent = `AI chose from ${aiPreview.catalogSummary.includedInPrompt} of ${aiPreview.catalogSummary.totalAvailable} tagged items · ${AI_CATALOG_MODES[aiPreview.catalogMode] || 'Mixed'} mode${templateLabel} · builds up to 14 days of playout when applied with rebuild`;
         const grid = $('ai-preview-grid');
         const occupied = new Array(48).fill(false);
         const blocks = (aiPreview.slots || []).filter((s) => (s.title && s.title !== 'Filter fallback') || s.jellyfinItemId);
@@ -1967,7 +1983,7 @@
             html += `<div class="slot-card has-items span-block" style="--slot-span:${span};grid-column:span ${span}">
                 <div class="time">${slotTime(i)} · ${duration}m</div>
                 <div class="summary">${escapeHtml(block.title)}</div>
-                <div class="count">${escapeHtml(block.type || '')}${block.runtimeMinutes ? ' · ' + block.runtimeMinutes + 'm' : ''}</div>
+                <div class="count">${escapeHtml(block.type || '')}${block.runtimeMinutes ? ' · ' + block.runtimeMinutes + 'm' : ''}${block.daypartName ? `<span class="ai-daypart-badge">${escapeHtml(block.daypartName)}</span>` : ''}</div>
             </div>`;
         }
         grid.innerHTML = html;
@@ -2080,6 +2096,25 @@
         }
     }
 
+    function renderWeatherDockerStatus(status) {
+        weatherDockerStatus = status;
+        const renderPanel = (elId, info, usingLocal) => {
+            const el = $(elId);
+            if (!el || !info) return;
+            const dockerLine = info.dockerAvailable
+                ? (info.running ? `Running · ${info.baseUrl}` : 'Stopped')
+                : 'Docker not available — install Docker and ensure Jellyfin can run docker';
+            el.innerHTML = `<div>${dockerLine}</div><div class="meta">${escapeHtml(info.containerName)} · ${escapeHtml(info.image)} · port ${info.hostPort}${usingLocal ? ' · active URL' : ''}</div>`;
+        };
+        renderPanel('ws4kp-docker-status', status?.ws4kp, status?.usingLocalWs4kp);
+        renderPanel('ws3kp-docker-status', status?.ws3kp, status?.usingLocalWs3kp);
+        const dockerOk = !!(status?.ws4kp?.dockerAvailable || status?.ws3kp?.dockerAvailable);
+        ['btn-ws4kp-start', 'btn-ws4kp-stop', 'btn-ws3kp-start', 'btn-ws3kp-stop'].forEach((id) => {
+            const btn = $(id);
+            if (btn) btn.disabled = !dockerOk;
+        });
+    }
+
     async function loadWeather() {
         try {
             const settings = await api('/setup/settings');
@@ -2087,8 +2122,43 @@
             if (input) {
                 input.value = settings.weatherStarBaseUrl || '';
             }
+            if ($('ws4kp-host-port')) $('ws4kp-host-port').value = settings.ws4kpHostPort ?? 8080;
+            if ($('ws4kp-image')) $('ws4kp-image').value = settings.ws4kpImage || 'ghcr.io/netbymatt/ws4kp';
+            if ($('ws3kp-host-port')) $('ws3kp-host-port').value = settings.ws3kpHostPort ?? 8083;
+            if ($('ws3kp-image')) $('ws3kp-image').value = settings.ws3kpImage || 'ghcr.io/netbymatt/ws3kp';
+            const dockerStatus = await api('/weather/docker/status');
+            renderWeatherDockerStatus(dockerStatus);
         } catch (err) {
             reportApiError(err, 'Could not load weather settings.');
+        }
+    }
+
+    async function startWeatherDocker(variant, updateBaseUrl) {
+        const isWs4kp = variant === 'ws4kp';
+        const hostPort = Number((isWs4kp ? $('ws4kp-host-port') : $('ws3kp-host-port'))?.value || (isWs4kp ? 8080 : 8083));
+        const image = (isWs4kp ? $('ws4kp-image') : $('ws3kp-image'))?.value?.trim();
+        try {
+            const data = await api('/weather/docker/' + variant + '/start', {
+                method: 'POST',
+                body: JSON.stringify({ hostPort, image: image || null, updateBaseUrl: !!updateBaseUrl })
+            });
+            renderWeatherDockerStatus(data);
+            if (updateBaseUrl && data.configuredBaseUrl) {
+                applyWeatherBaseUrl(data.configuredBaseUrl);
+            }
+            toast(`${variant} started.`, 'success');
+        } catch (err) {
+            toast(err.message, 'error');
+        }
+    }
+
+    async function stopWeatherDocker(variant) {
+        try {
+            const data = await api('/weather/docker/' + variant + '/stop', { method: 'POST', body: '{}' });
+            renderWeatherDockerStatus(data);
+            toast(`${variant} stopped.`, 'success');
+        } catch (err) {
+            toast(err.message, 'error');
         }
     }
 
@@ -2292,6 +2362,12 @@
         click('btn-remove-ebs-international', () => removeEbsSlate('international'));
         click('btn-save-weather', saveWeatherSettings);
         click('btn-use-test-weather-url', useTestWeatherUrl);
+        click('btn-ws4kp-start', () => startWeatherDocker('ws4kp', true).catch((e) => toast(e.message, 'error')));
+        click('btn-ws4kp-stop', () => stopWeatherDocker('ws4kp').catch((e) => toast(e.message, 'error')));
+        click('btn-ws4kp-use-url', () => startWeatherDocker('ws4kp', true).catch((e) => toast(e.message, 'error')));
+        click('btn-ws3kp-start', () => startWeatherDocker('ws3kp', true).catch((e) => toast(e.message, 'error')));
+        click('btn-ws3kp-stop', () => stopWeatherDocker('ws3kp').catch((e) => toast(e.message, 'error')));
+        click('btn-ws3kp-use-url', () => startWeatherDocker('ws3kp', true).catch((e) => toast(e.message, 'error')));
         bindWeatherUrlPresets();
         change('ebs-display-mode', updateEbsFieldVisibility);
         change('ebs-audio-mode', updateEbsFieldVisibility);

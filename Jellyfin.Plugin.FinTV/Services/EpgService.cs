@@ -36,7 +36,7 @@ public class EpgService
     {
         var channels = await _db.Channels.Where(c => c.Enabled).OrderBy(c => c.Number).AsNoTracking().ToListAsync(cancellationToken);
         var start = DateTime.UtcNow.AddHours(-3);
-        var end = DateTime.UtcNow.AddDays(Plugin.Instance?.Configuration.PlayoutDaysToBuild ?? 3);
+        var end = DateTime.UtcNow.AddDays(PlayoutScheduleHelper.GetPlayoutDaysToBuild());
 
         var root = new XElement(
             "tv",

@@ -238,10 +238,9 @@ public class ChannelPresetService
 
     private async Task BuildWeatherPlayoutAsync(Channel channel, CancellationToken cancellationToken)
     {
-        var days = Plugin.Instance?.Configuration.PlayoutDaysToBuild ?? 3;
         var start = DateTime.UtcNow.Date;
-        var end = start.AddDays(days);
-        await _lineupGenerator.BuildPlayoutAsync(channel, start, end, cancellationToken);
+        var end = PlayoutScheduleHelper.GetHorizonEndUtc(start);
+        await _lineupGenerator.BuildPlayoutAsync(channel, start, end, PlayoutBuildMode.ReplaceWindow, cancellationToken);
     }
 
     private static int CreateSeed(decimal number)

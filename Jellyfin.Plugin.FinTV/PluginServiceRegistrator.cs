@@ -46,6 +46,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddScoped<AiLineupGeneratorService>();
         serviceCollection.AddScoped<EbsService>();
         serviceCollection.AddSingleton<PlaywrightDockerBrowserService>();
+        serviceCollection.AddSingleton<WeatherStarDockerService>();
         serviceCollection.AddSingleton<PlaywrightRuntimeService>();
         serviceCollection.AddScoped<WeatherStarChannelService>();
         serviceCollection.AddSingleton<StreamService>();

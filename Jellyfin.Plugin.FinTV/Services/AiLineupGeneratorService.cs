@@ -59,10 +59,11 @@ public class AiLineupGeneratorService
         var libraryTag = ChannelAiRules.ExtractLibraryTag(channel.FilterJson);
         var ruleBrief = ChannelAiRules.GetBrief(libraryTag);
         var catalogMode = manifest.CatalogMode;
+        var playoutTemplate = AiPlayoutTemplates.Resolve(channel);
         var provider = providerOverride ?? Plugin.Instance?.Configuration.Ai.DefaultProvider ?? AiProvider.OpenAi;
 
-        var systemPrompt = BuildSystemPrompt(catalogMode);
-        var userPrompt = BuildUserPrompt(channel, manifest, ruleBrief, catalogMode);
+        var systemPrompt = BuildSystemPrompt(catalogMode, playoutTemplate);
+        var userPrompt = BuildUserPrompt(channel, manifest, ruleBrief, catalogMode, playoutTemplate);
 
         var rawJson = await _llm.CompleteJsonAsync(provider, systemPrompt, userPrompt, cancellationToken);
         var aiResponse = ParseAiResponse(rawJson);
@@ -71,7 +72,7 @@ public class AiLineupGeneratorService
         var catalogById = manifest.Catalog.ToDictionary(c => c.Id);
         var slots = ValidateAndBuildSlots(aiResponse.Slots, validIds, catalogById, channel.FilterJson);
 
-        return BuildPreview(channel, slots, manifest, provider);
+        return BuildPreview(channel, slots, manifest, provider, playoutTemplate);
     }
 
     public async Task ApplyAsync(
@@ -92,17 +93,17 @@ public class AiLineupGeneratorService
         var channel = await _db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken)
             ?? throw new InvalidOperationException("Channel not found.");
 
-        var days = Plugin.Instance?.Configuration.PlayoutDaysToBuild ?? 3;
         var start = DateTime.UtcNow.Date;
-        var end = start.AddDays(days);
-        await generator.BuildPlayoutAsync(channel, start, end, cancellationToken);
+        var end = PlayoutScheduleHelper.GetHorizonEndUtc(start);
+        await generator.BuildPlayoutAsync(channel, start, end, PlayoutBuildMode.ReplaceWindow, cancellationToken);
     }
 
     private AiLineupPreviewResult BuildPreview(
         Channel channel,
         List<LineupSlotDto> slots,
         AiCatalogManifest manifest,
-        AiProvider provider)
+        AiProvider provider,
+        AiPlayoutTemplate playoutTemplate)
     {
         var previewSlots = slots
             .OrderBy(s => s.SlotIndex)
@@ -119,6 +120,7 @@ public class AiLineupGeneratorService
                 {
                     SlotIndex = slot.SlotIndex,
                     SpanSlots = slot.SpanSlots,
+                    DaypartName = AiPlayoutTemplates.GetDaypartNameForSlot(playoutTemplate, slot.SlotIndex),
                     Title = entry?.Title ?? candidate?.CollectionName ?? "Filter fallback",
                     Type = entry?.Type ?? candidate?.Kind.ToString() ?? string.Empty,
                     RuntimeMinutes = entry?.RuntimeMinutes,
@@ -133,6 +135,8 @@ public class AiLineupGeneratorService
             ChannelName = channel.Name,
             Provider = provider,
             CatalogMode = manifest.CatalogMode,
+            PlayoutTemplateId = playoutTemplate.Id,
+            PlayoutTemplateName = playoutTemplate.Name,
             CatalogSummary = new AiCatalogSummary
             {
                 TotalAvailable = manifest.TotalAvailable,
@@ -306,8 +310,13 @@ public class AiLineupGeneratorService
         }
     }
 
-    private static string BuildSystemPrompt(ChannelCatalogMode catalogMode)
+    private static string BuildSystemPrompt(ChannelCatalogMode catalogMode, AiPlayoutTemplate playoutTemplate)
     {
+        var templateSection = AiPlayoutTemplates.BuildPromptSection(playoutTemplate);
+        var templateBlock = string.IsNullOrWhiteSpace(templateSection)
+            ? string.Empty
+            : "\n" + templateSection;
+
         return """
             You are a TV channel scheduling assistant for FinTV.
             Build a 48-slot daily lineup (each base slot is 30 minutes, slotIndex 0 = midnight).
@@ -318,14 +327,15 @@ public class AiLineupGeneratorService
             - spanSlots = number of consecutive 30-minute blocks (1-8). Use longer spans for movies.
             - Do not overlap spans. slotIndex + spanSlots must be <= 48.
             - Vary content across dayparts; avoid repeating the same title in adjacent blocks.
-            """ + $"\nCatalog mode: {catalogMode}.";
+            """ + $"\nCatalog mode: {catalogMode}." + templateBlock;
     }
 
     private static string BuildUserPrompt(
         Channel channel,
         AiCatalogManifest manifest,
         string ruleBrief,
-        ChannelCatalogMode catalogMode)
+        ChannelCatalogMode catalogMode,
+        AiPlayoutTemplate playoutTemplate)
     {
         var payload = new
         {
@@ -337,6 +347,20 @@ public class AiLineupGeneratorService
                 contentType = channel.ContentType.ToString()
             },
             rules = ruleBrief,
+            playoutTemplate = playoutTemplate.Dayparts.Count == 0
+                ? null
+                : new
+                {
+                    id = playoutTemplate.Id,
+                    name = playoutTemplate.Name,
+                    dayparts = playoutTemplate.Dayparts.Select(d => new
+                    {
+                        name = d.Name,
+                        slotRange = d.FormatSlotRange(),
+                        brief = d.Brief,
+                        maxSpanSlots = d.MaxSpanSlots
+                    })
+                },
             fineTune = channel.AiFineTunePrompt ?? string.Empty,
             catalog = manifest.Catalog.Select(c => new
             {
@@ -373,6 +397,10 @@ public class AiLineupPreviewResult
 
     public ChannelCatalogMode CatalogMode { get; set; }
 
+    public string? PlayoutTemplateId { get; set; }
+
+    public string? PlayoutTemplateName { get; set; }
+
     public AiCatalogSummary CatalogSummary { get; set; } = new();
 
     public List<AiLineupPreviewSlot> Slots { get; set; } = new();
@@ -385,6 +413,8 @@ public class AiLineupPreviewSlot
     public int SlotIndex { get; set; }
 
     public int SpanSlots { get; set; } = 1;
+
+    public string? DaypartName { get; set; }
 
     public string Title { get; set; } = string.Empty;
 
