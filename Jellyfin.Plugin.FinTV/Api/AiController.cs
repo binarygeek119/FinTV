@@ -42,10 +42,13 @@ public class AiController : ControllerBase
         => Ok(BuildSettingsResponse());
 
     [HttpPut("settings")]
-    public async Task<ActionResult<object>> UpdateSettings(
-        [FromBody] AiSettingsRequest request,
-        CancellationToken cancellationToken)
+    public ActionResult<object> UpdateSettings([FromBody] AiSettingsRequest request)
     {
+        if (request is null)
+        {
+            return BadRequest(new { message = "Request body is required." });
+        }
+
         var plugin = Plugin.Instance ?? throw new InvalidOperationException("FinTV plugin not initialized.");
         var ai = plugin.Configuration.Ai;
 
@@ -99,21 +102,8 @@ public class AiController : ControllerBase
         object? applyAllSummary = null;
         if (ai.Enabled && ai.AutoApplyToAllChannelsOnSave)
         {
-            var results = await _autoApply.ApplyToAllEligibleChannelsAsync(cancellationToken);
-            applyAllSummary = new
-            {
-                ok = results.Count(r => r.Ok),
-                failed = results.Count(r => !r.Ok && !r.WasSkipped),
-                skipped = results.Count(r => r.WasSkipped),
-                results = results.Select(r => new
-                {
-                    channelId = r.ChannelId,
-                    name = r.ChannelName,
-                    ok = r.Ok,
-                    skipped = r.WasSkipped,
-                    error = r.Error
-                })
-            };
+            _autoApply.QueueApplyToAllEligibleChannels();
+            applyAllSummary = new { queued = true };
         }
 
         return Ok(new

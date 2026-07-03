@@ -79,13 +79,13 @@ public class WeatherStarDockerService
 
             if (await IsContainerRunningAsync(definition.ContainerName, cancellationToken))
             {
-                await WaitForHttpReadyAsync(GetSettings(variant).HostPort, definition.ContainerName, cancellationToken);
+                await WaitForHttpReadyAsync(definition, GetSettings(variant).HostPort, cancellationToken);
                 return await GetStatusAsync(variant, cancellationToken);
             }
 
             await RemoveStaleContainerAsync(definition.ContainerName, cancellationToken);
             await StartContainerAsync(variant, cancellationToken);
-            await WaitForHttpReadyAsync(GetSettings(variant).HostPort, definition.ContainerName, cancellationToken);
+            await WaitForHttpReadyAsync(definition, GetSettings(variant).HostPort, cancellationToken);
 
             var settings = GetSettings(variant);
             _logger.LogInformation(
@@ -317,32 +317,92 @@ public class WeatherStarDockerService
         }
     }
 
-    private async Task WaitForHttpReadyAsync(int hostPort, string containerName, CancellationToken cancellationToken)
+    private async Task WaitForHttpReadyAsync(
+        WeatherStarDockerDefinition definition,
+        int hostPort,
+        CancellationToken cancellationToken)
     {
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
-        var url = BuildBaseUrl(hostPort);
+        var urls = BuildHealthCheckUrls(hostPort).ToArray();
         for (var attempt = 0; attempt < 60; attempt++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            try
+            foreach (var url in urls)
             {
-                using var response = await http.GetAsync(url, cancellationToken);
-                if (response.IsSuccessStatusCode)
+                if (await TryHttpProbeAsync(http, url, cancellationToken))
                 {
+                    _logger.LogDebug("WeatherStar HTTP ready at {Url}", url);
                     return;
                 }
             }
-            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+
+            if (await TryContainerInternalProbeAsync(definition.ContainerName, definition.ContainerPort, cancellationToken))
             {
-                _logger.LogDebug(ex, "Waiting for HTTP on {Url}", url);
+                _logger.LogDebug(
+                    "WeatherStar ready via in-container probe on {ContainerName}",
+                    definition.ContainerName);
+                return;
             }
 
             await Task.Delay(TimeSpan.FromMilliseconds(500), cancellationToken);
         }
 
+        var primaryUrl = BuildBaseUrl(hostPort);
         throw new TimeoutException(
-            $"WeatherStar container did not become ready at {url}. Check container logs with: docker logs {containerName}");
+            $"WeatherStar container did not become ready at {primaryUrl}. "
+            + $"If Jellyfin runs in Docker, the ws4kp port is on the host — verify with "
+            + $"`curl {primaryUrl}` on the host and `docker logs {definition.ContainerName}`. "
+            + $"Add `extra_hosts: [\"host.docker.internal:host-gateway\"]` to your Jellyfin compose file when using localhost URLs.");
+    }
+
+    private static IEnumerable<string> BuildHealthCheckUrls(int hostPort)
+    {
+        yield return BuildBaseUrl(hostPort);
+
+        if (File.Exists("/.dockerenv"))
+        {
+            yield return $"http://host.docker.internal:{hostPort}";
+        }
+    }
+
+    private async Task<bool> TryHttpProbeAsync(HttpClient http, string url, CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var response = await http.GetAsync(url, cancellationToken);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _logger.LogDebug(ex, "Waiting for HTTP on {Url}", url);
+            return false;
+        }
+    }
+
+    private async Task<bool> TryContainerInternalProbeAsync(
+        string containerName,
+        int containerPort,
+        CancellationToken cancellationToken)
+    {
+        var url = $"http://127.0.0.1:{containerPort}/";
+
+        var wget = await Cli.Wrap("docker")
+            .WithArguments(["exec", containerName, "wget", "-q", "-O", "/dev/null", url])
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteBufferedAsync(cancellationToken);
+
+        if (wget.ExitCode == 0)
+        {
+            return true;
+        }
+
+        var curl = await Cli.Wrap("docker")
+            .WithArguments(["exec", containerName, "curl", "-sf", url])
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteBufferedAsync(cancellationToken);
+
+        return curl.ExitCode == 0;
     }
 }
 
