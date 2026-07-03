@@ -147,6 +147,22 @@
         return value == null ? value : normalizeApiValue(value);
     }
 
+    function parseApiJsonBody(text) {
+        if (text == null || text === '') {
+            return null;
+        }
+
+        if (typeof text === 'object') {
+            return text;
+        }
+
+        try {
+            return JSON.parse(text);
+        } catch (err) {
+            throw new Error('Invalid JSON response from server');
+        }
+    }
+
     function resolveEnumValue(map, value, fallback) {
         if (value == null || value === '') {
             return fallback;
@@ -230,9 +246,14 @@
             const ajaxOptions = {
                 url: url,
                 type: method,
-                dataType: 'json',
+                dataType: 'text',
                 headers: {
                     accept: 'application/json'
+                },
+                statusCode: {
+                    204: function () {
+                        return null;
+                    }
                 }
             };
 
@@ -242,7 +263,7 @@
             }
 
             return ApiClient.ajax(ajaxOptions)
-                .then(normalizeApiResponse)
+                .then((text) => normalizeApiResponse(parseApiJsonBody(text)))
                 .catch(readApiFailure);
         }
 
@@ -270,7 +291,7 @@
             }
 
             const text = await res.text();
-            return normalizeApiResponse(text ? JSON.parse(text) : null);
+            return normalizeApiResponse(parseApiJsonBody(text));
         }).catch((err) => {
             if (isNetworkError(err)) {
                 throw new Error('Jellyfin server is unreachable');
@@ -291,12 +312,17 @@
                 data: formData,
                 contentType: false,
                 processData: false,
-                dataType: 'json',
+                dataType: 'text',
                 headers: {
                     accept: 'application/json'
+                },
+                statusCode: {
+                    204: function () {
+                        return null;
+                    }
                 }
             })
-                .then(normalizeApiResponse)
+                .then((text) => normalizeApiResponse(parseApiJsonBody(text)))
                 .catch(readApiFailure);
         }
 
@@ -329,7 +355,7 @@
             }
 
             const text = await res.text();
-            return normalizeApiResponse(text ? JSON.parse(text) : null);
+            return normalizeApiResponse(parseApiJsonBody(text));
         } catch (err) {
             if (isNetworkError(err)) {
                 throw new Error('Jellyfin server is unreachable');
