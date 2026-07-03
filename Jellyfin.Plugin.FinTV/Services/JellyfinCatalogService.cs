@@ -13,16 +13,19 @@ namespace Jellyfin.Plugin.FinTV.Services;
 public class JellyfinCatalogService
 {
     private readonly ILibraryManager _libraryManager;
+    private readonly HolidayChannelService _holidays;
 
-    public JellyfinCatalogService(ILibraryManager libraryManager)
+    public JellyfinCatalogService(ILibraryManager libraryManager, HolidayChannelService holidays)
     {
         _libraryManager = libraryManager;
+        _holidays = holidays;
     }
 
     public async Task<IReadOnlyList<ResolvedCandidate>> ResolveItemAsync(
         Guid itemId,
         Channel channel,
         PlayoutAnchorState anchor,
+        DateOnly scheduleDate,
         CancellationToken cancellationToken)
     {
         _ = cancellationToken;
@@ -34,8 +37,13 @@ public class JellyfinCatalogService
 
         if (item is Series series)
         {
-            var episodes = QueryItems(channel, parentId: series.Id);
+            var episodes = QueryItems(channel, scheduleDate: scheduleDate, parentId: series.Id);
             return PickFromPool(episodes, channel, anchor);
+        }
+
+        if (!_holidays.MatchesActiveHoliday(item, channel, scheduleDate))
+        {
+            return Array.Empty<ResolvedCandidate>();
         }
 
         return new[] { MapItem(item) };
@@ -45,10 +53,11 @@ public class JellyfinCatalogService
         string collectionName,
         Channel channel,
         PlayoutAnchorState anchor,
+        DateOnly scheduleDate,
         CancellationToken cancellationToken)
     {
         _ = cancellationToken;
-        var items = QueryItems(channel, collectionName: collectionName);
+        var items = QueryItems(channel, scheduleDate: scheduleDate, collectionName: collectionName);
         return Task.FromResult<IReadOnlyList<ResolvedCandidate>>(PickFromPool(items, channel, anchor));
     }
 
@@ -56,6 +65,7 @@ public class JellyfinCatalogService
         string filterJson,
         Channel channel,
         PlayoutAnchorState anchor,
+        DateOnly scheduleDate,
         CancellationToken cancellationToken)
     {
         _ = cancellationToken;
@@ -69,7 +79,7 @@ public class JellyfinCatalogService
             return Task.FromResult<IReadOnlyList<ResolvedCandidate>>(Array.Empty<ResolvedCandidate>());
         }
 
-        var items = QueryItems(channel, filter);
+        var items = QueryItems(channel, filter, scheduleDate: scheduleDate);
         return Task.FromResult<IReadOnlyList<ResolvedCandidate>>(PickFromPool(items, channel, anchor));
     }
 
@@ -77,7 +87,8 @@ public class JellyfinCatalogService
         Channel channel,
         FilterDefinition? filter = null,
         string? collectionName = null,
-        Guid? parentId = null)
+        Guid? parentId = null,
+        DateOnly? scheduleDate = null)
     {
         var query = new InternalItemsQuery
         {
@@ -92,46 +103,165 @@ public class JellyfinCatalogService
             query.ParentId = parentId.Value;
             query.IncludeItemTypes = new[] { BaseItemKind.Episode };
         }
-
-        ApplyFilterToQuery(query, filter);
-        MergeChannelFilter(query, channel);
+        else
+        {
+            ApplyFilterToQuery(query, filter);
+            MergeChannelFilter(query, channel);
+        }
 
         if (!string.IsNullOrWhiteSpace(collectionName))
         {
             query.Name = collectionName;
         }
 
-        return _libraryManager.GetItemsResult(query).Items.ToList();
+        return ApplyCatalogConstraints(_libraryManager.GetItemsResult(query).Items.ToList(), channel, scheduleDate);
     }
 
     public IReadOnlyList<BaseItem> BrowseForAiManifest(Channel channel, ChannelCatalogMode catalogMode, int limit)
     {
+        var scheduleDate = _holidays.GetScheduleDateUtc(DateTime.UtcNow);
         var kinds = GetManifestItemTypes(channel, catalogMode);
         var query = new InternalItemsQuery
         {
             Recursive = true,
             IsVirtualItem = false,
             IncludeItemTypes = kinds,
-            Limit = Math.Clamp(limit, 1, 1000),
             OrderBy = new[] { (ItemSortBy.SortName, Jellyfin.Database.Implementations.Enums.SortOrder.Ascending) }
         };
 
+        if (!ChannelAiRules.HasCatalogConstraints(channel))
+        {
+            query.Limit = Math.Clamp(limit, 1, 1000);
+        }
+
         MergeChannelFilter(query, channel);
-        return _libraryManager.GetItemsResult(query).Items.ToList();
+        var filtered = ApplyCatalogConstraints(_libraryManager.GetItemsResult(query).Items.ToList(), channel, scheduleDate);
+        return filtered.Take(Math.Clamp(limit, 1, 1000)).ToList();
     }
 
     public int CountForAiManifest(Channel channel, ChannelCatalogMode catalogMode)
     {
-        var kinds = GetManifestItemTypes(channel, catalogMode);
+        if (!ChannelAiRules.HasCatalogConstraints(channel))
+        {
+            var kinds = GetManifestItemTypes(channel, catalogMode);
+            var query = new InternalItemsQuery
+            {
+                Recursive = true,
+                IsVirtualItem = false,
+                IncludeItemTypes = kinds
+            };
+
+            MergeChannelFilter(query, channel);
+            return _libraryManager.GetItemsResult(query).TotalRecordCount;
+        }
+
+        return BrowseForAiManifest(channel, catalogMode, 10000).Count;
+    }
+
+    public int? GetCatalogReleaseYear(BaseItem item, ChannelCatalogYearConstraints? constraints)
+    {
+        if (item is Series series && constraints?.UseFirstEpisodeYearForSeries == true)
+        {
+            return GetSeriesFirstEpisodeYear(series) ?? GetReleaseYear(series);
+        }
+
+        return GetReleaseYear(item);
+    }
+
+    public int? GetSeriesFirstEpisodeYear(Series series)
+    {
         var query = new InternalItemsQuery
         {
+            ParentId = series.Id,
             Recursive = true,
             IsVirtualItem = false,
-            IncludeItemTypes = kinds
+            IncludeItemTypes = new[] { BaseItemKind.Episode },
+            OrderBy = new[]
+            {
+                (ItemSortBy.ParentIndexNumber, Jellyfin.Database.Implementations.Enums.SortOrder.Ascending),
+                (ItemSortBy.IndexNumber, Jellyfin.Database.Implementations.Enums.SortOrder.Ascending),
+                (ItemSortBy.PremiereDate, Jellyfin.Database.Implementations.Enums.SortOrder.Ascending)
+            },
+            Limit = 1
         };
 
-        MergeChannelFilter(query, channel);
-        return _libraryManager.GetItemsResult(query).TotalRecordCount;
+        var firstEpisode = _libraryManager.GetItemsResult(query).Items.FirstOrDefault();
+        return firstEpisode is null ? GetReleaseYear(series) : GetReleaseYear(firstEpisode);
+    }
+
+    public static int? GetReleaseYear(BaseItem item)
+    {
+        if (item.PremiereDate.HasValue)
+        {
+            return item.PremiereDate.Value.Year;
+        }
+
+        return item.ProductionYear;
+    }
+
+    public bool MatchesYearConstraints(BaseItem item, ChannelCatalogYearConstraints constraints)
+    {
+        if (item is Episode)
+        {
+            return false;
+        }
+
+        return constraints.ContainsYear(GetCatalogReleaseYear(item, constraints));
+    }
+
+    public bool MatchesGenreConstraints(BaseItem item, ChannelCatalogGenreConstraints constraints)
+    {
+        if (item is Episode)
+        {
+            return false;
+        }
+
+        return constraints.Matches(item.Genres?.ToList());
+    }
+
+    private IReadOnlyList<BaseItem> ApplyCatalogConstraints(
+        IReadOnlyList<BaseItem> items,
+        Channel channel,
+        DateOnly? scheduleDate = null)
+    {
+        var yearConstraints = ChannelAiRules.GetYearConstraints(channel);
+        var genreConstraints = ChannelAiRules.GetGenreConstraints(channel);
+        HolidayDefinition? holiday = null;
+        if (_holidays.IsHolidayChannel(channel))
+        {
+            var date = scheduleDate ?? _holidays.GetScheduleDateUtc(DateTime.UtcNow);
+            holiday = _holidays.GetActiveHoliday(date);
+        }
+
+        if (yearConstraints is null && genreConstraints is null && holiday is null && !_holidays.IsHolidayChannel(channel))
+        {
+            return items;
+        }
+
+        return items.Where(item =>
+        {
+            if (yearConstraints is not null && !MatchesYearConstraints(item, yearConstraints))
+            {
+                return false;
+            }
+
+            if (genreConstraints is not null && !MatchesGenreConstraints(item, genreConstraints))
+            {
+                return false;
+            }
+
+            if (_holidays.IsHolidayChannel(channel))
+            {
+                if (holiday is null)
+                {
+                    return false;
+                }
+
+                return HolidayChannelCalendar.MatchesHolidayContent(item, holiday);
+            }
+
+            return true;
+        }).ToList();
     }
 
     public BaseItem? GetItemById(Guid id) => _libraryManager.GetItemById(id);
@@ -259,8 +389,13 @@ public class JellyfinCatalogService
         }
     }
 
-    private static void MergeChannelFilter(InternalItemsQuery query, Channel channel)
+    private void MergeChannelFilter(InternalItemsQuery query, Channel channel)
     {
+        if (TryApplyLibraryScope(query, channel))
+        {
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(channel.FilterJson))
         {
             return;
@@ -290,6 +425,46 @@ public class JellyfinCatalogService
         }
     }
 
+    private bool TryApplyLibraryScope(InternalItemsQuery query, Channel channel)
+    {
+        var libraryConstraint = ChannelAiRules.GetLibraryConstraints(channel);
+        if (libraryConstraint is null)
+        {
+            return false;
+        }
+
+        var folder = ResolveLibraryFolder(libraryConstraint.LibraryName);
+        if (folder is null)
+        {
+            return false;
+        }
+
+        query.ParentId = folder.Id;
+        query.Tags = Array.Empty<string>();
+        query.Genres = Array.Empty<string>();
+        return true;
+    }
+
+    private CollectionFolder? ResolveLibraryFolder(string libraryName)
+    {
+        if (string.IsNullOrWhiteSpace(libraryName))
+        {
+            return null;
+        }
+
+        var root = _libraryManager.GetUserRootFolder();
+        foreach (var child in root.Children)
+        {
+            if (child is CollectionFolder folder
+                && folder.Name.Equals(libraryName, StringComparison.OrdinalIgnoreCase))
+            {
+                return folder;
+            }
+        }
+
+        return null;
+    }
+
     private static BaseItemKind[] GetQueryItemTypes(Channel channel)
     {
         var catalogMode = ResolveCatalogMode(channel);
@@ -307,6 +482,7 @@ public class JellyfinCatalogService
         {
             ChannelCatalogMode.MovieOnly => new[] { BaseItemKind.Movie },
             ChannelCatalogMode.Mixed => new[] { BaseItemKind.Movie, BaseItemKind.Episode },
+            ChannelCatalogMode.MusicVideoOnly => new[] { BaseItemKind.MusicVideo },
             _ => new[] { BaseItemKind.Episode }
         };
     }
@@ -327,6 +503,7 @@ public class JellyfinCatalogService
         {
             ChannelCatalogMode.MovieOnly => new[] { BaseItemKind.Movie },
             ChannelCatalogMode.Mixed => new[] { BaseItemKind.Series, BaseItemKind.Movie },
+            ChannelCatalogMode.MusicVideoOnly => new[] { BaseItemKind.MusicVideo },
             _ => new[] { BaseItemKind.Series }
         };
     }

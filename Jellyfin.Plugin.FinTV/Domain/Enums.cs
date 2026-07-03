@@ -150,5 +150,6 @@ public enum ChannelCatalogMode
 {
     TvOnly = 0,
     MovieOnly = 1,
-    Mixed = 2
+    Mixed = 2,
+    MusicVideoOnly = 3
 }

@@ -63,6 +63,137 @@ public static class AiPlayoutTemplates
                 new AiPlayoutDaypart(0, 47, "All Day Movies",
                     "Schedule movies from the catalog; use spanSlots based on runtime (long features get multi-slot blocks).", maxSpanSlots: 8)
             ]
+        },
+        new AiPlayoutTemplate
+        {
+            Id = "music-videos",
+            Name = "Music Video Rotation",
+            Description = "MTV-style blocks grouped by genre or artist with heavier rotation in prime time.",
+            Dayparts =
+            [
+                new AiPlayoutDaypart(0, 11, "Overnight Mix",
+                    "Deep cuts and mellow tracks; group 2-4 short videos per block by artist or genre."),
+                new AiPlayoutDaypart(12, 17, "Morning Flow",
+                    "Mainstream pop and hits; most videos are 3-5 minutes so several can share a 30-minute slot when spanSlots=1."),
+                new AiPlayoutDaypart(18, 33, "Afternoon Genre Blocks",
+                    "Group consecutive slots by genre (rock, pop, hip hop, comedy/parody) for themed blocks."),
+                new AiPlayoutDaypart(34, 43, "Prime Video Hour",
+                    "Flagship videos and artist marathons; use spanSlots for long performances or extended mixes.", maxSpanSlots: 4),
+                new AiPlayoutDaypart(44, 47, "Late Night",
+                    "Alternative, deep cuts, or comedy/parody as appropriate to channel rules.")
+            ]
+        },
+        new AiPlayoutTemplate
+        {
+            Id = "youtube-pbs",
+            Name = "YouTube TV · PBS Style",
+            Description = "Public television pacing for YouTube-sourced libraries: morning how-to, daytime docs, evening prestige.",
+            Dayparts =
+            [
+                new AiPlayoutDaypart(0, 5, "Overnight Encore",
+                    "Gentle reruns of documentaries or educational series."),
+                new AiPlayoutDaypart(6, 11, "Morning PBS",
+                    "How-to, cooking, crafts, and children's educational shorts."),
+                new AiPlayoutDaypart(12, 23, "Daytime Documentary",
+                    "History, science, and nature documentaries in themed consecutive blocks."),
+                new AiPlayoutDaypart(24, 29, "Afternoon Arts",
+                    "Performing arts, music appreciation, and cultural programs grouped together."),
+                new AiPlayoutDaypart(30, 37, "Early Evening PBS",
+                    "News-magazine tone, current affairs, and public-interest programming."),
+                new AiPlayoutDaypart(38, 43, "Masterpiece Hour",
+                    "Long-form prestige content; use spanSlots for multi-part or long episodes.", maxSpanSlots: 4),
+                new AiPlayoutDaypart(44, 47, "Late Night Encore",
+                    "Repeat standout docs or shorter educational pieces.")
+            ]
+        },
+        new AiPlayoutTemplate
+        {
+            Id = "winning-game-shows",
+            Name = "Winning · Game Show Blocks",
+            Description = "126.1 Winning: group game shows by format and match block length to typical episode runtime.",
+            Dayparts =
+            [
+                new AiPlayoutDaypart(0, 11, "Overnight Reruns",
+                    "Classic quiz and panel reruns; standard 30-minute episodes use spanSlots=1."),
+                new AiPlayoutDaypart(12, 17, "Morning Quick Games",
+                    "Fast-paced 22-30 minute game shows; one show per slot."),
+                new AiPlayoutDaypart(18, 29, "Daytime Blocks",
+                    "Group related daytime game shows (wordplay block, trivia block, panel block) back-to-back."),
+                new AiPlayoutDaypart(30, 33, "Afternoon Marathon",
+                    "Run 2-3 episodes of the same show when episodes are ~30 minutes; hour-long episodes use spanSlots=2.", maxSpanSlots: 4),
+                new AiPlayoutDaypart(34, 41, "Prime Game Hour",
+                    "Flagship prime-time game shows; hour-long episodes use spanSlots=2.", maxSpanSlots: 4),
+                new AiPlayoutDaypart(42, 47, "Late Night Games",
+                    "Panel games, comedy quizzes, or reruns matching late-night tone.")
+            ]
+        },
+        new AiPlayoutTemplate
+        {
+            Id = "get-learneded",
+            Name = "GET LEARNEDED · Ed TV Blocks",
+            Description = "126.2 GET LEARNEDED: group educational TV and documentaries by subject across consecutive slots.",
+            Dayparts =
+            [
+                new AiPlayoutDaypart(0, 11, "Overnight Encore",
+                    "Gentle science or nature reruns."),
+                new AiPlayoutDaypart(12, 17, "Morning Discovery",
+                    "Science and nature for a general audience; keep the same subject across 2-4 consecutive slots."),
+                new AiPlayoutDaypart(18, 23, "History Block",
+                    "History Channel-style series grouped together."),
+                new AiPlayoutDaypart(24, 29, "Science & Tech",
+                    "Discovery, engineering, and space documentaries as a block."),
+                new AiPlayoutDaypart(30, 33, "Nature Hour",
+                    "Wildlife and ecology programming grouped together."),
+                new AiPlayoutDaypart(34, 37, "Afternoon Deep Dive",
+                    "Long documentaries; use spanSlots for feature-length content.", maxSpanSlots: 4),
+                new AiPlayoutDaypart(38, 43, "Primetime Learning",
+                    "Prestige docs and educational movies; longer spans allowed.", maxSpanSlots: 6),
+                new AiPlayoutDaypart(44, 47, "Late Night Encore",
+                    "Calm educational reruns.")
+            ]
+        },
+        new AiPlayoutTemplate
+        {
+            Id = "past-tense-news",
+            Name = "Past Tense News · Breaking Chronology",
+            Description = "124.1 Past Tense News: chronological event order presented as live breaking coverage.",
+            Dayparts =
+            [
+                new AiPlayoutDaypart(0, 47, "Chronological News Day",
+                    "Order news clips by the historical timeline of the events they cover — earliest events in morning slots, progressing through the day. Present every story as if it is breaking live right now, not archival footage. Group all coverage of the same event consecutively before advancing to the next historical moment. Match spanSlots to segment length; typical news blocks are 30-60 minutes.", maxSpanSlots: 4)
+            ]
+        },
+        new AiPlayoutTemplate
+        {
+            Id = "slappy-comedy",
+            Name = "Slappy · Comedy + Animation Domination",
+            Description = "124.3 Slappy: comedy all day with a Fox-style adult animation block at 6pm.",
+            Dayparts =
+            [
+                new AiPlayoutDaypart(0, 11, "Overnight Comedy",
+                    "Sitcom and comedy reruns; lighter live-action comedy."),
+                new AiPlayoutDaypart(12, 17, "Morning Laughs",
+                    "Sitcom blocks and comedy series reruns."),
+                new AiPlayoutDaypart(18, 29, "Daytime Comedy",
+                    "Comedy talk, sketch, and sitcom blocks grouped by show."),
+                new AiPlayoutDaypart(30, 35, "Afternoon Comedy",
+                    "Comedy movies or multi-episode sitcom marathons before primetime.", maxSpanSlots: 4),
+                new AiPlayoutDaypart(36, 41, "Animation Domination",
+                    "Fox-style 6pm-9pm block (slots 36-41): stack adult animated comedy back-to-back (e.g. Family Guy, American Dad, Bob's Burgers, The Simpsons, Futurama). Run 2-3 episodes of the same series consecutively; use spanSlots=2 for hour-long episodes.", maxSpanSlots: 4),
+                new AiPlayoutDaypart(42, 47, "Late Night Comedy",
+                    "Edgier animated or live-action comedy; adult sitcoms and late-night style comedy.")
+            ]
+        },
+        new AiPlayoutTemplate
+        {
+            Id = "holiday-channel",
+            Name = "Holiday Channel · Seasonal Marathon",
+            Description = "203.4 The Holiday Channel: themed marathons during an active holiday window.",
+            Dayparts =
+            [
+                new AiPlayoutDaypart(0, 47, "Holiday Marathon",
+                    "Only schedule content matching the active holiday. Group episodes of the same show in blocks. Use spanSlots from movie runtime. Vary order like cable TV holiday marathons with smart rotation.", maxSpanSlots: 8)
+            ]
         }
     ];
 
@@ -120,8 +251,12 @@ public static class AiPlayoutTemplates
             lines.Add($"- {daypart.Name} slots {daypart.FormatSlotRange()}: {daypart.Brief}{spanHint}");
         }
 
-        lines.Add("- Do not place kids content in Late Night or adult-only dayparts.");
-        lines.Add("- Do not place adult-only titles in Morning Cartoons or After School blocks.");
+        if (template.Id is "classic-cable" or "kids-all-day")
+        {
+            lines.Add("- Do not place kids content in Late Night or adult-only dayparts.");
+            lines.Add("- Do not place adult-only titles in Morning Cartoons or After School blocks.");
+        }
+
         return string.Join('\n', lines);
     }
 }

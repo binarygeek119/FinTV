@@ -324,6 +324,14 @@
                         <input type="checkbox" id="ai-enabled">
                         <span>Enable AI lineup generation</span>
                     </label>
+                    <label class="field checkbox-field">
+                        <input type="checkbox" id="ai-auto-apply-channel-add">
+                        <span>Auto-apply AI settings and lineup when channels are added (14-day playout rebuild)</span>
+                    </label>
+                    <label class="field checkbox-field">
+                        <input type="checkbox" id="ai-auto-apply-all-on-save">
+                        <span>Apply AI lineups to all eligible channels when saving settings (14-day playout rebuild)</span>
+                    </label>
                     <div class="actions" style="margin-bottom:1rem">
                         <button type="button" id="btn-save-ai-settings" class="raised button-submit emby-button">Save AI Settings</button>
                         <button type="button" id="btn-test-ai" class="emby-button">Test Connection</button>
@@ -355,7 +363,7 @@
                         <input id="ai-venice-model" type="text" class="emby-input" placeholder="gpt-4o-mini">
                     </label>
                     <p id="ai-key-status" class="hint"></p>
-                    <p class="hint">AI lineups build up to <strong>14 days</strong> of playout. FinTV auto-extends the schedule as each day ends. Use <strong>Apply + Rebuild Playout</strong> after applying a new lineup.</p>
+                    <p class="hint">AI lineups build up to <strong>14 days</strong> of playout. FinTV auto-extends the schedule as each day ends. Auto-apply sets content mix and playout template from channel rules, generates the lineup, and rebuilds playout.</p>
                 </div>
                 <div class="card section-card">
                     <div class="section-header-row">

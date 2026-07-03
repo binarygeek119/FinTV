@@ -222,7 +222,12 @@ public class LogosController : ControllerBase
     /// <returns>Logo image file.</returns>
     [HttpGet("{channelId:guid}/{fileName}")]
     [AllowAnonymous]
-    public async Task<IActionResult> GetChannelLogo(Guid channelId, string fileName, [FromServices] ChannelService channels, CancellationToken cancellationToken)
+    public async Task<IActionResult> GetChannelLogo(
+        Guid channelId,
+        string fileName,
+        [FromServices] ChannelService channels,
+        [FromServices] HolidayChannelService holidays,
+        CancellationToken cancellationToken)
     {
         var channel = await channels.GetByIdAsync(channelId, cancellationToken);
         if (channel?.LogoSetId is null)
@@ -235,6 +240,16 @@ public class LogosController : ControllerBase
         if (set is null)
         {
             return NotFound();
+        }
+
+        if (holidays.IsHolidayChannel(channel))
+        {
+            var scheduleDate = holidays.GetScheduleDateUtc(DateTime.UtcNow);
+            var effectivePath = holidays.ResolveEffectiveLogoPath(channel, scheduleDate);
+            if (!string.IsNullOrWhiteSpace(effectivePath) && System.IO.File.Exists(effectivePath))
+            {
+                return PhysicalFile(effectivePath, GetContentType(effectivePath));
+            }
         }
 
         var entry = set.Entries.FirstOrDefault(e => e.FileName.Equals(fileName, StringComparison.OrdinalIgnoreCase));

@@ -13,17 +13,20 @@ public class ChannelPresetService
     private readonly ChannelService _channels;
     private readonly LogoSetService _logoSets;
     private readonly LineupGeneratorService _lineupGenerator;
+    private readonly AiChannelAutoApplyService _aiAutoApply;
 
     public ChannelPresetService(
         FinTvDbContext db,
         ChannelService channels,
         LogoSetService logoSets,
-        LineupGeneratorService lineupGenerator)
+        LineupGeneratorService lineupGenerator,
+        AiChannelAutoApplyService aiAutoApply)
     {
         _db = db;
         _channels = channels;
         _logoSets = logoSets;
         _lineupGenerator = lineupGenerator;
+        _aiAutoApply = aiAutoApply;
     }
 
     /// <summary>
@@ -163,6 +166,10 @@ public class ChannelPresetService
             if (created.ContentType == ChannelContentType.Weather)
             {
                 await BuildWeatherPlayoutAsync(created, cancellationToken);
+            }
+            else
+            {
+                await _aiAutoApply.TryAutoApplyForChannelAsync(created.Id, cancellationToken);
             }
 
             existingNumbers.Add(new { Number = created.Number, Id = created.Id });

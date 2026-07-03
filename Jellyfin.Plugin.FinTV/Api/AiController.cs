@@ -18,17 +18,20 @@ namespace Jellyfin.Plugin.FinTV.Api;
 public class AiController : ControllerBase
 {
     private readonly AiLineupGeneratorService _generator;
+    private readonly AiChannelAutoApplyService _autoApply;
     private readonly LlmClientService _llm;
     private readonly FinTvDbContext _db;
     private readonly LineupGeneratorService _playoutGenerator;
 
     public AiController(
         AiLineupGeneratorService generator,
+        AiChannelAutoApplyService autoApply,
         LlmClientService llm,
         FinTvDbContext db,
         LineupGeneratorService playoutGenerator)
     {
         _generator = generator;
+        _autoApply = autoApply;
         _llm = llm;
         _db = db;
         _playoutGenerator = playoutGenerator;
@@ -36,24 +39,12 @@ public class AiController : ControllerBase
 
     [HttpGet("settings")]
     public ActionResult<object> GetSettings()
-    {
-        var ai = Plugin.Instance?.Configuration.Ai ?? new AiSettings();
-        return Ok(new
-        {
-            enabled = ai.Enabled,
-            defaultProvider = (int)ai.DefaultProvider,
-            openAiModel = ai.OpenAiModel,
-            veniceModel = ai.VeniceModel,
-            maxCatalogItemsInPrompt = ai.MaxCatalogItemsInPrompt,
-            hasOpenAiApiKey = !string.IsNullOrWhiteSpace(ai.OpenAiApiKey),
-            hasVeniceApiKey = !string.IsNullOrWhiteSpace(ai.VeniceApiKey),
-            openAiApiKeyMasked = MaskKey(ai.OpenAiApiKey),
-            veniceApiKeyMasked = MaskKey(ai.VeniceApiKey)
-        });
-    }
+        => Ok(BuildSettingsResponse());
 
     [HttpPut("settings")]
-    public ActionResult<object> UpdateSettings([FromBody] AiSettingsRequest request)
+    public async Task<ActionResult<object>> UpdateSettings(
+        [FromBody] AiSettingsRequest request,
+        CancellationToken cancellationToken)
     {
         var plugin = Plugin.Instance ?? throw new InvalidOperationException("FinTV plugin not initialized.");
         var ai = plugin.Configuration.Ai;
@@ -83,6 +74,16 @@ public class AiController : ControllerBase
             ai.MaxCatalogItemsInPrompt = Math.Clamp(request.MaxCatalogItemsInPrompt.Value, 10, 1000);
         }
 
+        if (request.AutoApplyOnChannelAdd.HasValue)
+        {
+            ai.AutoApplyOnChannelAdd = request.AutoApplyOnChannelAdd.Value;
+        }
+
+        if (request.AutoApplyToAllChannelsOnSave.HasValue)
+        {
+            ai.AutoApplyToAllChannelsOnSave = request.AutoApplyToAllChannelsOnSave.Value;
+        }
+
         if (!string.IsNullOrWhiteSpace(request.OpenAiApiKey))
         {
             ai.OpenAiApiKey = request.OpenAiApiKey.Trim();
@@ -94,7 +95,51 @@ public class AiController : ControllerBase
         }
 
         plugin.SaveConfiguration();
-        return GetSettings();
+
+        object? applyAllSummary = null;
+        if (ai.Enabled && ai.AutoApplyToAllChannelsOnSave)
+        {
+            var results = await _autoApply.ApplyToAllEligibleChannelsAsync(cancellationToken);
+            applyAllSummary = new
+            {
+                ok = results.Count(r => r.Ok),
+                failed = results.Count(r => !r.Ok && !r.WasSkipped),
+                skipped = results.Count(r => r.WasSkipped),
+                results = results.Select(r => new
+                {
+                    channelId = r.ChannelId,
+                    name = r.ChannelName,
+                    ok = r.Ok,
+                    skipped = r.WasSkipped,
+                    error = r.Error
+                })
+            };
+        }
+
+        return Ok(new
+        {
+            settings = BuildSettingsResponse(),
+            applyAll = applyAllSummary
+        });
+    }
+
+    private static object BuildSettingsResponse()
+    {
+        var ai = Plugin.Instance?.Configuration.Ai ?? new AiSettings();
+        return new
+        {
+            enabled = ai.Enabled,
+            defaultProvider = (int)ai.DefaultProvider,
+            openAiModel = ai.OpenAiModel,
+            veniceModel = ai.VeniceModel,
+            maxCatalogItemsInPrompt = ai.MaxCatalogItemsInPrompt,
+            hasOpenAiApiKey = !string.IsNullOrWhiteSpace(ai.OpenAiApiKey),
+            hasVeniceApiKey = !string.IsNullOrWhiteSpace(ai.VeniceApiKey),
+            openAiApiKeyMasked = MaskKey(ai.OpenAiApiKey),
+            veniceApiKeyMasked = MaskKey(ai.VeniceApiKey),
+            autoApplyOnChannelAdd = ai.AutoApplyOnChannelAdd,
+            autoApplyToAllChannelsOnSave = ai.AutoApplyToAllChannelsOnSave
+        };
     }
 
     [HttpPost("settings/test")]
@@ -125,6 +170,7 @@ public class AiController : ControllerBase
 
         return Ok(channels
             .Where(c => c.ContentType != ChannelContentType.Weather)
+            .Where(c => !ChannelAiRules.IsExcludedFromAi(ChannelAiRules.ExtractLibraryTag(c.FilterJson)))
             .Select(c =>
             {
                 var tag = ChannelAiRules.ExtractLibraryTag(c.FilterJson);
@@ -177,7 +223,7 @@ public class AiController : ControllerBase
             : request.AiPlayoutTemplateId.Trim();
 
         await _db.SaveChangesAsync(cancellationToken);
-        return NoContent();
+        return Ok(new { ok = true });
     }
 
     [HttpPut("channels/{channelId:guid}/fine-tune")]
@@ -210,7 +256,7 @@ public class AiController : ControllerBase
         }
 
         await _db.SaveChangesAsync(cancellationToken);
-        return NoContent();
+        return Ok(new { ok = true });
     }
 
     [HttpPost("channels/{channelId:guid}/generate")]
@@ -233,20 +279,24 @@ public class AiController : ControllerBase
     [HttpPost("channels/{channelId:guid}/apply")]
     public async Task<IActionResult> Apply(
         Guid channelId,
-        [FromBody] AiApplyLineupRequest request,
+        [FromBody] AiApplyLineupRequest? request,
         CancellationToken cancellationToken)
     {
         try
         {
             await _generator.ApplyAsync(
                 channelId,
-                request.Slots ?? new List<LineupSlotDto>(),
-                request.RebuildPlayout,
+                request?.Slots ?? new List<LineupSlotDto>(),
+                request?.RebuildPlayout ?? false,
                 _playoutGenerator,
                 cancellationToken);
-            return NoContent();
+            return Ok(new { ok = true });
         }
         catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
         {
             return BadRequest(new { message = ex.Message });
         }
@@ -260,27 +310,18 @@ public class AiController : ControllerBase
             return BadRequest(new { message = "AI lineup generation is disabled." });
         }
 
-        var channels = await _db.Channels
-            .Where(c => c.Enabled && c.ContentType != ChannelContentType.Weather)
-            .OrderBy(c => c.Number)
-            .ToListAsync(cancellationToken);
-
-        var results = new List<object>();
-        foreach (var channel in channels)
+        var results = await _autoApply.ApplyToAllEligibleChannelsAsync(cancellationToken);
+        return Ok(new
         {
-            try
+            results = results.Select(r => new
             {
-                var preview = await _generator.GenerateAsync(channel.Id, null, cancellationToken);
-                await _generator.ApplyAsync(channel.Id, preview.LineupSlots, true, _playoutGenerator, cancellationToken);
-                results.Add(new { channelId = channel.Id, name = channel.Name, ok = true });
-            }
-            catch (Exception ex)
-            {
-                results.Add(new { channelId = channel.Id, name = channel.Name, ok = false, error = ex.Message });
-            }
-        }
-
-        return Ok(new { results });
+                channelId = r.ChannelId,
+                name = r.ChannelName,
+                ok = r.Ok,
+                skipped = r.WasSkipped,
+                error = r.Error
+            })
+        });
     }
 
     private static string MaskKey(string? key)
@@ -314,6 +355,10 @@ public class AiSettingsRequest
     public string? VeniceModel { get; set; }
 
     public int? MaxCatalogItemsInPrompt { get; set; }
+
+    public bool? AutoApplyOnChannelAdd { get; set; }
+
+    public bool? AutoApplyToAllChannelsOnSave { get; set; }
 }
 
 public class AiTestSettingsRequest

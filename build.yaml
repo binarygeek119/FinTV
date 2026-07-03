@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.50"
+version: "0.0.2.51"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -81,6 +81,11 @@ artifacts:
   - "tools/yt-dlp/win-x64/yt-dlp.exe"
   - "scripts/install-docker-cli-jellyfin.sh"
 changelog: |-
+  - Add The Holiday Channel seasonal scheduling with dynamic logos, themed catalog matching, and off-season playback
+  - Add Slappy comedy channel with Animation Domination 6pm block and comedy-only catalog filtering
+  - Add channel AI catalog rules for FlashBack, Retro, Flip TV, Past Tense News, Cops And Robbers, and more presets
+  - Add AI auto-apply on channel add and optional apply-to-all on save with 14-day playout rebuild
+  - Fix FinTV admin AI tab JSON errors and lineup apply failures
   - Add FinTV-ready Jellyfin unstable Docker image with Docker CLI 29.5.2 and Playwright Chromium on GHCR
   - Use baked-in Playwright browsers on Linux when PLAYWRIGHT_BROWSERS_PATH is set (custom Jellyfin image)
   - Fix FinTV admin "Unexpected end of JSON input" when saving lineups, AI settings, or deleting channels (204 No Content responses)

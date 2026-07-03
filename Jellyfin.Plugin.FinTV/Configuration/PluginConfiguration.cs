@@ -107,6 +107,16 @@ public class AiSettings
     public string VeniceModel { get; set; } = "gpt-4o-mini";
 
     public int MaxCatalogItemsInPrompt { get; set; } = 250;
+
+    /// <summary>
+    /// When true, new channels get default AI settings, generated lineups, and a 14-day playout rebuild.
+    /// </summary>
+    public bool AutoApplyOnChannelAdd { get; set; }
+
+    /// <summary>
+    /// When true, saving AI settings also generates and applies lineups for all eligible channels.
+    /// </summary>
+    public bool AutoApplyToAllChannelsOnSave { get; set; }
 }
 
 public class BlackframeTaskState

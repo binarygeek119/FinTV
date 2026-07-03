@@ -144,7 +144,7 @@ public class LineupService
             SpanSlots = Math.Clamp(dto.SpanSlots, 1, 8),
             LineupId = lineupId,
             LineupOverrideId = overrideId,
-            Candidates = dto.Candidates.Select(c => new SlotCandidate
+            Candidates = (dto.Candidates ?? new List<SlotCandidateDto>()).Select(c => new SlotCandidate
             {
                 Kind = c.Kind,
                 JellyfinItemId = c.JellyfinItemId,

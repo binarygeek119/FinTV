@@ -12,19 +12,22 @@ public class LineupGeneratorService
     private readonly SmartSelectionService _smartSelection;
     private readonly CommercialService _commercialService;
     private readonly ChannelService _channelService;
+    private readonly HolidayChannelService _holidays;
 
     public LineupGeneratorService(
         FinTvDbContext db,
         LineupService lineupService,
         SmartSelectionService smartSelection,
         CommercialService commercialService,
-        ChannelService channelService)
+        ChannelService channelService,
+        HolidayChannelService holidays)
     {
         _db = db;
         _lineupService = lineupService;
         _smartSelection = smartSelection;
         _commercialService = commercialService;
         _channelService = channelService;
+        _holidays = holidays;
     }
 
     public async Task BuildPlayoutAsync(
@@ -89,6 +92,13 @@ public class LineupGeneratorService
             if (slotStart < cursor)
             {
                 slotStart = cursor;
+            }
+
+            if (_holidays.IsHolidayChannel(channel) && _holidays.GetActiveHoliday(date) is null)
+            {
+                await AddHolidayOfflineBlockAsync(channel, slotStart, blockEnd, cancellationToken);
+                cursor = blockEnd;
+                continue;
             }
 
             var picked = await _smartSelection.PickCandidateAsync(channel, slot, date, anchor, cancellationToken);
@@ -222,5 +232,25 @@ public class LineupGeneratorService
 
         channel.LastPlayoutBuiltAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(cancellationToken);
+    }
+
+    private Task AddHolidayOfflineBlockAsync(
+        Channel channel,
+        DateTime start,
+        DateTime finish,
+        CancellationToken cancellationToken)
+    {
+        _ = cancellationToken;
+        var offline = _holidays.FindOfflineMediaItem();
+        _db.PlayoutItems.Add(new PlayoutItem
+        {
+            ChannelId = channel.Id,
+            JellyfinItemId = offline?.Id,
+            Start = start,
+            Finish = finish,
+            Title = offline?.Name ?? "The Holiday Channel - Off Season"
+        });
+
+        return Task.CompletedTask;
     }
 }

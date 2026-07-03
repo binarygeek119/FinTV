@@ -481,7 +481,9 @@ public class FfmpegCommandBuilder
 
         var bug = channel.BugPlacement == BugPlacementMode.None
             ? null
-            : (ResolveBugPath(channel) ?? bugImagePath);
+            : (!string.IsNullOrWhiteSpace(bugImagePath) && File.Exists(bugImagePath)
+                ? bugImagePath
+                : ResolveBugPath(channel));
         if (!string.IsNullOrWhiteSpace(bug) && File.Exists(bug))
         {
             var overlay = GetBugOverlay(channel, width, height);

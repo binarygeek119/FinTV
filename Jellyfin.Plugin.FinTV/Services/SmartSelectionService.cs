@@ -12,6 +12,8 @@ public class PlayoutAnchorState
     public Dictionary<int, int> SlotShuffleCursor { get; set; } = new();
 
     public Dictionary<Guid, DateTime> LastAired { get; set; } = new();
+
+    public string? LastHolidayId { get; set; }
 }
 
 public class SmartSelectionService
@@ -47,7 +49,7 @@ public class SmartSelectionService
 
         foreach (var candidate in slot.Candidates.OrderBy(c => c.SortOrder))
         {
-            var items = await ResolveCandidateAsync(channel, candidate, anchor, cancellationToken);
+            var items = await ResolveCandidateAsync(channel, candidate, scheduleDate, anchor, cancellationToken);
             foreach (var item in items)
             {
                 var score = ComputeScore(item, candidate.Weight, recentIds, anchor);
@@ -94,17 +96,18 @@ public class SmartSelectionService
     private async Task<IReadOnlyList<ResolvedCandidate>> ResolveCandidateAsync(
         Channel channel,
         SlotCandidate candidate,
+        DateOnly scheduleDate,
         PlayoutAnchorState anchor,
         CancellationToken cancellationToken)
     {
         return candidate.Kind switch
         {
             SlotCandidateKind.JellyfinItem when candidate.JellyfinItemId.HasValue =>
-                await _catalog.ResolveItemAsync(candidate.JellyfinItemId.Value, channel, anchor, cancellationToken),
+                await _catalog.ResolveItemAsync(candidate.JellyfinItemId.Value, channel, anchor, scheduleDate, cancellationToken),
             SlotCandidateKind.Collection when !string.IsNullOrWhiteSpace(candidate.CollectionName) =>
-                await _catalog.ResolveCollectionAsync(candidate.CollectionName, channel, anchor, cancellationToken),
+                await _catalog.ResolveCollectionAsync(candidate.CollectionName, channel, anchor, scheduleDate, cancellationToken),
             SlotCandidateKind.FilterQuery when !string.IsNullOrWhiteSpace(candidate.FilterJson) =>
-                await _catalog.ResolveFilterAsync(candidate.FilterJson, channel, anchor, cancellationToken),
+                await _catalog.ResolveFilterAsync(candidate.FilterJson, channel, anchor, scheduleDate, cancellationToken),
             _ => Array.Empty<ResolvedCandidate>()
         };
     }

@@ -15,10 +15,12 @@ public class EpgService
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
     private readonly FinTvDbContext _db;
+    private readonly HolidayChannelService _holidays;
 
-    public EpgService(FinTvDbContext db)
+    public EpgService(FinTvDbContext db, HolidayChannelService holidays)
     {
         _db = db;
+        _holidays = holidays;
     }
 
     public async Task<byte[]> GenerateXmlTvBytesAsync(string baseUrl, CancellationToken cancellationToken = default)
@@ -147,12 +149,19 @@ public class EpgService
         return "http://localhost:8096";
     }
 
-    private static string GetLogoUrl(Channel channel, string? baseUrl = null)
+    private string GetLogoUrl(Channel channel, string? baseUrl = null)
     {
         baseUrl ??= Plugin.Instance?.Configuration.PublicBaseUrl ?? "http://localhost:8096";
-        if (!string.IsNullOrWhiteSpace(channel.LogoFileName))
+        var fileName = channel.LogoFileName;
+        if (_holidays.IsHolidayChannel(channel))
         {
-            return $"{baseUrl.TrimEnd('/')}/FinTV/api/logos/{channel.Id:N}/{Uri.EscapeDataString(channel.LogoFileName)}";
+            var scheduleDate = _holidays.GetScheduleDateUtc(DateTime.UtcNow);
+            fileName = _holidays.ResolveEffectiveLogoFileName(channel, scheduleDate) ?? fileName;
+        }
+
+        if (!string.IsNullOrWhiteSpace(fileName))
+        {
+            return $"{baseUrl.TrimEnd('/')}/FinTV/api/logos/{channel.Id:N}/{Uri.EscapeDataString(fileName)}";
         }
 
         return string.Empty;

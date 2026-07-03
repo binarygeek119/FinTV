@@ -22,11 +22,13 @@ public class AiCatalogManifestBuilder
     {
         var catalogMode = JellyfinCatalogService.ResolveCatalogMode(channel);
         var maxItems = Plugin.Instance?.Configuration.Ai.MaxCatalogItemsInPrompt ?? 250;
+        var yearConstraints = ChannelAiRules.GetYearConstraints(channel);
+        var genreConstraints = ChannelAiRules.GetGenreConstraints(channel);
         var totalAvailable = _catalog.CountForAiManifest(channel, catalogMode);
         var items = _catalog.BrowseForAiManifest(channel, catalogMode, maxItems);
 
         var entries = items
-            .Select(item => MapEntry(item, catalogMode))
+            .Select(item => MapEntry(item, catalogMode, yearConstraints, genreConstraints))
             .Where(e => e is not null)
             .Cast<AiCatalogEntry>()
             .ToList();
@@ -40,25 +42,55 @@ public class AiCatalogManifestBuilder
         };
     }
 
-    private AiCatalogEntry? MapEntry(BaseItem item, ChannelCatalogMode catalogMode)
+    private AiCatalogEntry? MapEntry(
+        BaseItem item,
+        ChannelCatalogMode catalogMode,
+        ChannelCatalogYearConstraints? yearConstraints,
+        ChannelCatalogGenreConstraints? genreConstraints)
     {
         if (item is Series series)
         {
+            if (catalogMode == ChannelCatalogMode.MovieOnly || catalogMode == ChannelCatalogMode.MusicVideoOnly)
+            {
+                return null;
+            }
+
+            if (yearConstraints is not null && !_catalog.MatchesYearConstraints(series, yearConstraints))
+            {
+                return null;
+            }
+
+            if (genreConstraints is not null && !_catalog.MatchesGenreConstraints(series, genreConstraints))
+            {
+                return null;
+            }
+
             return new AiCatalogEntry
             {
                 Id = series.Id,
                 Title = series.Name,
                 Type = "Series",
-                Year = series.ProductionYear,
+                Year = _catalog.GetCatalogReleaseYear(series, yearConstraints),
                 RuntimeMinutes = EstimateSeriesRuntimeMinutes(series),
                 Genres = series.Genres?.ToList() ?? new List<string>(),
-                Tags = series.Tags?.ToList() ?? new List<string>()
+                Tags = series.Tags?.ToList() ?? new List<string>(),
+                Plot = TruncatePlot(series.Overview)
             };
         }
 
         if (item is Movie movie)
         {
-            if (catalogMode == ChannelCatalogMode.TvOnly)
+            if (catalogMode is ChannelCatalogMode.TvOnly or ChannelCatalogMode.MusicVideoOnly)
+            {
+                return null;
+            }
+
+            if (yearConstraints is not null && !_catalog.MatchesYearConstraints(movie, yearConstraints))
+            {
+                return null;
+            }
+
+            if (genreConstraints is not null && !_catalog.MatchesGenreConstraints(movie, genreConstraints))
             {
                 return null;
             }
@@ -68,15 +100,21 @@ public class AiCatalogManifestBuilder
                 Id = movie.Id,
                 Title = movie.Name,
                 Type = "Movie",
-                Year = movie.ProductionYear,
+                Year = JellyfinCatalogService.GetReleaseYear(movie),
                 RuntimeMinutes = _catalog.GetRuntimeMinutes(movie),
                 Genres = movie.Genres?.ToList() ?? new List<string>(),
-                Tags = movie.Tags?.ToList() ?? new List<string>()
+                Tags = movie.Tags?.ToList() ?? new List<string>(),
+                Plot = TruncatePlot(movie.Overview)
             };
         }
 
         if (item is MusicVideo musicVideo)
         {
+            if (catalogMode is ChannelCatalogMode.TvOnly or ChannelCatalogMode.MovieOnly)
+            {
+                return null;
+            }
+
             return new AiCatalogEntry
             {
                 Id = musicVideo.Id,
@@ -100,6 +138,16 @@ public class AiCatalogManifestBuilder
         }
 
         return 30;
+    }
+
+    private static string? TruncatePlot(string? overview)
+    {
+        if (string.IsNullOrWhiteSpace(overview))
+        {
+            return null;
+        }
+
+        return overview.Length <= 240 ? overview : overview[..240] + "...";
     }
 }
 
@@ -129,4 +177,6 @@ public class AiCatalogEntry
     public List<string> Genres { get; set; } = new();
 
     public List<string> Tags { get; set; } = new();
+
+    public string? Plot { get; set; }
 }

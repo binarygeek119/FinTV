@@ -41,6 +41,7 @@ public class StreamService
         var weather = scope.ServiceProvider.GetRequiredService<WeatherStarChannelService>();
         var ebs = scope.ServiceProvider.GetRequiredService<EbsService>();
         var youtubeCommercials = scope.ServiceProvider.GetRequiredService<YouTubeCommercialStreamService>();
+        var holidays = scope.ServiceProvider.GetRequiredService<HolidayChannelService>();
 
         var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
         if (channel is null)
@@ -81,11 +82,11 @@ public class StreamService
                     }
                     else if (current.CommercialId.HasValue)
                     {
-                        await StreamCommercialItemAsync(channel, current, catalog, youtubeCommercials, ffmpegPath, output, cancellationToken);
+                        await StreamCommercialItemAsync(channel, current, catalog, holidays, youtubeCommercials, ffmpegPath, output, cancellationToken);
                     }
                     else if (current.JellyfinItemId.HasValue)
                     {
-                        await StreamMediaItemAsync(channel, current, catalog, ffmpegPath, output, cancellationToken);
+                        await StreamMediaItemAsync(channel, current, catalog, holidays, ffmpegPath, output, cancellationToken);
                     }
                     else
                     {
@@ -198,6 +199,7 @@ public class StreamService
         Channel channel,
         PlayoutItem item,
         JellyfinCatalogService catalog,
+        HolidayChannelService holidays,
         string ffmpegPath,
         Stream output,
         CancellationToken cancellationToken)
@@ -218,7 +220,8 @@ public class StreamService
 
         var offset = Math.Max(0, (DateTime.UtcNow - item.Start).TotalSeconds + item.InPoint.TotalSeconds);
         var duration = Math.Max(1, (item.Finish - DateTime.UtcNow).TotalSeconds);
-        var args = _ffmpeg.BuildMediaCommand(channel, inputPath, offset, duration, catalog.GetPrimaryImagePath(mediaItem));
+        var bugPath = ResolveBugPath(channel, item.Start, holidays);
+        var args = _ffmpeg.BuildMediaCommand(channel, inputPath, offset, duration, bugPath);
 
         await RunFfmpegToStreamAsync(ffmpegPath, args, output, cancellationToken);
     }
@@ -227,6 +230,7 @@ public class StreamService
         Channel channel,
         PlayoutItem item,
         JellyfinCatalogService catalog,
+        HolidayChannelService holidays,
         YouTubeCommercialStreamService youtubeCommercials,
         string ffmpegPath,
         Stream output,
@@ -259,7 +263,8 @@ public class StreamService
 
             var offset = Math.Max(0, (DateTime.UtcNow - item.Start).TotalSeconds + item.InPoint.TotalSeconds);
             var duration = Math.Max(1, (item.Finish - DateTime.UtcNow).TotalSeconds);
-            var args = _ffmpeg.BuildMediaCommand(channel, inputPath, offset, duration, catalog.GetPrimaryImagePath(mediaItem));
+            var bugPath = ResolveBugPath(channel, item.Start, holidays);
+            var args = _ffmpeg.BuildMediaCommand(channel, inputPath, offset, duration, bugPath);
             await RunFfmpegToStreamAsync(ffmpegPath, args, output, cancellationToken);
             return;
         }
@@ -312,6 +317,22 @@ public class StreamService
         var plan = ebs.CreatePlaybackPlan(channel, durationSeconds);
         var args = _ffmpeg.BuildEbsCommand(channel, plan);
         await RunFfmpegToStreamAsync(ffmpegPath, args, output, cancellationToken);
+    }
+
+    private static string? ResolveBugPath(Channel channel, DateTime scheduleUtc, HolidayChannelService holidays)
+    {
+        if (channel.BugPlacement == BugPlacementMode.None)
+        {
+            return null;
+        }
+
+        if (holidays.IsHolidayChannel(channel))
+        {
+            var date = holidays.GetScheduleDateUtc(scheduleUtc);
+            return holidays.ResolveEffectiveLogoPath(channel, date);
+        }
+
+        return channel.ChannelLogoPath;
     }
 
     private static async Task RunFfmpegToStreamAsync(string ffmpegPath, IReadOnlyList<string> args, Stream output, CancellationToken cancellationToken)

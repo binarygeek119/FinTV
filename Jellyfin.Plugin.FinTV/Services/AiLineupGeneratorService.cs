@@ -20,19 +20,22 @@ public class AiLineupGeneratorService
     private readonly LlmClientService _llm;
     private readonly JellyfinCatalogService _catalog;
     private readonly LineupService _lineups;
+    private readonly HolidayChannelService _holidays;
 
     public AiLineupGeneratorService(
         FinTvDbContext db,
         AiCatalogManifestBuilder manifestBuilder,
         LlmClientService llm,
         JellyfinCatalogService catalog,
-        LineupService lineups)
+        LineupService lineups,
+        HolidayChannelService holidays)
     {
         _db = db;
         _manifestBuilder = manifestBuilder;
         _llm = llm;
         _catalog = catalog;
         _lineups = lineups;
+        _holidays = holidays;
     }
 
     public async Task<AiLineupPreviewResult> GenerateAsync(
@@ -50,9 +53,25 @@ public class AiLineupGeneratorService
             throw new InvalidOperationException("Weather channels do not use AI lineups.");
         }
 
+        if (_holidays.IsHolidayChannel(channel))
+        {
+            var scheduleDate = _holidays.GetScheduleDateUtc(DateTime.UtcNow);
+            if (_holidays.GetActiveHoliday(scheduleDate) is null)
+            {
+                throw new InvalidOperationException(
+                    "The Holiday Channel is off-season. AI lineups are generated when a holiday window becomes active (up to 30 days before).");
+            }
+        }
+
         var manifest = _manifestBuilder.Build(channel);
         if (manifest.Catalog.Count == 0)
         {
+            if (_holidays.IsHolidayChannel(channel))
+            {
+                throw new InvalidOperationException(
+                    "No holiday-themed shows or movies found — tag items with holiday keywords in Jellyfin tags, genres, or plot.");
+            }
+
             throw new InvalidOperationException("No tagged shows/movies found for this channel — tag your library first.");
         }
 
@@ -93,9 +112,26 @@ public class AiLineupGeneratorService
         var channel = await _db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken)
             ?? throw new InvalidOperationException("Channel not found.");
 
-        var start = DateTime.UtcNow.Date;
-        var end = PlayoutScheduleHelper.GetHorizonEndUtc(start);
-        await generator.BuildPlayoutAsync(channel, start, end, PlayoutBuildMode.ReplaceWindow, cancellationToken);
+        try
+        {
+            var start = DateTime.UtcNow.Date;
+            var end = PlayoutScheduleHelper.GetHorizonEndUtc(start);
+            await generator.BuildPlayoutAsync(channel, start, end, PlayoutBuildMode.ReplaceWindow, cancellationToken);
+        }
+        catch (InvalidOperationException)
+        {
+            throw;
+        }
+        catch (TimeZoneNotFoundException ex)
+        {
+            throw new InvalidOperationException(
+                "Invalid schedule time zone in FinTV settings. Set Dashboard → Plugins → FinTV → schedule time zone to a valid IANA id (e.g. America/New_York).",
+                ex);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException($"Playout rebuild failed: {ex.Message}", ex);
+        }
     }
 
     private AiLineupPreviewResult BuildPreview(
@@ -215,6 +251,11 @@ public class AiLineupGeneratorService
                     }
                 ]
             };
+
+            for (var covered = aiSlot.SlotIndex + 1; covered < aiSlot.SlotIndex + span && covered < 48; covered++)
+            {
+                result.Remove(covered);
+            }
         }
 
         var fallbackFilter = string.IsNullOrWhiteSpace(channelFilterJson)
@@ -290,7 +331,7 @@ public class AiLineupGeneratorService
             {
                 SlotIndex = slot.SlotIndex,
                 SpanSlots = Math.Clamp(slot.SpanSlots, 1, 8),
-                Candidates = slot.Candidates
+                Candidates = slot.Candidates ?? new List<SlotCandidateDto>()
             };
         }
 
@@ -327,16 +368,26 @@ public class AiLineupGeneratorService
             - spanSlots = number of consecutive 30-minute blocks (1-8). Use longer spans for movies.
             - Do not overlap spans. slotIndex + spanSlots must be <= 48.
             - Vary content across dayparts; avoid repeating the same title in adjacent blocks.
+            - Catalog modes: TvOnly (series), MovieOnly, Mixed (TV+movies), MusicVideoOnly (music videos).
             """ + $"\nCatalog mode: {catalogMode}." + templateBlock;
     }
 
-    private static string BuildUserPrompt(
+    private string BuildUserPrompt(
         Channel channel,
         AiCatalogManifest manifest,
         string ruleBrief,
         ChannelCatalogMode catalogMode,
         AiPlayoutTemplate playoutTemplate)
     {
+        var yearConstraints = ChannelAiRules.GetYearConstraints(channel);
+        var genreConstraints = ChannelAiRules.GetGenreConstraints(channel);
+        var libraryConstraints = ChannelAiRules.GetLibraryConstraints(channel);
+        HolidayDefinition? activeHoliday = null;
+        if (_holidays.IsHolidayChannel(channel))
+        {
+            activeHoliday = _holidays.GetActiveHoliday(_holidays.GetScheduleDateUtc(DateTime.UtcNow));
+        }
+
         var payload = new
         {
             channel = new
@@ -347,6 +398,35 @@ public class AiLineupGeneratorService
                 contentType = channel.ContentType.ToString()
             },
             rules = ruleBrief,
+            activeHoliday = activeHoliday is null
+                ? null
+                : new
+                {
+                    id = activeHoliday.Id,
+                    name = activeHoliday.Name,
+                    matchKeywords = activeHoliday.MatchKeywords
+                },
+            releaseYearFilter = yearConstraints is null
+                ? null
+                : new
+                {
+                    minYear = yearConstraints.MinYear,
+                    maxYear = yearConstraints.MaxYear,
+                    seriesUsesFirstEpisodeYear = yearConstraints.UseFirstEpisodeYearForSeries
+                },
+            genreFilter = genreConstraints is null
+                ? null
+                : new
+                {
+                    requiredKeywords = genreConstraints.RequiredGenreKeywords,
+                    excludedKeywords = genreConstraints.ExcludedGenreKeywords
+                },
+            libraryFilter = libraryConstraints is null
+                ? null
+                : new
+                {
+                    libraryName = libraryConstraints.LibraryName
+                },
             playoutTemplate = playoutTemplate.Dayparts.Count == 0
                 ? null
                 : new
@@ -370,7 +450,8 @@ public class AiLineupGeneratorService
                 year = c.Year,
                 runtimeMinutes = c.RuntimeMinutes,
                 genres = c.Genres,
-                tags = c.Tags
+                tags = c.Tags,
+                plot = c.Plot
             }),
             totalAvailable = manifest.TotalAvailable
         };

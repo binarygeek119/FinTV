@@ -234,6 +234,44 @@
         };
     }
 
+    function isEmptyApiResponseError(err) {
+        const message = String((err && err.message) || '');
+        const status = err && err.status;
+        const responseText = err && typeof err.responseText === 'string' ? err.responseText : '';
+        return status === 204
+            || ((message === 'parsererror' || message.includes('Unexpected end of JSON input'))
+                && !responseText);
+    }
+
+    function ajaxViaApiClient(ajaxOptions) {
+        return new Promise((resolve, reject) => {
+            ajaxOptions.success = (data, _textStatus, xhr) => {
+                if (xhr.status === 204 || data == null || data === '') {
+                    resolve(null);
+                    return;
+                }
+
+                try {
+                    resolve(normalizeApiResponse(parseApiJsonBody(data)));
+                } catch (parseErr) {
+                    reject(parseErr);
+                }
+            };
+
+            ajaxOptions.error = (xhr, textStatus) => {
+                if (isEmptyApiResponseError({ status: xhr.status, message: textStatus, responseText: xhr.responseText })) {
+                    resolve(null);
+                    return;
+                }
+
+                readApiFailure({ responseText: xhr.responseText, message: textStatus, status: xhr.status })
+                    .catch(reject);
+            };
+
+            ApiClient.ajax(ajaxOptions);
+        });
+    }
+
     function api(path, options) {
         options = options || {};
         const url = resolveUrl('FinTV/api' + (path.startsWith('/') ? path : '/' + path));
@@ -249,11 +287,6 @@
                 dataType: 'text',
                 headers: {
                     accept: 'application/json'
-                },
-                statusCode: {
-                    204: function () {
-                        return null;
-                    }
                 }
             };
 
@@ -262,9 +295,7 @@
                 ajaxOptions.data = body;
             }
 
-            return ApiClient.ajax(ajaxOptions)
-                .then((text) => normalizeApiResponse(parseApiJsonBody(text)))
-                .catch(readApiFailure);
+            return ajaxViaApiClient(ajaxOptions);
         }
 
         const fetchOptions = {
@@ -306,7 +337,7 @@
         const httpMethod = method || 'POST';
 
         if (typeof ApiClient !== 'undefined' && typeof ApiClient.ajax === 'function') {
-            return ApiClient.ajax({
+            return ajaxViaApiClient({
                 url: url,
                 type: httpMethod,
                 data: formData,
@@ -315,15 +346,8 @@
                 dataType: 'text',
                 headers: {
                     accept: 'application/json'
-                },
-                statusCode: {
-                    204: function () {
-                        return null;
-                    }
                 }
-            })
-                .then((text) => normalizeApiResponse(parseApiJsonBody(text)))
-                .catch(readApiFailure);
+            });
         }
 
         const headers = {
@@ -1827,7 +1851,34 @@
         }
     }
 
-    const AI_CATALOG_MODES = ['TV only', 'Movies only', 'Both'];
+    const AI_CATALOG_MODES = ['TV only', 'Movies only', 'Both', 'Music videos only'];
+    const SLOT_CANDIDATE_KIND = {
+        jellyfinItem: 0, JellyfinItem: 0,
+        collection: 1, Collection: 1,
+        filterQuery: 2, FilterQuery: 2
+    };
+
+    function buildAiApplyPayload(rebuild) {
+        const source = aiPreview?.lineupSlots || aiPreview?.LineupSlots;
+        if (!Array.isArray(source) || source.length === 0) {
+            throw new Error('No AI lineup to apply. Generate a lineup first.');
+        }
+
+        const slots = source.map((slot) => ({
+            SlotIndex: slot.slotIndex ?? slot.SlotIndex,
+            SpanSlots: Math.max(1, Math.min(8, Number(slot.spanSlots ?? slot.SpanSlots ?? 1))),
+            Candidates: (slot.candidates || slot.Candidates || []).map((c, index) => ({
+                Kind: resolveEnumValue(SLOT_CANDIDATE_KIND, c.kind ?? c.Kind, 0),
+                JellyfinItemId: c.jellyfinItemId ?? c.JellyfinItemId ?? null,
+                CollectionName: c.collectionName ?? c.CollectionName ?? null,
+                FilterJson: c.filterJson ?? c.FilterJson ?? null,
+                Weight: Number(c.weight ?? c.Weight ?? 1),
+                SortOrder: Number(c.sortOrder ?? c.SortOrder ?? index)
+            }))
+        }));
+
+        return { Slots: slots, RebuildPlayout: !!rebuild };
+    }
 
     function updateAiUiState() {
         const enabled = !!(aiSettings && aiSettings.enabled);
@@ -1837,12 +1888,16 @@
         qa('.ai-channel-row').forEach((row) => row.classList.toggle('disabled-row', !enabled));
         if ($('btn-test-ai')) $('btn-test-ai').disabled = !enabled;
         if ($('btn-ai-generate-all')) $('btn-ai-generate-all').disabled = !enabled;
+        if ($('ai-auto-apply-channel-add')) $('ai-auto-apply-channel-add').disabled = !enabled;
+        if ($('ai-auto-apply-all-on-save')) $('ai-auto-apply-all-on-save').disabled = !enabled;
     }
 
     async function loadAi() {
         try {
             aiSettings = await api('/ai/settings');
             if ($('ai-enabled')) $('ai-enabled').checked = !!aiSettings.enabled;
+            if ($('ai-auto-apply-channel-add')) $('ai-auto-apply-channel-add').checked = !!aiSettings.autoApplyOnChannelAdd;
+            if ($('ai-auto-apply-all-on-save')) $('ai-auto-apply-all-on-save').checked = !!aiSettings.autoApplyToAllChannelsOnSave;
             if ($('ai-default-provider')) $('ai-default-provider').value = String(aiSettings.defaultProvider ?? 0);
             if ($('ai-openai-model')) $('ai-openai-model').value = aiSettings.openAiModel || 'gpt-4o-mini';
             if ($('ai-venice-model')) $('ai-venice-model').value = aiSettings.veniceModel || 'gpt-4o-mini';
@@ -1887,6 +1942,7 @@
                                 <option value="0" ${ch.catalogMode === 0 ? 'selected' : ''}>TV only</option>
                                 <option value="1" ${ch.catalogMode === 1 ? 'selected' : ''}>Movies only</option>
                                 <option value="2" ${ch.catalogMode === 2 ? 'selected' : ''}>Both</option>
+                                <option value="3" ${ch.catalogMode === 3 ? 'selected' : ''}>Music videos only</option>
                             </select>
                         </label>
                         <label class="field" style="margin:0">
@@ -1918,6 +1974,8 @@
         try {
             const payload = {
                 enabled: !!$('ai-enabled')?.checked,
+                autoApplyOnChannelAdd: !!$('ai-auto-apply-channel-add')?.checked,
+                autoApplyToAllChannelsOnSave: !!$('ai-auto-apply-all-on-save')?.checked,
                 defaultProvider: Number($('ai-default-provider')?.value || '0'),
                 openAiModel: $('ai-openai-model')?.value?.trim() || 'gpt-4o-mini',
                 veniceModel: $('ai-venice-model')?.value?.trim() || 'gpt-4o-mini'
@@ -1926,8 +1984,20 @@
             const veniceKey = $('ai-venice-key')?.value?.trim();
             if (openKey) payload.openAiApiKey = openKey;
             if (veniceKey) payload.veniceApiKey = veniceKey;
-            aiSettings = await api('/ai/settings', { method: 'PUT', body: JSON.stringify(payload) });
-            toast('AI settings saved.', 'success');
+            const response = await api('/ai/settings', { method: 'PUT', body: JSON.stringify(payload) });
+            aiSettings = response.settings || response;
+            if (response.applyAll) {
+                const summary = response.applyAll;
+                toast(
+                    `AI settings saved. Applied to ${summary.ok} channel(s)` +
+                    (summary.failed ? `, ${summary.failed} failed` : '') +
+                    (summary.skipped ? `, ${summary.skipped} skipped` : '') +
+                    '.',
+                    summary.failed ? 'info' : 'success'
+                );
+            } else {
+                toast('AI settings saved.', 'success');
+            }
             await loadAi();
         } catch (err) {
             toast(err.message, 'error');
@@ -2021,7 +2091,7 @@
         try {
             await api('/ai/channels/' + aiPreview.channelId + '/apply', {
                 method: 'POST',
-                body: JSON.stringify({ slots: aiPreview.lineupSlots, rebuildPlayout: !!rebuild })
+                body: JSON.stringify(buildAiApplyPayload(rebuild))
             });
             toast(rebuild ? 'Lineup applied and playout rebuild started.' : 'Lineup applied.', 'success');
             discardAiPreview();
@@ -2042,8 +2112,9 @@
         try {
             const data = await api('/ai/generate-all', { method: 'POST', body: '{}' });
             const ok = (data.results || []).filter((r) => r.ok).length;
-            const fail = (data.results || []).filter((r) => !r.ok).length;
-            toast(`Generate all finished: ${ok} succeeded, ${fail} failed.`, fail ? 'info' : 'success');
+            const fail = (data.results || []).filter((r) => !r.ok && !r.skipped).length;
+            const skipped = (data.results || []).filter((r) => r.skipped).length;
+            toast(`Generate all finished: ${ok} succeeded, ${fail} failed${skipped ? `, ${skipped} skipped` : ''}.`, fail ? 'info' : 'success');
             await loadAi();
         } catch (err) {
             toast(err.message, 'error');
