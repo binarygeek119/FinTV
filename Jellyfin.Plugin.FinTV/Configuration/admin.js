@@ -264,8 +264,8 @@
                     return;
                 }
 
-                readApiFailure({ responseText: xhr.responseText, message: textStatus, status: xhr.status })
-                    .catch(reject);
+                void readApiFailure({ responseText: xhr.responseText, message: textStatus, status: xhr.status })
+                    .catch((err) => reject(err instanceof Error ? err : new Error(String(err))));
             };
 
             ApiClient.ajax(ajaxOptions);
@@ -390,10 +390,15 @@
     }
 
     function toast(message, type) {
+        const container = $('toast-container');
+        if (!container) {
+            return;
+        }
+
         const el = document.createElement('div');
         el.className = 'toast' + (type ? ' ' + type : '');
         el.textContent = message;
-        $('toast-container').appendChild(el);
+        container.appendChild(el);
         setTimeout(() => el.remove(), 4200);
     }
 
@@ -1881,12 +1886,11 @@
     }
 
     function updateAiUiState() {
-        const enabled = !!(aiSettings && aiSettings.enabled);
+        const enabled = $('ai-enabled') ? !!$('ai-enabled').checked : !!(aiSettings && aiSettings.enabled);
         const note = $('ai-disabled-note');
         note?.classList.toggle('hidden', enabled);
         qa('.ai-action').forEach((el) => { el.disabled = !enabled; });
         qa('.ai-channel-row').forEach((row) => row.classList.toggle('disabled-row', !enabled));
-        if ($('btn-test-ai')) $('btn-test-ai').disabled = !enabled;
         if ($('btn-ai-generate-all')) $('btn-ai-generate-all').disabled = !enabled;
         if ($('ai-auto-apply-channel-add')) $('ai-auto-apply-channel-add').disabled = !enabled;
         if ($('ai-auto-apply-all-on-save')) $('ai-auto-apply-all-on-save').disabled = !enabled;
@@ -2005,14 +2009,32 @@
     }
 
     async function testAiConnection() {
+        const btn = $('btn-test-ai');
+        const originalLabel = btn ? btn.textContent : '';
         try {
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = 'Testing…';
+            }
+            const payload = {
+                provider: Number($('ai-default-provider')?.value || '0')
+            };
+            const openKey = $('ai-openai-key')?.value?.trim();
+            const veniceKey = $('ai-venice-key')?.value?.trim();
+            if (openKey) payload.openAiApiKey = openKey;
+            if (veniceKey) payload.veniceApiKey = veniceKey;
             const data = await api('/ai/settings/test', {
                 method: 'POST',
-                body: JSON.stringify({ provider: Number($('ai-default-provider')?.value || '0') })
+                body: JSON.stringify(payload)
             });
             toast(`Connected to ${data.provider}.`, 'success');
         } catch (err) {
-            toast(err.message, 'error');
+            reportApiError(err, 'AI connection test failed.');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = originalLabel || 'Test Connection';
+            }
         }
     }
 
@@ -2447,7 +2469,7 @@
         click('btn-save-setup', saveSetupSettings);
         click('btn-save-ebs', () => saveEbsSettings().catch((e) => toast(e.message, 'error')));
         click('btn-save-ai-settings', () => saveAiSettings().catch((e) => toast(e.message, 'error')));
-        click('btn-test-ai', () => testAiConnection().catch((e) => toast(e.message, 'error')));
+        click('btn-test-ai', () => { void testAiConnection(); });
         click('btn-ai-generate-all', () => generateAllAiLineups().catch((e) => toast(e.message, 'error')));
         click('btn-ai-apply', () => applyAiLineup(false).catch((e) => toast(e.message, 'error')));
         click('btn-ai-apply-rebuild', () => applyAiLineup(true).catch((e) => toast(e.message, 'error')));

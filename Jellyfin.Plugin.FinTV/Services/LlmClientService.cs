@@ -29,10 +29,12 @@ public class LlmClientService
         AiProvider provider,
         string systemPrompt,
         string userPrompt,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? openAiApiKeyOverride = null,
+        string? veniceApiKeyOverride = null)
     {
         var settings = Plugin.Instance?.Configuration.Ai ?? new AiSettings();
-        var (apiKey, model, baseUrl) = ResolveProvider(provider, settings);
+        var (apiKey, model, baseUrl) = ResolveProvider(provider, settings, openAiApiKeyOverride, veniceApiKeyOverride);
 
         if (string.IsNullOrWhiteSpace(apiKey))
         {
@@ -136,13 +138,19 @@ public class LlmClientService
         return content[start..];
     }
 
-    public async Task TestConnectionAsync(AiProvider provider, CancellationToken cancellationToken = default)
+    public async Task TestConnectionAsync(
+        AiProvider provider,
+        string? openAiApiKeyOverride = null,
+        string? veniceApiKeyOverride = null,
+        CancellationToken cancellationToken = default)
     {
         var content = await CompleteJsonAsync(
             provider,
             "You are a connectivity test. Reply with JSON {\"ok\":true}.",
             "Reply now.",
-            cancellationToken);
+            cancellationToken,
+            openAiApiKeyOverride,
+            veniceApiKeyOverride);
 
         if (!content.Contains("ok", StringComparison.OrdinalIgnoreCase))
         {
@@ -150,16 +158,20 @@ public class LlmClientService
         }
     }
 
-    private static (string ApiKey, string Model, string BaseUrl) ResolveProvider(AiProvider provider, AiSettings settings)
+    private static (string ApiKey, string Model, string BaseUrl) ResolveProvider(
+        AiProvider provider,
+        AiSettings settings,
+        string? openAiApiKeyOverride = null,
+        string? veniceApiKeyOverride = null)
     {
         return provider switch
         {
             AiProvider.Venice => (
-                settings.VeniceApiKey ?? string.Empty,
+                !string.IsNullOrWhiteSpace(veniceApiKeyOverride) ? veniceApiKeyOverride : settings.VeniceApiKey ?? string.Empty,
                 string.IsNullOrWhiteSpace(settings.VeniceModel) ? "gpt-4o-mini" : settings.VeniceModel,
                 "https://api.venice.ai/api/v1"),
             _ => (
-                settings.OpenAiApiKey ?? string.Empty,
+                !string.IsNullOrWhiteSpace(openAiApiKeyOverride) ? openAiApiKeyOverride : settings.OpenAiApiKey ?? string.Empty,
                 string.IsNullOrWhiteSpace(settings.OpenAiModel) ? "gpt-4o-mini" : settings.OpenAiModel,
                 "https://api.openai.com/v1")
         };

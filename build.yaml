@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.51"
+version: "0.0.2.52"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -81,6 +81,7 @@ artifacts:
   - "tools/yt-dlp/win-x64/yt-dlp.exe"
   - "scripts/install-docker-cli-jellyfin.sh"
 changelog: |-
+  - Fix AI Test Connection button staying disabled until AI is saved; allow testing unsaved API keys before enable
   - Add The Holiday Channel seasonal scheduling with dynamic logos, themed catalog matching, and off-season playback
   - Add Slappy comedy channel with Animation Domination 6pm block and comedy-only catalog filtering
   - Add channel AI catalog rules for FlashBack, Retro, Flip TV, Past Tense News, Cops And Robbers, and more presets

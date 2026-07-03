@@ -143,16 +143,28 @@ public class AiController : ControllerBase
     }
 
     [HttpPost("settings/test")]
-    public async Task<IActionResult> TestSettings([FromBody] AiTestSettingsRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> TestSettings([FromBody] AiTestSettingsRequest? request, CancellationToken cancellationToken)
     {
-        if (Plugin.Instance?.Configuration.Ai.Enabled != true)
-        {
-            return BadRequest(new { message = "AI lineup generation is disabled." });
-        }
+        var plugin = Plugin.Instance ?? throw new InvalidOperationException("FinTV plugin not initialized.");
+        var provider = request?.Provider ?? plugin.Configuration.Ai.DefaultProvider;
 
-        var provider = request.Provider ?? Plugin.Instance.Configuration.Ai.DefaultProvider;
-        await _llm.TestConnectionAsync(provider, cancellationToken);
-        return Ok(new { ok = true, provider = provider.ToString() });
+        try
+        {
+            await _llm.TestConnectionAsync(
+                provider,
+                request?.OpenAiApiKey,
+                request?.VeniceApiKey,
+                cancellationToken);
+            return Ok(new { ok = true, provider = provider.ToString() });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = $"Connection test failed: {ex.Message}" });
+        }
     }
 
     [HttpGet("channels")]
@@ -364,6 +376,10 @@ public class AiSettingsRequest
 public class AiTestSettingsRequest
 {
     public AiProvider? Provider { get; set; }
+
+    public string? OpenAiApiKey { get; set; }
+
+    public string? VeniceApiKey { get; set; }
 }
 
 public class AiChannelSettingsRequest
