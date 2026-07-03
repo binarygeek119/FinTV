@@ -1750,34 +1750,62 @@
     }
 
     async function applyPresets() {
-        const updateExisting = $('preset-update-existing').checked;
-        presetNumberingMode = parseInt($('preset-numbering-mode').value, 10) || 0;
+        if (!syncConfigPage()) {
+            toast('FinTV admin page is not ready. Close and reopen FinTV settings.', 'error');
+            return;
+        }
+
+        const btn = $('btn-apply-presets');
+        const resultEl = $('presets-result');
+        const numberingEl = $('preset-numbering-mode');
+        const updateExistingEl = $('preset-update-existing');
+        const originalLabel = btn ? btn.textContent : '';
+
+        if (!numberingEl) {
+            toast('Preset controls are not loaded. Switch to the Presets tab and try again.', 'error');
+            return;
+        }
+
         try {
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = 'Creating…';
+            }
+
+            const updateExisting = !!updateExistingEl?.checked;
+            presetNumberingMode = parseInt(numberingEl.value, 10) || 0;
             const result = await api('/channels/presets/apply', {
                 method: 'POST',
-                body: {
+                body: JSON.stringify({
                     numberingMode: presetNumberingMode,
                     skipExisting: !updateExisting,
                     updateExisting: updateExisting
-                }
+                })
             });
             const lines = [];
-            if (result.created && result.created.length) {
+            if (result?.created?.length) {
                 lines.push(`Created ${result.created.length}: ${result.created.map((r) => formatChannelNumber(r.number) + ' ' + r.name).join(', ')}`);
             }
-            if (result.updated && result.updated.length) {
+            if (result?.updated?.length) {
                 lines.push(`Updated ${result.updated.length}: ${result.updated.map((r) => formatChannelNumber(r.number) + ' ' + r.name).join(', ')}`);
             }
-            if (result.skipped && result.skipped.length) {
-                lines.push(`Skipped ${result.skipped.length}.`);
+            if (result?.skipped?.length) {
+                lines.push(`Skipped ${result.skipped.length} existing channel(s).`);
             }
-            $('presets-result').classList.remove('hidden');
-            $('presets-result').textContent = lines.join('\n') || 'No changes made.';
-            toast(lines[0] || 'Presets applied.', 'success');
+            if (resultEl) {
+                resultEl.classList.remove('hidden');
+                resultEl.textContent = lines.join('\n') || 'No changes made — all preset channels already exist.';
+            }
+            toast(lines[0] || 'All preset channels already exist.', lines.length ? 'success' : 'info');
             await loadPresets();
             await loadChannels();
         } catch (err) {
-            toast(err.message, 'error');
+            reportApiError(err, 'Could not apply channel presets.');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = originalLabel || 'Create Missing Channels';
+            }
         }
     }
 
@@ -2400,11 +2428,9 @@
     }
 
     function bindEvents() {
-        if (!configPage || configPage.dataset.fintvBound === '1') {
+        if (!configPage) {
             return;
         }
-
-        configPage.dataset.fintvBound = '1';
 
         function click(id, handler) {
             const el = $(id);
@@ -2491,7 +2517,7 @@
         change('ebs-display-mode', updateEbsFieldVisibility);
         change('ebs-audio-mode', updateEbsFieldVisibility);
         change('ebs-music-source', updateEbsFieldVisibility);
-        click('btn-apply-presets', applyPresets);
+        click('btn-apply-presets', () => { void applyPresets(); });
         change('preset-numbering-mode', loadPresets);
         click('modal-close', closeModal);
         const modalBackdrop = $('modal-backdrop');
@@ -2558,6 +2584,9 @@ export default function (view) {
     view.addEventListener('viewshow', boot);
     view.addEventListener('viewdestroy', function () {
         delete view.dataset.fintvBound;
+        document.querySelectorAll('#FinTVConfigPage').forEach((page) => {
+            delete page.dataset.fintvBound;
+        });
     });
     boot();
 }
