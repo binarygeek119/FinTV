@@ -1,5 +1,4 @@
 using System.Net.Http.Headers;
-using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -40,21 +39,37 @@ public class LlmClientService
             throw new InvalidOperationException($"{provider} API key is not configured.");
         }
 
-        var payload = new
-        {
-            model,
-            messages = new object[]
+        var useJsonResponseFormat = provider != AiProvider.Venice;
+        var effectiveSystemPrompt = useJsonResponseFormat
+            ? systemPrompt
+            : systemPrompt + "\nReply with raw JSON only. No markdown fences or commentary.";
+
+        var payload = useJsonResponseFormat
+            ? (object)new
             {
-                new { role = "system", content = systemPrompt },
-                new { role = "user", content = userPrompt }
-            },
-            response_format = new { type = "json_object" },
-            temperature = 0.4
-        };
+                model,
+                messages = new object[]
+                {
+                    new { role = "system", content = effectiveSystemPrompt },
+                    new { role = "user", content = userPrompt }
+                },
+                response_format = new { type = "json_object" },
+                temperature = 0.4
+            }
+            : new
+            {
+                model,
+                messages = new object[]
+                {
+                    new { role = "system", content = effectiveSystemPrompt },
+                    new { role = "user", content = userPrompt }
+                },
+                temperature = 0.4
+            };
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/chat/completions");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-        request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+        request.Content = new StringContent(JsonSerializer.Serialize(payload, JsonOptions), Encoding.UTF8, "application/json");
 
         var client = _httpClientFactory.CreateClient(nameof(LlmClientService));
         client.Timeout = TimeSpan.FromSeconds(120);
@@ -74,7 +89,51 @@ public class LlmClientService
             throw new InvalidOperationException("LLM returned an empty response.");
         }
 
-        return content;
+        return useJsonResponseFormat ? content : ExtractJsonFromText(content);
+    }
+
+    internal static string ExtractJsonFromText(string content)
+    {
+        content = content.Trim();
+
+        if (content.StartsWith("```", StringComparison.Ordinal))
+        {
+            var fenceEnd = content.IndexOf('\n');
+            if (fenceEnd >= 0)
+            {
+                content = content[(fenceEnd + 1)..].TrimEnd();
+            }
+
+            if (content.EndsWith("```", StringComparison.Ordinal))
+            {
+                content = content[..^3].TrimEnd();
+            }
+        }
+
+        var start = content.IndexOf('{');
+        if (start < 0)
+        {
+            return content;
+        }
+
+        var depth = 0;
+        for (var i = start; i < content.Length; i++)
+        {
+            if (content[i] == '{')
+            {
+                depth++;
+            }
+            else if (content[i] == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return content[start..(i + 1)];
+                }
+            }
+        }
+
+        return content[start..];
     }
 
     public async Task TestConnectionAsync(AiProvider provider, CancellationToken cancellationToken = default)

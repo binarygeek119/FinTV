@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BUILD_YAML = ROOT / "build.yaml"
 LOGOS_DIR = ROOT / "Jellyfin.Plugin.FinTV" / "Assets" / "logos" / "binarygeek119"
 YTDLP_DIR = ROOT / "Jellyfin.Plugin.FinTV" / "Assets" / "tools" / "yt-dlp"
+SCRIPTS_DIR = ROOT / "Jellyfin.Plugin.FinTV" / "Assets" / "scripts"
 CSPROJ = ROOT / "Jellyfin.Plugin.FinTV" / "Jellyfin.Plugin.FinTV.csproj"
 PLAYWRIGHT_NODE_PLATFORMS = ("win32_x64", "linux-x64")
 
@@ -48,6 +49,17 @@ def yt_dlp_artifacts() -> list[str]:
     return [
         f'  - "tools/yt-dlp/{path.relative_to(YTDLP_DIR).as_posix()}"'
         for path in sorted(YTDLP_DIR.rglob("*"))
+        if path.is_file()
+    ]
+
+
+def script_artifacts() -> list[str]:
+    if not SCRIPTS_DIR.exists():
+        return []
+
+    return [
+        f'  - "scripts/{path.relative_to(SCRIPTS_DIR).as_posix()}"'
+        for path in sorted(SCRIPTS_DIR.rglob("*"))
         if path.is_file()
     ]
 
@@ -102,6 +114,7 @@ def main() -> int:
     playwright_version = read_playwright_version()
     logos = logo_artifacts()
     yt_dlp = yt_dlp_artifacts()
+    scripts = script_artifacts()
     playwright = playwright_artifacts(playwright_version)
     if not playwright:
         print(
@@ -121,6 +134,7 @@ def main() -> int:
         if line.strip()
         and not line.strip().startswith('- "logos/binarygeek119/')
         and not line.strip().startswith('- "tools/yt-dlp/')
+        and not line.strip().startswith('- "scripts/')
         and not line.strip().startswith('- ".playwright/')
         and line.strip() not in ('- "playwright.ps1"', '- "playwright.sh"')
     ]
@@ -130,13 +144,14 @@ def main() -> int:
         + base_artifacts
         + logos
         + yt_dlp
+        + scripts
         + playwright
         + lines[changelog_index:]
     )
     BUILD_YAML.write_text("\n".join(updated) + "\n", encoding="utf-8")
     print(
         f"Added {len(logos)} logo artifacts, {len(yt_dlp)} yt-dlp artifacts, "
-        f"and {len(playwright)} Playwright artifacts to build.yaml"
+        f"{len(scripts)} script artifacts, and {len(playwright)} Playwright artifacts to build.yaml"
     )
     return 0
 

@@ -97,6 +97,30 @@
     <Copy SourceFiles="@(BundledYtDlpPublish)" DestinationFiles="@(BundledYtDlpPublish->'$(PublishDir)tools\yt-dlp\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
 
+  <Target Name="AddBundledScriptsToPublish" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <BundledScript Include="$(MSBuildThisFileDirectory)Assets\scripts\**\*.*" Condition="Exists('$(MSBuildThisFileDirectory)Assets\scripts')" />
+      <ResolvedFileToPublish Include="@(BundledScript)">
+        <RelativePath>scripts\%(RecursiveDir)%(Filename)%(Extension)</RelativePath>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
+
+  <Target Name="CopyBundledScriptsToOutput" AfterTargets="Build" Condition="Exists('$(MSBuildThisFileDirectory)Assets\scripts')">
+    <ItemGroup>
+      <BundledScriptOutput Include="$(MSBuildThisFileDirectory)Assets\scripts\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(BundledScriptOutput)" DestinationFiles="@(BundledScriptOutput->'$(OutputPath)scripts\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyBundledScriptsToPublishDir" AfterTargets="Publish" Condition="Exists('$(MSBuildThisFileDirectory)Assets\scripts')">
+    <ItemGroup>
+      <BundledScriptPublish Include="$(MSBuildThisFileDirectory)Assets\scripts\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(BundledScriptPublish)" DestinationFiles="@(BundledScriptPublish->'$(PublishDir)scripts\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
+
   <PropertyGroup>
     <PlaywrightPackageVersion>1.49.0</PlaywrightPackageVersion>
     <PlaywrightPackageRoot>$([System.IO.Path]::Combine('$(NuGetPackageRoot)', 'microsoft.playwright', '$(PlaywrightPackageVersion)'))</PlaywrightPackageRoot>

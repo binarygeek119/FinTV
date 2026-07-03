@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.47"
+version: "0.0.2.48"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -79,7 +79,10 @@ artifacts:
   - "tools/yt-dlp/VERSION.txt"
   - "tools/yt-dlp/linux-x64/yt-dlp"
   - "tools/yt-dlp/win-x64/yt-dlp.exe"
+  - "scripts/install-docker-cli-jellyfin.sh"
 changelog: |-
+  - Fix Venice AI test and lineup generation when models reject OpenAI response_format JSON mode
+  - Bundle install-docker-cli-jellyfin.sh for Docker-in-Docker Jellyfin WeatherStar setup
   - Add ws4kp and ws3kp Docker start/stop controls on Weather tab for self-hosted WeatherStar 4000+ and 3000+
   - Extend playout horizon to 14 days with hourly auto-extend so schedules roll forward without wiping future items
   - Add AI playout templates (Classic Cable dayparts, Kids All Day, Movie Marathon) for time-of-day scheduling
