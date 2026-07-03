@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.png" alt="FinTV" width="320" />
+</p>
+
 # FinTV
 
 Simulated live TV for [Jellyfin](https://jellyfin.org). FinTV turns your media library into always-on broadcast channels with a full electronic program guide, commercial support, retro 4:3 presentation options, and IPTV integration.
