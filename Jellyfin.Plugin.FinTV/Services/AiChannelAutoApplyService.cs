@@ -2,6 +2,7 @@ using Jellyfin.Plugin.FinTV.Configuration;
 using Jellyfin.Plugin.FinTV.Data;
 using Jellyfin.Plugin.FinTV.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.FinTV.Services;
@@ -14,17 +15,20 @@ public class AiChannelAutoApplyService
     private readonly FinTvDbContext _db;
     private readonly AiLineupGeneratorService _generator;
     private readonly LineupGeneratorService _playoutGenerator;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<AiChannelAutoApplyService> _logger;
 
     public AiChannelAutoApplyService(
         FinTvDbContext db,
         AiLineupGeneratorService generator,
         LineupGeneratorService playoutGenerator,
+        IServiceScopeFactory scopeFactory,
         ILogger<AiChannelAutoApplyService> logger)
     {
         _db = db;
         _generator = generator;
         _playoutGenerator = playoutGenerator;
+        _scopeFactory = scopeFactory;
         _logger = logger;
     }
 
@@ -109,6 +113,33 @@ public class AiChannelAutoApplyService
             _logger.LogWarning(ex, "AI auto-apply failed for channel {ChannelId}", channelId);
             return AiAutoApplyChannelResult.Failed(ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Runs AI auto-apply in the background so channel create/preset APIs return immediately.
+    /// </summary>
+    /// <param name="channelId">Channel identifier.</param>
+    public void QueueAutoApplyForChannel(Guid channelId)
+    {
+        var settings = Plugin.Instance?.Configuration.Ai ?? new AiSettings();
+        if (!settings.Enabled || !settings.AutoApplyOnChannelAdd)
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var service = scope.ServiceProvider.GetRequiredService<AiChannelAutoApplyService>();
+                await service.TryAutoApplyForChannelAsync(channelId, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Background AI auto-apply failed for channel {ChannelId}", channelId);
+            }
+        });
     }
 
     public async Task<IReadOnlyList<AiAutoApplyChannelResult>> ApplyToAllEligibleChannelsAsync(

@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.54"
+version: "0.0.2.55"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -81,6 +81,9 @@ artifacts:
   - "tools/yt-dlp/win-x64/yt-dlp.exe"
   - "scripts/install-docker-cli-jellyfin.sh"
 changelog: |-
+  - Fix channel save and CommercialBrainz settings targeting wrong admin page copy on Jellyfin 12
+  - Return channel create immediately instead of blocking on background AI auto-apply
+  - Always show default CommercialBrainz base URL when settings have not loaded yet
   - Fix uncaught promise errors in FinTV admin when Jellyfin 12 ApiClient.ajax rejects with Response
   - Return clear JSON errors for WeatherStar Docker start failures instead of HTTP 500
   - Fix FinTV admin buttons (including Create Missing Channels) not responding after navigating away and back

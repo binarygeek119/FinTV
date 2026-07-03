@@ -169,7 +169,7 @@ public class ChannelPresetService
             }
             else
             {
-                await _aiAutoApply.TryAutoApplyForChannelAsync(created.Id, cancellationToken);
+                _aiAutoApply.QueueAutoApplyForChannel(created.Id);
             }
 
             existingNumbers.Add(new { Number = created.Number, Id = created.Id });

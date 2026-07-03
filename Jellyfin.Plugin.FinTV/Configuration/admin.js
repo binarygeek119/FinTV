@@ -849,9 +849,25 @@
 
     async function saveChannel(e) {
         e.preventDefault();
+        if (!syncConfigPage()) {
+            toast('FinTV admin page is not ready. Close and reopen FinTV settings.', 'error');
+            return;
+        }
+
+        const nameEl = $('ch-name');
+        const numberEl = $('ch-number');
+        const form = $('channel-form');
+        const submitBtn = form ? form.querySelector('button[type="submit"]') : null;
+        const originalLabel = submitBtn ? submitBtn.textContent : '';
+
+        if (!nameEl || !numberEl) {
+            toast('Channel form is not loaded. Close and reopen the form.', 'error');
+            return;
+        }
+
         let number;
         try {
-            number = parseChannelNumber($('ch-number').value);
+            number = parseChannelNumber(numberEl.value);
         } catch (err) {
             toast(err.message, 'error');
             return;
@@ -859,28 +875,28 @@
 
         let weatherCoords;
         try {
-            weatherCoords = parseWeatherCoordinates($('ch-lat').value, $('ch-lon').value);
+            weatherCoords = parseWeatherCoordinates($('ch-lat')?.value, $('ch-lon')?.value);
         } catch (err) {
             toast(err.message, 'error');
             return;
         }
 
-        $('ch-lat').value = weatherCoords.lat == null ? '' : String(weatherCoords.lat);
-        $('ch-lon').value = weatherCoords.lon == null ? '' : String(weatherCoords.lon);
+        if ($('ch-lat')) $('ch-lat').value = weatherCoords.lat == null ? '' : String(weatherCoords.lat);
+        if ($('ch-lon')) $('ch-lon').value = weatherCoords.lon == null ? '' : String(weatherCoords.lon);
 
         const payload = buildChannelPayload({
             number,
-            name: $('ch-name').value.trim(),
+            name: nameEl.value.trim(),
             contentType: readSelectEnum('ch-content-type', CONTENT_TYPE_VALUES, 0),
             aspectRatio: readSelectEnum('ch-aspect', ASPECT_RATIO_VALUES, 0),
-            scanlinesEnabled: $('ch-scanlines').checked,
+            scanlinesEnabled: !!$('ch-scanlines')?.checked,
             bugPlacement: readSelectEnum('ch-bug', BUG_PLACEMENT_VALUES, 0),
-            audioLanguage: $('ch-audio').value.trim(),
-            logoSetId: $('ch-logo-set').value ? $('ch-logo-set').value : null,
-            logoFileName: $('ch-logo-file').value || null,
+            audioLanguage: $('ch-audio')?.value.trim() || 'eng',
+            logoSetId: $('ch-logo-set')?.value ? $('ch-logo-set').value : null,
+            logoFileName: $('ch-logo-file')?.value || null,
             weatherLatitude: weatherCoords.lat,
             weatherLongitude: weatherCoords.lon,
-            enabled: $('ch-enabled').checked
+            enabled: !!$('ch-enabled')?.checked
         });
 
         if (!payload.Name) {
@@ -889,17 +905,27 @@
         }
 
         try {
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Saving…';
+            }
+
             if (editingChannelId) {
-                await api('/channels/' + editingChannelId, { method: 'PUT', body: payload });
+                await api('/channels/' + editingChannelId, { method: 'PUT', body: JSON.stringify(payload) });
                 toast('Channel updated.', 'success');
             } else {
-                await api('/channels', { method: 'POST', body: payload });
+                await api('/channels', { method: 'POST', body: JSON.stringify(payload) });
                 toast('Channel created.', 'success');
             }
             showChannelForm(false);
             await loadChannels();
         } catch (err) {
-            toast(err.message, 'error');
+            reportApiError(err, 'Could not save channel.');
+        } finally {
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = originalLabel || 'Save';
+            }
         }
     }
 
@@ -1335,10 +1361,12 @@
             .filter((num) => Number.isFinite(num) && num >= 1900);
     }
 
+    const COMMERCIALBRAINZ_DEFAULT_URL = 'https://commercialbrainz.duckdns.org';
+
     function readBrainzSettingsFromForm() {
         return {
             enabled: !!$('cb-enabled')?.checked,
-            baseUrl: $('cb-base-url')?.value?.trim() || '',
+            baseUrl: $('cb-base-url')?.value?.trim() || COMMERCIALBRAINZ_DEFAULT_URL,
             apiToken: $('cb-api-token')?.value?.trim() || '',
             poolMode: parseInt($('cb-pool-mode')?.value, 10) || 2,
             maxSyncResults: parseInt($('cb-max-sync')?.value, 10) || 500,
@@ -1364,9 +1392,11 @@
     }
 
     function applyBrainzSettings(settings) {
-        if (!settings) return;
+        settings = settings || {};
         if ($('cb-enabled')) $('cb-enabled').checked = !!settings.enabled;
-        if ($('cb-base-url')) $('cb-base-url').value = settings.baseUrl || 'https://commercialbrainz.duckdns.org';
+        if ($('cb-base-url')) {
+            $('cb-base-url').value = settings.baseUrl || COMMERCIALBRAINZ_DEFAULT_URL;
+        }
         if ($('cb-api-token')) $('cb-api-token').value = '';
         if ($('cb-pool-mode')) $('cb-pool-mode').value = String(settings.poolMode ?? 2);
         if ($('cb-max-sync')) $('cb-max-sync').value = settings.maxSyncResults || 500;
@@ -1424,15 +1454,32 @@
     }
 
     async function loadBrainzSettings() {
-        const settings = await api('/commercials/brainz/settings').catch(() => null);
-        applyBrainzSettings(settings);
+        try {
+            const settings = await api('/commercials/brainz/settings');
+            applyBrainzSettings(settings);
+        } catch (err) {
+            applyBrainzSettings(null);
+            reportApiError(err, 'Could not load CommercialBrainz settings.');
+        }
     }
 
     async function saveBrainzSettings() {
-        const payload = readBrainzSettingsFromForm();
-        const saved = await api('/commercials/brainz/settings', { method: 'PUT', body: payload });
-        applyBrainzSettings(saved);
-        toast('CommercialBrainz filters saved.', 'success');
+        if (!syncConfigPage()) {
+            toast('FinTV admin page is not ready. Close and reopen FinTV settings.', 'error');
+            return;
+        }
+
+        try {
+            const payload = readBrainzSettingsFromForm();
+            const saved = await api('/commercials/brainz/settings', {
+                method: 'PUT',
+                body: JSON.stringify(payload)
+            });
+            applyBrainzSettings(saved);
+            toast('CommercialBrainz filters saved.', 'success');
+        } catch (err) {
+            reportApiError(err, 'Could not save CommercialBrainz settings.');
+        }
     }
 
     async function previewBrainz() {

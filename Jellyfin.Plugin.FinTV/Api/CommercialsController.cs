@@ -182,7 +182,9 @@ public class CommercialsController : ControllerBase
         return new
         {
             enabled = settings.Enabled,
-            baseUrl = settings.BaseUrl,
+            baseUrl = string.IsNullOrWhiteSpace(settings.BaseUrl)
+                ? CommercialBrainzSettings.DefaultBaseUrl
+                : settings.BaseUrl.Trim().TrimEnd('/'),
             hasApiToken = !string.IsNullOrWhiteSpace(settings.ApiToken),
             poolMode = (int)settings.PoolMode,
             maxSyncResults = settings.MaxSyncResults,

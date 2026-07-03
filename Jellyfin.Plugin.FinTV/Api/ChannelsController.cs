@@ -104,12 +104,12 @@ public class ChannelsController : ControllerBase
         {
             var created = await _channels.CreateAsync(request.ToChannel(), cancellationToken);
             await BuildWeatherPlayoutIfNeededAsync(created, cancellationToken);
-            await _aiAutoApply.TryAutoApplyForChannelAsync(created.Id, cancellationToken);
+            _aiAutoApply.QueueAutoApplyForChannel(created.Id);
             return CreatedAtAction(nameof(Get), new { id = created.Id }, created);
         }
         catch (ArgumentException ex)
         {
-            return BadRequest(ex.Message);
+            return BadRequest(new { message = ex.Message });
         }
     }
 
@@ -136,7 +136,7 @@ public class ChannelsController : ControllerBase
         }
         catch (ArgumentException ex)
         {
-            return BadRequest(ex.Message);
+            return BadRequest(new { message = ex.Message });
         }
     }
 
