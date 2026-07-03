@@ -2001,7 +2001,24 @@
         if ($('ai-auto-apply-all-on-save')) $('ai-auto-apply-all-on-save').disabled = !enabled;
     }
 
+    function readAiSettingsFromForm() {
+        return {
+            enabled: !!$('ai-enabled')?.checked,
+            autoApplyOnChannelAdd: !!$('ai-auto-apply-channel-add')?.checked,
+            autoApplyToAllChannelsOnSave: !!$('ai-auto-apply-all-on-save')?.checked,
+            defaultProvider: Number($('ai-default-provider')?.value || '0'),
+            openAiModel: $('ai-openai-model')?.value?.trim() || 'gpt-4o-mini',
+            veniceModel: $('ai-venice-model')?.value?.trim() || 'gpt-4o-mini',
+            openAiApiKey: $('ai-openai-key')?.value?.trim() || null,
+            veniceApiKey: $('ai-venice-key')?.value?.trim() || null
+        };
+    }
+
     async function loadAi() {
+        if (!syncConfigPage()) {
+            return;
+        }
+
         try {
             aiSettings = await api('/ai/settings');
             if ($('ai-enabled')) $('ai-enabled').checked = !!aiSettings.enabled;
@@ -2080,22 +2097,35 @@
     }
 
     async function saveAiSettings() {
+        if (!syncConfigPage()) {
+            toast('FinTV admin page is not ready. Close and reopen FinTV settings.', 'error');
+            return;
+        }
+
+        const btn = $('btn-save-ai-settings');
+        const originalLabel = btn ? btn.textContent : '';
         try {
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = 'Saving…';
+            }
+
+            const form = readAiSettingsFromForm();
             const payload = {
-                enabled: !!$('ai-enabled')?.checked,
-                autoApplyOnChannelAdd: !!$('ai-auto-apply-channel-add')?.checked,
-                autoApplyToAllChannelsOnSave: !!$('ai-auto-apply-all-on-save')?.checked,
-                defaultProvider: Number($('ai-default-provider')?.value || '0'),
-                openAiModel: $('ai-openai-model')?.value?.trim() || 'gpt-4o-mini',
-                veniceModel: $('ai-venice-model')?.value?.trim() || 'gpt-4o-mini'
+                enabled: form.enabled,
+                autoApplyOnChannelAdd: form.autoApplyOnChannelAdd,
+                autoApplyToAllChannelsOnSave: form.autoApplyToAllChannelsOnSave,
+                defaultProvider: form.defaultProvider,
+                openAiModel: form.openAiModel,
+                veniceModel: form.veniceModel
             };
-            const openKey = $('ai-openai-key')?.value?.trim();
-            const veniceKey = $('ai-venice-key')?.value?.trim();
-            if (openKey) payload.openAiApiKey = openKey;
-            if (veniceKey) payload.veniceApiKey = veniceKey;
+            if (form.openAiApiKey) payload.openAiApiKey = form.openAiApiKey;
+            if (form.veniceApiKey) payload.veniceApiKey = form.veniceApiKey;
             const response = await api('/ai/settings', { method: 'PUT', body: JSON.stringify(payload) });
             aiSettings = response.settings || response;
-            if (response.applyAll) {
+            if (response.applyAll?.queued) {
+                toast('AI settings saved. Apply-to-all is running in the background.', 'success');
+            } else if (response.applyAll) {
                 const summary = response.applyAll;
                 toast(
                     `AI settings saved. Applied to ${summary.ok} channel(s)` +
@@ -2109,11 +2139,21 @@
             }
             await loadAi();
         } catch (err) {
-            toast(err.message, 'error');
+            reportApiError(err, 'Could not save AI settings.');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = originalLabel || 'Save AI Settings';
+            }
         }
     }
 
     async function testAiConnection() {
+        if (!syncConfigPage()) {
+            toast('FinTV admin page is not ready. Close and reopen FinTV settings.', 'error');
+            return;
+        }
+
         const btn = $('btn-test-ai');
         const originalLabel = btn ? btn.textContent : '';
         try {
@@ -2121,13 +2161,12 @@
                 btn.disabled = true;
                 btn.textContent = 'Testing…';
             }
+            const form = readAiSettingsFromForm();
             const payload = {
-                provider: Number($('ai-default-provider')?.value || '0')
+                provider: form.defaultProvider
             };
-            const openKey = $('ai-openai-key')?.value?.trim();
-            const veniceKey = $('ai-venice-key')?.value?.trim();
-            if (openKey) payload.openAiApiKey = openKey;
-            if (veniceKey) payload.veniceApiKey = veniceKey;
+            if (form.openAiApiKey) payload.openAiApiKey = form.openAiApiKey;
+            if (form.veniceApiKey) payload.veniceApiKey = form.veniceApiKey;
             const data = await api('/ai/settings/test', {
                 method: 'POST',
                 body: JSON.stringify(payload)
@@ -2144,7 +2183,12 @@
     }
 
     async function saveAiChannelSettings(channelId) {
-        const row = document.querySelector(`[data-ai-channel="${channelId}"]`);
+        if (!syncConfigPage()) {
+            toast('FinTV admin page is not ready. Close and reopen FinTV settings.', 'error');
+            return;
+        }
+
+        const row = q(`[data-ai-channel="${channelId}"]`);
         if (!row) return;
         try {
             await api('/ai/channels/' + channelId + '/fine-tune', {
@@ -2162,7 +2206,12 @@
     }
 
     async function generateAiLineup(channelId) {
-        const row = document.querySelector(`[data-ai-channel="${channelId}"]`);
+        if (!syncConfigPage()) {
+            toast('FinTV admin page is not ready. Close and reopen FinTV settings.', 'error');
+            return;
+        }
+
+        const row = q(`[data-ai-channel="${channelId}"]`);
         if (row) {
             await saveAiChannelSettings(channelId);
         }

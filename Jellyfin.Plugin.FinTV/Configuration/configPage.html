@@ -390,7 +390,7 @@
                 <div class="card section-card">
                     <h3>Self-hosted WeatherStar (Docker)</h3>
                     <p class="hint hint-warning"><strong>Host WeatherStar locally.</strong> Do not point production channels at a public demo URL.</p>
-                    <p class="hint">FinTV can start official Docker images for WeatherStar 4000+ and 3000+. Docker must be installed and the Jellyfin user must be able to run <code>docker</code>. If Jellyfin runs in Docker, mount <code>/var/run/docker.sock</code>.</p>
+                    <p class="hint">FinTV can start official Docker images for WeatherStar 4000+ and 3000+. Docker must be installed and the Jellyfin user must be able to run <code>docker</code>. If Jellyfin runs in Docker, mount <code>/var/run/docker.sock</code> and add <code>extra_hosts: ["host.docker.internal:host-gateway"]</code> so localhost WeatherStar URLs resolve from the Jellyfin container.</p>
                     <div class="weather-docker-grid">
                         <div class="weather-docker-panel">
                             <h4>WeatherStar 4000+ (ws4kp)</h4>

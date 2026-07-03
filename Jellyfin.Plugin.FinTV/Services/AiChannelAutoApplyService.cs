@@ -142,6 +142,38 @@ public class AiChannelAutoApplyService
         });
     }
 
+    /// <summary>
+    /// Applies AI lineups to all eligible channels in the background after settings are saved.
+    /// </summary>
+    public void QueueApplyToAllEligibleChannels()
+    {
+        var settings = Plugin.Instance?.Configuration.Ai ?? new AiSettings();
+        if (!settings.Enabled || !settings.AutoApplyToAllChannelsOnSave)
+        {
+            return;
+        }
+
+        _logger.LogInformation("Queueing AI apply-to-all for eligible channels.");
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var service = scope.ServiceProvider.GetRequiredService<AiChannelAutoApplyService>();
+                var results = await service.ApplyToAllEligibleChannelsAsync(CancellationToken.None).ConfigureAwait(false);
+                _logger.LogInformation(
+                    "Background AI apply-to-all finished: {Ok} ok, {Failed} failed, {Skipped} skipped.",
+                    results.Count(r => r.Ok),
+                    results.Count(r => !r.Ok && !r.WasSkipped),
+                    results.Count(r => r.WasSkipped));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Background AI apply-to-all failed.");
+            }
+        });
+    }
+
     public async Task<IReadOnlyList<AiAutoApplyChannelResult>> ApplyToAllEligibleChannelsAsync(
         CancellationToken cancellationToken = default)
     {
