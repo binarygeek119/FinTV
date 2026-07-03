@@ -1,0 +1,35 @@
+# Example stack for ghcr.io/binarygeek119/jellyfin-unstable-fintv:unstable
+#
+# Before first run on the host:
+#   stat -c '%g' /var/run/docker.sock
+# Replace DOCKER_GID below with that number.
+
+services:
+  jellyfin:
+    image: ghcr.io/binarygeek119/jellyfin-unstable-fintv:unstable
+    container_name: jellyfin
+    restart: unless-stopped
+    ports:
+      - "8096:8096"
+      # - "8920:8920"  # HTTPS (optional)
+    environment:
+      - TZ=America/Los_Angeles
+    volumes:
+      - ./config:/config
+      - ./cache:/cache
+      - /path/to/media:/media:ro
+      # Required for FinTV WeatherStar Docker buttons (ws4kp/ws3kp)
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - "999"  # DOCKER_GID from: stat -c '%g' /var/run/docker.sock
+    devices:
+      - /dev/dri:/dev/dri  # optional hardware transcoding
+
+  # Optional: auto-pull rebuilt images from GHCR and restart Jellyfin
+  # watchtower:
+  #   image: containrrr/watchtower
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #   command: --interval 86400 --cleanup --label-enable
+  #   labels:
+  #     - com.centurylinklabs.watchtower.enable=true

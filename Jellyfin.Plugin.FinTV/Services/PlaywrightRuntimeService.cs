@@ -6,7 +6,7 @@ namespace Jellyfin.Plugin.FinTV.Services;
 
 /// <summary>
 /// Configures Playwright for Jellyfin plugin hosting on Windows and headless Linux servers.
-/// Linux uses Playwright's official Docker image for Chromium; Windows uses a local browser.
+/// Linux uses a Docker sidecar for Chromium unless PLAYWRIGHT_BROWSERS_PATH is preset (FinTV Jellyfin image).
 /// </summary>
 public class PlaywrightRuntimeService
 {
@@ -28,7 +28,9 @@ public class PlaywrightRuntimeService
     /// <summary>
     /// Gets a value indicating whether weather capture uses Docker-hosted Chromium.
     /// </summary>
-    public bool UsesDockerBrowser => OperatingSystem.IsLinux();
+    public bool UsesDockerBrowser =>
+        OperatingSystem.IsLinux()
+        && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH"));
 
     /// <summary>
     /// Creates a Playwright instance after ensuring drivers and Chromium are available.
@@ -101,10 +103,23 @@ public class PlaywrightRuntimeService
     /// <returns>Headless launch options.</returns>
     public BrowserTypeLaunchOptions CreateLaunchOptions()
     {
-        return new BrowserTypeLaunchOptions
+        var options = new BrowserTypeLaunchOptions
         {
             Headless = true
         };
+
+        if (OperatingSystem.IsLinux() && !UsesDockerBrowser)
+        {
+            options.Args =
+            [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu"
+            ];
+        }
+
+        return options;
     }
 
     private void ConfigureEnvironment()
@@ -124,8 +139,16 @@ public class PlaywrightRuntimeService
 
         if (!UsesDockerBrowser)
         {
-            var browsersPath = Path.Combine(plugin.DataFolder, "playwright-browsers");
-            Directory.CreateDirectory(browsersPath);
+            var presetBrowsersPath = Environment.GetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH");
+            var browsersPath = string.IsNullOrWhiteSpace(presetBrowsersPath)
+                ? Path.Combine(plugin.DataFolder, "playwright-browsers")
+                : presetBrowsersPath;
+
+            if (string.IsNullOrWhiteSpace(presetBrowsersPath))
+            {
+                Directory.CreateDirectory(browsersPath);
+            }
+
             Environment.SetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH", browsersPath);
             _logger.LogDebug(
                 "Playwright configured for local browser. Driver path: {DriverPath}. Browser path: {BrowserPath}",
@@ -146,6 +169,13 @@ public class PlaywrightRuntimeService
     {
         if (_browsersInstalled)
         {
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH")))
+        {
+            _browsersInstalled = true;
+            _logger.LogDebug("Using preset Playwright browsers from PLAYWRIGHT_BROWSERS_PATH");
             return;
         }
 

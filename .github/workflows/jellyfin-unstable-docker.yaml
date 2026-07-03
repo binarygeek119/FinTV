@@ -1,0 +1,102 @@
+name: Jellyfin Unstable Docker (FinTV)
+
+on:
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - 'docker/jellyfin-unstable/**'
+      - '.github/workflows/jellyfin-unstable-docker.yaml'
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: binarygeek119/jellyfin-unstable-fintv
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@b8013c0661083a32396201685803a1e1602dbe6 # v3.6.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@b5ca514318bd6ebac0fb2a04fbe24736e13317f8 # v3.10.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@9780b0c442871a1371090abad6610697c8a71f98 # v3.3.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull upstream Jellyfin unstable
+        id: upstream
+        run: |
+          docker pull jellyfin/jellyfin:unstable
+          digest="$(docker inspect jellyfin/jellyfin:unstable --format='{{index .RepoDigests 0}}')"
+          short="$(echo "$digest" | awk -F: '{print $2}' | cut -c1-12)"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "short=$short" >> "$GITHUB_OUTPUT"
+          echo "Upstream Jellyfin unstable: $digest"
+
+      - name: Read last built base digest label
+        id: last
+        run: |
+          image="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:unstable"
+          last=""
+          if docker pull "$image" 2>/dev/null; then
+            last="$(docker inspect "$image" --format='{{ index .Config.Labels "org.opencontainers.image.base.digest" }}' 2>/dev/null || true)"
+          fi
+          echo "digest=$last" >> "$GITHUB_OUTPUT"
+          echo "Last built base digest: ${last:-<none>}"
+
+      - name: Decide whether to build
+        id: should
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event_name }}" = "push" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "Build forced by ${GITHUB_EVENT_NAME}."
+            exit 0
+          fi
+
+          upstream="${{ steps.upstream.outputs.digest }}"
+          last="${{ steps.last.outputs.digest }}"
+          if [ "$upstream" != "$last" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "Upstream digest changed."
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "Upstream digest unchanged; skipping build."
+          fi
+
+      - name: Build and push
+        if: steps.should.outputs.build == 'true'
+        uses: docker/build-push-action@263435318d21a037746bf5442a1f4a437cb440f4 # v6.18.0
+        with:
+          context: docker/jellyfin-unstable
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:unstable
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.upstream.outputs.short }}
+          labels: |
+            org.opencontainers.image.base.digest=${{ steps.upstream.outputs.digest }}
+            fintv.docker-cli.version=29.5.2
+          build-args: |
+            DOCKER_CLI_VERSION=29.5.2
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Skip notice
+        if: steps.should.outputs.build != 'true'
+        run: echo "No rebuild needed today."

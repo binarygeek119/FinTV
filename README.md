@@ -20,7 +20,7 @@ Inspired by [ErsatzTV/legacy](https://github.com/ErsatzTV/legacy) scheduling con
 
 - Jellyfin **12.0+** (including 12.0 RC builds)
 - FFmpeg (bundled with Jellyfin)
-- For WeatherStar channel: **Windows** uses bundled Playwright Chromium; **Linux** uses Playwright's official Docker image (Docker required)
+- For WeatherStar channel: **Windows** uses bundled Playwright Chromium; **Linux Docker** can use the [FinTV-ready Jellyfin unstable image](docker/jellyfin-unstable/README.md) or Playwright's sidecar container (Docker required)
 
 > **Jellyfin 10.11 users:** use [FinTV v0.0.1.3](https://github.com/binarygeek119/FinTV/releases/tag/v0.0.1.3) instead. v0.0.2.0+ targets Jellyfin 12 on .NET 10.
 
@@ -126,6 +126,24 @@ Click **Start** then **Use URL** to set the base URL to `http://127.0.0.1:8080` 
 On first weather tune, FinTV creates a container named `fintv-playwright-chromium`. If your WeatherStar URL uses `localhost` or `127.0.0.1`, FinTV rewrites it to `host.docker.internal` so the container can reach WeatherStar on the Jellyfin host.
 
 If Jellyfin itself runs in Docker, mount the Docker socket into the Jellyfin container (for example `-v /var/run/docker.sock:/var/run/docker.sock`) so FinTV can start the Playwright browser and WeatherStar containers.
+
+**FinTV-ready Jellyfin Docker image (recommended for Linux):** Use [`ghcr.io/binarygeek119/jellyfin-unstable-fintv:unstable`](docker/jellyfin-unstable/README.md) — includes Docker CLI **29.5.2**, Playwright Chromium, and auto-rebuilds when Jellyfin unstable updates.
+
+**Stock Jellyfin images:** mount the Docker socket and run the bundled install script from the **host**:
+
+```bash
+# volumes: - /var/run/docker.sock:/var/run/docker.sock
+bash /config/plugins/FinTV_<version>/scripts/install-docker-cli-jellyfin.sh jellyfin
+```
+
+The script installs Docker CLI **29.5.2** (static binary). If that fails, it falls back to apt `docker.io`.
+
+If `docker version` fails with permission denied, add the host Docker socket group to Jellyfin and restart:
+
+```yaml
+group_add:
+  - "999"   # use: stat -c '%g' /var/run/docker.sock on the host
+```
 
 **Install FinTV, restart Jellyfin, then tune a weather channel once** to initialize the browser runtime on either platform.
 
