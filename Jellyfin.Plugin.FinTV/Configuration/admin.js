@@ -245,30 +245,60 @@
 
     function ajaxViaApiClient(ajaxOptions) {
         return new Promise((resolve, reject) => {
+            let settled = false;
+            const finish = (action, value) => {
+                if (settled) {
+                    return;
+                }
+
+                settled = true;
+                action(value);
+            };
+
             ajaxOptions.success = (data, _textStatus, xhr) => {
                 if (xhr.status === 204 || data == null || data === '') {
-                    resolve(null);
+                    finish(resolve, null);
                     return;
                 }
 
                 try {
-                    resolve(normalizeApiResponse(parseApiJsonBody(data)));
+                    finish(resolve, normalizeApiResponse(parseApiJsonBody(data)));
                 } catch (parseErr) {
-                    reject(parseErr);
+                    finish(reject, parseErr);
                 }
             };
 
             ajaxOptions.error = (xhr, textStatus) => {
                 if (isEmptyApiResponseError({ status: xhr.status, message: textStatus, responseText: xhr.responseText })) {
-                    resolve(null);
+                    finish(resolve, null);
                     return;
                 }
 
                 void readApiFailure({ responseText: xhr.responseText, message: textStatus, status: xhr.status })
-                    .catch((err) => reject(err instanceof Error ? err : new Error(String(err))));
+                    .catch((err) => finish(reject, err instanceof Error ? err : new Error(String(err))));
             };
 
-            ApiClient.ajax(ajaxOptions);
+            let ajaxResult;
+            try {
+                ajaxResult = ApiClient.ajax(ajaxOptions);
+            } catch (syncErr) {
+                finish(reject, syncErr instanceof Error ? syncErr : new Error(String(syncErr)));
+                return;
+            }
+
+            if (ajaxResult && typeof ajaxResult.then === 'function') {
+                ajaxResult.catch(async (err) => {
+                    if (settled) {
+                        return;
+                    }
+
+                    try {
+                        await readApiFailure(err);
+                    } catch (parsedErr) {
+                        finish(reject, parsedErr instanceof Error ? parsedErr : new Error(String(parsedErr)));
+                    }
+                });
+            }
         });
     }
 
@@ -2295,7 +2325,7 @@
             }
             toast(`${variant} started.`, 'success');
         } catch (err) {
-            toast(err.message, 'error');
+            reportApiError(err, 'Could not start WeatherStar Docker.');
         }
     }
 
@@ -2305,7 +2335,7 @@
             renderWeatherDockerStatus(data);
             toast(`${variant} stopped.`, 'success');
         } catch (err) {
-            toast(err.message, 'error');
+            reportApiError(err, 'Could not stop WeatherStar Docker.');
         }
     }
 

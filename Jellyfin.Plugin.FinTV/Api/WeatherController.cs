@@ -61,22 +61,34 @@ public class WeatherController : ControllerBase
         WeatherStarDockerStartRequest? request,
         CancellationToken cancellationToken)
     {
-        _docker.UpdateSettings(variant, request?.HostPort, request?.Image);
-        var status = await _docker.EnsureRunningAsync(variant, cancellationToken);
-
-        if (request?.UpdateBaseUrl != false)
+        try
         {
-            var plugin = Plugin.Instance ?? throw new InvalidOperationException("FinTV plugin not initialized.");
-            plugin.Configuration.WeatherStarBaseUrl = status.BaseUrl;
-            plugin.SaveConfiguration();
-        }
-        else if (Plugin.Instance is not null)
-        {
-            Plugin.Instance.SaveConfiguration();
-        }
+            _docker.UpdateSettings(variant, request?.HostPort, request?.Image);
+            await _docker.EnsureRunningAsync(variant, cancellationToken);
 
-        var combined = await _docker.GetCombinedStatusAsync(cancellationToken);
-        return Ok(ToCombinedResponse(combined));
+            if (request?.UpdateBaseUrl != false)
+            {
+                var plugin = Plugin.Instance ?? throw new InvalidOperationException("FinTV plugin not initialized.");
+                var status = await _docker.GetStatusAsync(variant, cancellationToken);
+                plugin.Configuration.WeatherStarBaseUrl = status.BaseUrl;
+                plugin.SaveConfiguration();
+            }
+            else if (Plugin.Instance is not null)
+            {
+                Plugin.Instance.SaveConfiguration();
+            }
+
+            var combined = await _docker.GetCombinedStatusAsync(cancellationToken);
+            return Ok(ToCombinedResponse(combined));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (TimeoutException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     private static object ToCombinedResponse(WeatherStarDockerCombinedStatus status)
