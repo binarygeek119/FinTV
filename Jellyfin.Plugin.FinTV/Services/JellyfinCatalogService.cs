@@ -14,11 +14,16 @@ public class JellyfinCatalogService
 {
     private readonly ILibraryManager _libraryManager;
     private readonly HolidayChannelService _holidays;
+    private readonly FinTvListService _lists;
 
-    public JellyfinCatalogService(ILibraryManager libraryManager, HolidayChannelService holidays)
+    public JellyfinCatalogService(
+        ILibraryManager libraryManager,
+        HolidayChannelService holidays,
+        FinTvListService lists)
     {
         _libraryManager = libraryManager;
         _holidays = holidays;
+        _lists = lists;
     }
 
     public async Task<IReadOnlyList<ResolvedCandidate>> ResolveItemAsync(
@@ -83,6 +88,45 @@ public class JellyfinCatalogService
         return Task.FromResult<IReadOnlyList<ResolvedCandidate>>(PickFromPool(items, channel, anchor));
     }
 
+    public async Task<IReadOnlyList<ResolvedCandidate>> ResolvePlaylistAsync(
+        Guid finTvListId,
+        Channel channel,
+        PlayoutAnchorState anchor,
+        DateOnly scheduleDate,
+        int slotIndex,
+        CancellationToken cancellationToken)
+    {
+        var list = await _lists.GetByIdAsync(finTvListId, cancellationToken);
+        if (list is null)
+        {
+            return Array.Empty<ResolvedCandidate>();
+        }
+
+        var playlistItems = _lists.GetPlaylistItems(list.JellyfinPlaylistId);
+        var items = ApplyCatalogConstraints(playlistItems, channel, scheduleDate);
+        if (items.Count == 0)
+        {
+            return Array.Empty<ResolvedCandidate>();
+        }
+
+        if (list.PlaybackMode == ListPlaybackMode.Sequential)
+        {
+            anchor.ListCursor.TryGetValue(list.Id, out var index);
+            if (index >= items.Count)
+            {
+                index = 0;
+            }
+
+            var picked = items[index];
+            anchor.ListCursor[list.Id] = index + 1;
+            return new[] { MapItem(picked) };
+        }
+
+        var rng = new Random(HashCode.Combine(channel.PlayoutSeed, scheduleDate.DayNumber, slotIndex, finTvListId.GetHashCode()));
+        var randomItem = items[rng.Next(items.Count)];
+        return new[] { MapItem(randomItem) };
+    }
+
     public IReadOnlyList<BaseItem> QueryItems(
         Channel channel,
         FilterDefinition? filter = null,
@@ -114,7 +158,9 @@ public class JellyfinCatalogService
             query.Name = collectionName;
         }
 
-        return ApplyCatalogConstraints(_libraryManager.GetItemsResult(query).Items.ToList(), channel, scheduleDate);
+        return ApplyFilterDefinitionConstraints(
+            ApplyCatalogConstraints(_libraryManager.GetItemsResult(query).Items.ToList(), channel, scheduleDate),
+            filter);
     }
 
     public IReadOnlyList<BaseItem> BrowseForAiManifest(Channel channel, ChannelCatalogMode catalogMode, int limit)
@@ -389,6 +435,88 @@ public class JellyfinCatalogService
         }
     }
 
+    private static IReadOnlyList<BaseItem> ApplyFilterDefinitionConstraints(
+        IReadOnlyList<BaseItem> items,
+        FilterDefinition? filter)
+    {
+        if (filter is null)
+        {
+            return items;
+        }
+
+        return items.Where(item =>
+        {
+            if (!string.IsNullOrWhiteSpace(filter.TitleContains)
+                && !item.Name.Contains(filter.TitleContains, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var year = GetReleaseYear(item);
+            if (filter.MinYear.HasValue && (!year.HasValue || year.Value < filter.MinYear.Value))
+            {
+                return false;
+            }
+
+            if (filter.MaxYear.HasValue && (!year.HasValue || year.Value > filter.MaxYear.Value))
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(filter.MinRating)
+                && !RatingAtLeast(item.OfficialRating, filter.MinRating))
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrWhiteSpace(filter.MaxRating)
+                && !RatingAtMost(item.OfficialRating, filter.MaxRating))
+            {
+                return false;
+            }
+
+            return true;
+        }).ToList();
+    }
+
+    private static bool RatingAtLeast(string? itemRating, string minRating)
+    {
+        var itemScore = ParseRatingScore(itemRating);
+        var minScore = ParseRatingScore(minRating);
+        return itemScore.HasValue && minScore.HasValue && itemScore.Value >= minScore.Value;
+    }
+
+    private static bool RatingAtMost(string? itemRating, string maxRating)
+    {
+        var itemScore = ParseRatingScore(itemRating);
+        var maxScore = ParseRatingScore(maxRating);
+        return itemScore.HasValue && maxScore.HasValue && itemScore.Value <= maxScore.Value;
+    }
+
+    private static int? ParseRatingScore(string? rating)
+    {
+        if (string.IsNullOrWhiteSpace(rating))
+        {
+            return null;
+        }
+
+        return rating.ToUpperInvariant() switch
+        {
+            "G" => 1,
+            "PG" => 2,
+            "PG-13" => 3,
+            "TV-Y" => 1,
+            "TV-Y7" => 2,
+            "TV-G" => 2,
+            "TV-PG" => 3,
+            "R" => 4,
+            "TV-14" => 4,
+            "NC-17" => 5,
+            "TV-MA" => 5,
+            _ => null
+        };
+    }
+
     private void MergeChannelFilter(InternalItemsQuery query, Channel channel)
     {
         if (TryApplyLibraryScope(query, channel))
@@ -569,6 +697,14 @@ public class FilterDefinition
     public List<string>? Tags { get; set; }
 
     public string? TitleContains { get; set; }
+
+    public int? MinYear { get; set; }
+
+    public int? MaxYear { get; set; }
+
+    public string? MinRating { get; set; }
+
+    public string? MaxRating { get; set; }
 }
 
 public class MusicLibraryInfo

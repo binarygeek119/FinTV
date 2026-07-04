@@ -7,10 +7,22 @@ namespace Jellyfin.Plugin.FinTV.Services;
 public class LineupService
 {
     private readonly FinTvDbContext _db;
+    private readonly SpecialPresentationService _specialPresentations;
 
-    public LineupService(FinTvDbContext db)
+    public LineupService(FinTvDbContext db, SpecialPresentationService specialPresentations)
     {
         _db = db;
+        _specialPresentations = specialPresentations;
+    }
+
+    public static LineupSlotDto CreateWeatherSlotDto()
+    {
+        return new LineupSlotDto
+        {
+            SlotIndex = 0,
+            SpanSlots = 48,
+            Candidates = new List<SlotCandidateDto>()
+        };
     }
 
     public async Task<Lineup?> GetDefaultLineupAsync(Guid channelId, CancellationToken cancellationToken = default)
@@ -53,6 +65,8 @@ public class LineupService
 
     public async Task<LineupOverride> CreateOverrideAsync(Guid channelId, LineupOverrideDto dto, CancellationToken cancellationToken = default)
     {
+        await EnsureNotWeatherChannelAsync(channelId, cancellationToken);
+
         var entity = new LineupOverride
         {
             ChannelId = channelId,
@@ -110,18 +124,47 @@ public class LineupService
 
     public async Task<IReadOnlyList<LineupSlot>> ResolveSlotsForDateAsync(Guid channelId, DateOnly date, CancellationToken cancellationToken = default)
     {
+        var channel = await _db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
+        if (channel?.ContentType == ChannelContentType.Weather)
+        {
+            return new List<LineupSlot>
+            {
+                new()
+                {
+                    SlotIndex = 0,
+                    SpanSlots = 48,
+                    Candidates = new List<SlotCandidate>()
+                }
+            };
+        }
+
         var overrides = await GetOverridesAsync(channelId, cancellationToken);
         var match = overrides.FirstOrDefault(o =>
             (o.Kind == LineupOverrideKind.SpecificDate && o.SpecificDate == date)
             || (o.Kind == LineupOverrideKind.DayOfWeek && o.DayOfWeek == date.DayOfWeek));
 
+        IReadOnlyList<LineupSlot> baseSlots;
         if (match is not null)
         {
-            return match.Slots.OrderBy(s => s.SlotIndex).ToList();
+            baseSlots = match.Slots.OrderBy(s => s.SlotIndex).ToList();
+        }
+        else
+        {
+            var defaultLineup = await GetDefaultLineupAsync(channelId, cancellationToken);
+            baseSlots = defaultLineup?.Slots.OrderBy(s => s.SlotIndex).ToList() ?? new List<LineupSlot>();
         }
 
-        var defaultLineup = await GetDefaultLineupAsync(channelId, cancellationToken);
-        return defaultLineup?.Slots.OrderBy(s => s.SlotIndex).ToList() ?? new List<LineupSlot>();
+        var presentations = await _specialPresentations.GetForChannelAsync(channelId, cancellationToken);
+        return _specialPresentations.MergeIntoSlots(baseSlots, presentations, date.DayOfWeek);
+    }
+
+    private async Task EnsureNotWeatherChannelAsync(Guid channelId, CancellationToken cancellationToken)
+    {
+        var channel = await _db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
+        if (channel?.ContentType == ChannelContentType.Weather)
+        {
+            throw new InvalidOperationException("Lineup overrides are not supported on weather channels.");
+        }
     }
 
     private void ReplaceSlots(ICollection<LineupSlot> existing, IReadOnlyList<LineupSlotDto> incoming, Guid? lineupId, Guid? overrideId)
@@ -150,6 +193,7 @@ public class LineupService
                 JellyfinItemId = c.JellyfinItemId,
                 CollectionName = c.CollectionName,
                 FilterJson = c.FilterJson,
+                FinTvListId = c.FinTvListId,
                 Weight = c.Weight,
                 SortOrder = c.SortOrder
             }).ToList()
@@ -175,6 +219,8 @@ public class SlotCandidateDto
     public string? CollectionName { get; set; }
 
     public string? FilterJson { get; set; }
+
+    public Guid? FinTvListId { get; set; }
 
     public int Weight { get; set; } = 1;
 

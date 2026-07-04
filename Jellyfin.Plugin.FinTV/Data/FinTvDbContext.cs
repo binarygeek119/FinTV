@@ -34,6 +34,12 @@ public class FinTvDbContext : DbContext
 
     public DbSet<CommercialChapter> CommercialChapters => Set<CommercialChapter>();
 
+    public DbSet<FinTvList> FinTvLists => Set<FinTvList>();
+
+    public DbSet<SpecialPresentation> SpecialPresentations => Set<SpecialPresentation>();
+
+    public DbSet<SpecialPresentationCandidate> SpecialPresentationCandidates => Set<SpecialPresentationCandidate>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -85,6 +91,20 @@ public class FinTvDbContext : DbContext
         modelBuilder.Entity<LogoSetEntry>(entity =>
         {
             entity.HasIndex(e => new { e.LogoSetId, e.RelativePath });
+        });
+
+        modelBuilder.Entity<FinTvList>(entity =>
+        {
+            entity.HasIndex(e => e.JellyfinPlaylistId).IsUnique();
+        });
+
+        modelBuilder.Entity<SpecialPresentation>(entity =>
+        {
+            entity.HasIndex(e => new { e.ChannelId, e.DayOfWeek, e.SlotIndex });
+            entity.HasMany(e => e.Candidates)
+                .WithOne(e => e.SpecialPresentation)
+                .HasForeignKey(e => e.SpecialPresentationId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

@@ -30,6 +30,8 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddScoped<ChannelService>();
         serviceCollection.AddScoped<ChannelPresetService>();
         serviceCollection.AddScoped<LineupService>();
+        serviceCollection.AddScoped<SpecialPresentationService>();
+        serviceCollection.AddScoped<FinTvListService>();
         serviceCollection.AddScoped<SmartSelectionService>();
         serviceCollection.AddScoped<LineupGeneratorService>();
         serviceCollection.AddScoped<CommercialService>();

@@ -11,6 +11,8 @@ public class PlayoutAnchorState
 
     public Dictionary<int, int> SlotShuffleCursor { get; set; } = new();
 
+    public Dictionary<Guid, int> ListCursor { get; set; } = new();
+
     public Dictionary<Guid, DateTime> LastAired { get; set; } = new();
 
     public string? LastHolidayId { get; set; }
@@ -49,7 +51,7 @@ public class SmartSelectionService
 
         foreach (var candidate in slot.Candidates.OrderBy(c => c.SortOrder))
         {
-            var items = await ResolveCandidateAsync(channel, candidate, scheduleDate, anchor, cancellationToken);
+            var items = await ResolveCandidateAsync(channel, candidate, scheduleDate, anchor, slot.SlotIndex, cancellationToken);
             foreach (var item in items)
             {
                 var score = ComputeScore(item, candidate.Weight, recentIds, anchor);
@@ -98,6 +100,7 @@ public class SmartSelectionService
         SlotCandidate candidate,
         DateOnly scheduleDate,
         PlayoutAnchorState anchor,
+        int slotIndex,
         CancellationToken cancellationToken)
     {
         return candidate.Kind switch
@@ -108,6 +111,8 @@ public class SmartSelectionService
                 await _catalog.ResolveCollectionAsync(candidate.CollectionName, channel, anchor, scheduleDate, cancellationToken),
             SlotCandidateKind.FilterQuery when !string.IsNullOrWhiteSpace(candidate.FilterJson) =>
                 await _catalog.ResolveFilterAsync(candidate.FilterJson, channel, anchor, scheduleDate, cancellationToken),
+            SlotCandidateKind.Playlist when candidate.FinTvListId.HasValue =>
+                await _catalog.ResolvePlaylistAsync(candidate.FinTvListId.Value, channel, anchor, scheduleDate, slotIndex, cancellationToken),
             _ => Array.Empty<ResolvedCandidate>()
         };
     }

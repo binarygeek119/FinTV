@@ -13,6 +13,8 @@
                 <button type="button" class="tab active" data-tab="channels" role="tab">Channels</button>
                 <button type="button" class="tab" data-tab="presets" role="tab">Presets</button>
                 <button type="button" class="tab" data-tab="lineups" role="tab">Lineups</button>
+                <button type="button" class="tab" data-tab="list" role="tab">List</button>
+                <button type="button" class="tab" data-tab="special" role="tab">Special Presentation</button>
                 <button type="button" class="tab" data-tab="commercials" role="tab">Commercials</button>
                 <button type="button" class="tab" data-tab="logos" role="tab">Logo Sets</button>
                 <button type="button" class="tab" data-tab="ebs" role="tab">EBS</button>
@@ -170,6 +172,29 @@
                     <p class="hint">Use overrides for special schedules (Friday movie night, holidays, etc.).</p>
                     <div id="override-list"></div>
                 </div>
+            </section>
+
+            <section id="tab-list" class="tab-panel">
+                <div class="card section-card">
+                    <div class="section-header">
+                        <h3>FinTV Lists</h3>
+                        <button type="button" id="btn-add-list" class="raised button-submit emby-button">Add from Jellyfin</button>
+                    </div>
+                    <p class="hint">Register Jellyfin playlists as FinTV lists. Use them in Lineups, Overrides, Special Presentations, and AI slot edits.</p>
+                    <div id="lists-table" class="data-table-wrap"></div>
+                </div>
+            </section>
+
+            <section id="tab-special" class="tab-panel">
+                <div class="toolbar lineup-toolbar">
+                    <label class="inline-field">
+                        <span>Channel</span>
+                        <select id="special-channel-select" class="emby-select"></select>
+                    </label>
+                    <button type="button" id="btn-add-special" class="raised button-submit emby-button">Add Presentation</button>
+                </div>
+                <p class="hint">Recurring day/time blocks that override AI or default lineup content on matching days. Use fixed items, metadata rules, or a registered FinTV list.</p>
+                <div id="special-list" class="data-table-wrap"></div>
             </section>
 
             <section id="tab-commercials" class="tab-panel">
@@ -439,7 +464,7 @@
                         <li><a href="https://4000.weatherstar.dev/" target="_blank" rel="noopener">https://4000.weatherstar.dev/</a> <button type="button" class="emby-button btn-inline weather-url-preset" data-url="https://4000.weatherstar.dev">Use URL</button></li>
                         <li><a href="https://weatherstar3000.netbymatt.com/" target="_blank" rel="noopener">https://weatherstar3000.netbymatt.com/</a> <button type="button" class="emby-button btn-inline weather-url-preset" data-url="https://weatherstar3000.netbymatt.com">Use URL</button></li>
                     </ul>
-                    <p class="hint">Weather channels use headless Chromium via Playwright and EBS background music. <strong>Linux:</strong> Playwright uses <code>mcr.microsoft.com/playwright:v1.49.0-jammy</code>. Localhost WeatherStar URLs are rewritten to <code>host.docker.internal</code> for container access.</p>
+                    <p class="hint">Weather channels use headless Chromium via Playwright and EBS background music. <strong>Linux Docker (recommended):</strong> use the FinTV-ready Jellyfin image (<code>ghcr.io/binarygeek119/jellyfin-unstable-fintv</code>) so Chromium and the Playwright driver are baked in. <strong>Stock Linux:</strong> FinTV uses <code>mcr.microsoft.com/playwright:v1.49.0-jammy</code> over CDP; localhost WeatherStar URLs are rewritten to <code>host.docker.internal</code>.</p>
                     <label class="field">
                         <span>WeatherStar base URL</span>
                         <input id="weather-base-url" type="url" class="emby-input" placeholder="http://127.0.0.1:8080">

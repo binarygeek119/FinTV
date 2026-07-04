@@ -135,7 +135,18 @@ public class PlaywrightRuntimeService
         var pluginDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)
             ?? plugin.DataFolder;
 
-        Environment.SetEnvironmentVariable("PLAYWRIGHT_DRIVER_SEARCH_PATH", pluginDirectory);
+        var presetDriverPath = Environment.GetEnvironmentVariable("PLAYWRIGHT_DRIVER_SEARCH_PATH");
+        if (string.IsNullOrWhiteSpace(presetDriverPath))
+        {
+            Environment.SetEnvironmentVariable("PLAYWRIGHT_DRIVER_SEARCH_PATH", pluginDirectory);
+            presetDriverPath = pluginDirectory;
+        }
+        else
+        {
+            _logger.LogDebug(
+                "Using preset Playwright driver from PLAYWRIGHT_DRIVER_SEARCH_PATH: {DriverPath}",
+                presetDriverPath);
+        }
 
         if (!UsesDockerBrowser)
         {
@@ -152,14 +163,14 @@ public class PlaywrightRuntimeService
             Environment.SetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH", browsersPath);
             _logger.LogDebug(
                 "Playwright configured for local browser. Driver path: {DriverPath}. Browser path: {BrowserPath}",
-                pluginDirectory,
+                presetDriverPath,
                 browsersPath);
         }
         else
         {
             _logger.LogDebug(
                 "Playwright configured for Docker browser on Linux. Driver path: {DriverPath}",
-                pluginDirectory);
+                presetDriverPath);
         }
 
         _environmentConfigured = true;

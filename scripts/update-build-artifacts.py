@@ -13,7 +13,8 @@ LOGOS_DIR = ROOT / "Jellyfin.Plugin.FinTV" / "Assets" / "logos" / "binarygeek119
 YTDLP_DIR = ROOT / "Jellyfin.Plugin.FinTV" / "Assets" / "tools" / "yt-dlp"
 SCRIPTS_DIR = ROOT / "Jellyfin.Plugin.FinTV" / "Assets" / "scripts"
 CSPROJ = ROOT / "Jellyfin.Plugin.FinTV" / "Jellyfin.Plugin.FinTV.csproj"
-PLAYWRIGHT_NODE_PLATFORMS = ("win32_x64", "linux-x64")
+# Linux driver ships in ghcr.io/binarygeek119/jellyfin-unstable-fintv, not the plugin zip.
+PLAYWRIGHT_NODE_PLATFORMS = ("win32_x64",)
 
 
 def read_playwright_version() -> str:
@@ -94,10 +95,9 @@ def playwright_artifacts(version: str) -> list[str]:
                 rel = path.relative_to(package_root).as_posix()
                 artifacts.append(f'  - "{rel}"')
 
-    for script_name in ("playwright.ps1", "playwright.sh"):
-        script_path = package_root / "buildTransitive" / script_name
-        if script_path.exists():
-            artifacts.append(f'  - "{script_name}"')
+    script_path = package_root / "buildTransitive" / "playwright.ps1"
+    if script_path.exists():
+        artifacts.append('  - "playwright.ps1"')
 
     return artifacts
 

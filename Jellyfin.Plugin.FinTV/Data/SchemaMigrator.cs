@@ -10,6 +10,8 @@ internal static class SchemaMigrator
     private const string CommercialBrainzMigrationKey = "commercial-brainz-v1";
     private const string AiLineupMigrationKey = "ai-lineup-v1";
     private const string AiPlayoutTemplateMigrationKey = "ai-playout-template-v1";
+    private const string FinTvListsMigrationKey = "fintv-lists-v1";
+    private const string SpecialPresentationMigrationKey = "special-presentation-v1";
     private static readonly Regex SqlIdentifierRegex = new("^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.Compiled);
 
     public static async Task MigrateAsync(FinTvDbContext db, ILogger logger, CancellationToken cancellationToken)
@@ -39,6 +41,18 @@ internal static class SchemaMigrator
         {
             await MigrateAiPlayoutTemplateAsync(db, logger, cancellationToken);
             await MarkMigrationAppliedAsync(db, AiPlayoutTemplateMigrationKey, cancellationToken);
+        }
+
+        if (!await IsMigrationAppliedAsync(db, FinTvListsMigrationKey, cancellationToken))
+        {
+            await MigrateFinTvListsAsync(db, logger, cancellationToken);
+            await MarkMigrationAppliedAsync(db, FinTvListsMigrationKey, cancellationToken);
+        }
+
+        if (!await IsMigrationAppliedAsync(db, SpecialPresentationMigrationKey, cancellationToken))
+        {
+            await MigrateSpecialPresentationsAsync(db, logger, cancellationToken);
+            await MarkMigrationAppliedAsync(db, SpecialPresentationMigrationKey, cancellationToken);
         }
     }
 
@@ -221,6 +235,81 @@ internal static class SchemaMigrator
         {
             await AddColumnIfMissingAsync(db, "Channels", "AiPlayoutTemplateId", "TEXT", cancellationToken);
         }
+    }
+
+    private static async Task MigrateFinTvListsAsync(
+        FinTvDbContext db,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        logger.LogInformation("Applying FinTV lists schema migration");
+
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            CREATE TABLE IF NOT EXISTS "FinTvLists" (
+                "Id" TEXT NOT NULL PRIMARY KEY,
+                "Name" TEXT NOT NULL,
+                "JellyfinPlaylistId" TEXT NOT NULL,
+                "PlaybackMode" INTEGER NOT NULL DEFAULT 0,
+                "CreatedAt" TEXT NOT NULL
+            );
+            """,
+            cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_FinTvLists_JellyfinPlaylistId"
+            ON "FinTvLists" ("JellyfinPlaylistId");
+            """,
+            cancellationToken);
+
+        if (await TableExistsAsync(db, "SlotCandidates", cancellationToken))
+        {
+            await AddColumnIfMissingAsync(db, "SlotCandidates", "FinTvListId", "TEXT", cancellationToken);
+        }
+    }
+
+    private static async Task MigrateSpecialPresentationsAsync(
+        FinTvDbContext db,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        logger.LogInformation("Applying special presentation schema migration");
+
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            CREATE TABLE IF NOT EXISTS "SpecialPresentations" (
+                "Id" TEXT NOT NULL PRIMARY KEY,
+                "ChannelId" TEXT NOT NULL,
+                "Name" TEXT NOT NULL,
+                "Enabled" INTEGER NOT NULL DEFAULT 1,
+                "DayOfWeek" INTEGER NOT NULL,
+                "SlotIndex" INTEGER NOT NULL,
+                "SpanSlots" INTEGER NOT NULL DEFAULT 1
+            );
+            """,
+            cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            CREATE TABLE IF NOT EXISTS "SpecialPresentationCandidates" (
+                "Id" TEXT NOT NULL PRIMARY KEY,
+                "SpecialPresentationId" TEXT NOT NULL,
+                "Kind" INTEGER NOT NULL,
+                "JellyfinItemId" TEXT,
+                "CollectionName" TEXT,
+                "FilterJson" TEXT,
+                "FinTvListId" TEXT,
+                "Weight" INTEGER NOT NULL DEFAULT 1,
+                "SortOrder" INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY("SpecialPresentationId") REFERENCES "SpecialPresentations"("Id") ON DELETE CASCADE
+            );
+            """,
+            cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            CREATE INDEX IF NOT EXISTS "IX_SpecialPresentations_ChannelId_DayOfWeek_SlotIndex"
+            ON "SpecialPresentations" ("ChannelId", "DayOfWeek", "SlotIndex");
+            """,
+            cancellationToken);
     }
 
     private static async Task AddColumnIfMissingAsync(

@@ -169,6 +169,8 @@ public class SlotCandidate
 
     public string? FilterJson { get; set; }
 
+    public Guid? FinTvListId { get; set; }
+
     public int Weight { get; set; } = 1;
 
     public int SortOrder { get; set; }
@@ -312,4 +314,63 @@ public class CommercialChapter
 
     [JsonIgnore]
     public Commercial? Commercial { get; set; }
+}
+
+public class FinTvList
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public string Name { get; set; } = string.Empty;
+
+    public Guid JellyfinPlaylistId { get; set; }
+
+    public ListPlaybackMode PlaybackMode { get; set; } = ListPlaybackMode.Sequential;
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+public class SpecialPresentation
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid ChannelId { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    public bool Enabled { get; set; } = true;
+
+    public DayOfWeek DayOfWeek { get; set; }
+
+    public int SlotIndex { get; set; }
+
+    public int SpanSlots { get; set; } = 1;
+
+    [JsonIgnore]
+    public Channel? Channel { get; set; }
+
+    public ICollection<SpecialPresentationCandidate> Candidates { get; set; } = new List<SpecialPresentationCandidate>();
+}
+
+public class SpecialPresentationCandidate
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    public Guid SpecialPresentationId { get; set; }
+
+    public SlotCandidateKind Kind { get; set; }
+
+    public Guid? JellyfinItemId { get; set; }
+
+    public string? CollectionName { get; set; }
+
+    public string? FilterJson { get; set; }
+
+    public Guid? FinTvListId { get; set; }
+
+    public int Weight { get; set; } = 1;
+
+    public int SortOrder { get; set; }
+
+    [JsonIgnore]
+    public SpecialPresentation? SpecialPresentation { get; set; }
 }

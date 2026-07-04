@@ -57,12 +57,34 @@ public class LineupsController : ControllerBase
 
         var lineup = await _lineups.GetDefaultLineupAsync(channelId, cancellationToken);
         var overrides = await _lineups.GetOverridesAsync(channelId, cancellationToken);
+        if (channel.ContentType == ChannelContentType.Weather)
+        {
+            return Ok(new
+            {
+                lineup = new
+                {
+                    slots = new[]
+                    {
+                        new
+                        {
+                            slotIndex = 0,
+                            spanSlots = 48,
+                            candidates = Array.Empty<object>()
+                        }
+                    }
+                },
+                overrides = Array.Empty<object>(),
+                contentType = channel.ContentType,
+                isWeather = true
+            });
+        }
+
         return Ok(new
         {
             lineup,
             overrides,
             contentType = channel.ContentType,
-            isWeather = channel.ContentType == ChannelContentType.Weather
+            isWeather = false
         });
     }
 
@@ -76,6 +98,17 @@ public class LineupsController : ControllerBase
     [HttpPut("{channelId:guid}")]
     public async Task<IActionResult> UpdateDefault(Guid channelId, [FromBody] List<LineupSlotDto> slots, CancellationToken cancellationToken)
     {
+        var channel = await _channels.GetByIdAsync(channelId, cancellationToken);
+        if (channel is null)
+        {
+            return NotFound();
+        }
+
+        if (channel.ContentType == ChannelContentType.Weather)
+        {
+            return BadRequest(new { message = "Weather channels do not use editable lineups." });
+        }
+
         await _lineups.UpdateDefaultSlotsAsync(channelId, slots, cancellationToken);
         return NoContent();
     }
@@ -90,8 +123,15 @@ public class LineupsController : ControllerBase
     [HttpPost("{channelId:guid}/overrides")]
     public async Task<ActionResult<LineupOverride>> CreateOverride(Guid channelId, [FromBody] LineupOverrideDto dto, CancellationToken cancellationToken)
     {
-        var created = await _lineups.CreateOverrideAsync(channelId, dto, cancellationToken);
-        return Created(string.Empty, created);
+        try
+        {
+            var created = await _lineups.CreateOverrideAsync(channelId, dto, cancellationToken);
+            return Created(string.Empty, created);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -144,20 +184,24 @@ public class LineupsController : ControllerBase
                 date,
                 isWeather = true,
                 title = "Local Weather",
-                description = "Live WeatherStar feed streaming 24/7. Lineup slots are not used for weather channels.",
-                slots = Enumerable.Range(0, 48).Select(slotIndex => new
+                description = "Live WeatherStar feed streaming 24/7 as one continuous programme.",
+                slots = new[]
                 {
-                    slotIndex,
-                    candidateCount = 1,
-                    candidates = new[]
+                    new
                     {
-                        new
+                        slotIndex = 0,
+                        spanSlots = 48,
+                        candidateCount = 1,
+                        candidates = new[]
                         {
-                            title = "Local Weather (live 24/7)",
-                            kind = "weather"
+                            new
+                            {
+                                title = "Local Weather (live 24/7)",
+                                kind = "weather"
+                            }
                         }
                     }
-                })
+                }
             });
         }
 

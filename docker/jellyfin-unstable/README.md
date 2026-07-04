@@ -36,7 +36,7 @@ Use that value in `group_add` in compose.
 
 | Feature | How it works |
 |---------|----------------|
-| Weather channel capture | Uses baked-in Chromium via `PLAYWRIGHT_BROWSERS_PATH=/ms-playwright` (no `fintv-playwright-chromium` sidecar) |
+| Weather channel capture | Uses baked-in Chromium and .NET Playwright driver (`PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`, `PLAYWRIGHT_DRIVER_SEARCH_PATH=/opt/playwright-driver`; no plugin `.playwright/node` or sidecar) |
 | Weather tab Docker buttons | Uses in-container `docker` CLI against the mounted host socket |
 | FinTV plugin install | Install from the FinTV catalog as usual; not bundled in this image |
 

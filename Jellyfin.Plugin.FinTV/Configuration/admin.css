@@ -125,6 +125,9 @@ table.data-table tbody tr.selected { background: rgba(59, 130, 246, .16); }
 .slot-card.weather-slot { cursor: default; }
 .slot-card.weather-slot:hover { transform: none; }
 .slot-card.weather-slot .summary { color: #d1fae5; }
+.slot-card.weather-single-slot { min-height: 5rem; grid-column: 1 / -1; }
+.presentation-card, .list-card { display: flex; justify-content: space-between; gap: 1rem; padding: .85rem 1rem; border: 1px solid rgba(255,255,255,.08); border-radius: .5rem; margin-bottom: .65rem; }
+.presentation-card .meta, .list-card .meta { opacity: .75; font-size: .9rem; margin-top: .25rem; }
 .slot-card.empty { opacity: .75; }
 .slot-card .time { font-size: .78rem; color: #93c5fd; margin-bottom: .35rem; font-weight: 600; }
 .slot-card .summary { font-size: .82rem; color: var(--fintv-muted); line-height: 1.35; }

@@ -43,7 +43,14 @@ public enum SlotCandidateKind
 {
     JellyfinItem = 0,
     Collection = 1,
-    FilterQuery = 2
+    FilterQuery = 2,
+    Playlist = 3
+}
+
+public enum ListPlaybackMode
+{
+    Sequential = 0,
+    Random = 1
 }
 
 public enum CommercialBreakMode

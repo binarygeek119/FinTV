@@ -121,7 +121,9 @@ Click **Start** then **Use URL** to set the base URL to `http://127.0.0.1:8080` 
 
 **Windows:** FinTV downloads Chromium automatically into `{JellyfinData}/plugins/configurations/FinTV/playwright-browsers` on the first weather tune.
 
-**Linux:** FinTV starts Chromium from Playwright's official Docker image (`mcr.microsoft.com/playwright:v1.49.0-jammy`) and connects over CDP. Requirements:
+**Linux (recommended):** Use the FinTV-ready Jellyfin Docker image [`ghcr.io/binarygeek119/jellyfin-unstable-fintv:unstable`](docker/jellyfin-unstable/README.md). It includes Playwright Chromium and the .NET Playwright driver with correct permissions (`PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`, `PLAYWRIGHT_DRIVER_SEARCH_PATH=/opt/playwright-driver`). Mount the Docker socket for WeatherStar container buttons.
+
+**Linux (stock Jellyfin, no FinTV image):** FinTV can start Chromium from Playwright's official Docker image (`mcr.microsoft.com/playwright:v1.49.0-jammy`) and connect over CDP. Requirements:
 
 - Docker installed and running
 - The Jellyfin service user can run `docker` (for example, add the user to the `docker` group)
@@ -130,8 +132,6 @@ Click **Start** then **Use URL** to set the base URL to `http://127.0.0.1:8080` 
 On first weather tune, FinTV creates a container named `fintv-playwright-chromium`. If your WeatherStar URL uses `localhost` or `127.0.0.1`, FinTV rewrites it to `host.docker.internal` so the container can reach WeatherStar on the Jellyfin host.
 
 If Jellyfin itself runs in Docker, mount the Docker socket into the Jellyfin container (for example `-v /var/run/docker.sock:/var/run/docker.sock`) so FinTV can start the Playwright browser and WeatherStar containers.
-
-**FinTV-ready Jellyfin Docker image (recommended for Linux):** Use [`ghcr.io/binarygeek119/jellyfin-unstable-fintv:unstable`](docker/jellyfin-unstable/README.md) — includes Docker CLI **29.5.2**, Playwright Chromium, and auto-rebuilds when Jellyfin unstable updates.
 
 **Stock Jellyfin images:** mount the Docker socket and run the bundled install script from the **host**:
 

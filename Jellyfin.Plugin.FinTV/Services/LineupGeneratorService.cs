@@ -202,32 +202,51 @@ public class LineupGeneratorService
         if (mode == PlayoutBuildMode.ReplaceWindow)
         {
             var existing = await _db.PlayoutItems
-                .Where(p => p.ChannelId == channel.Id && p.Start >= startUtc && p.Start < endUtc)
+                .Where(p => p.ChannelId == channel.Id && p.Finish > startUtc && p.Start < endUtc)
                 .ToListAsync(cancellationToken);
 
             _db.PlayoutItems.RemoveRange(existing);
-        }
-
-        var cursor = startUtc;
-        while (cursor < endUtc)
-        {
-            var segmentEnd = cursor.AddHours(24);
-            if (segmentEnd > endUtc)
-            {
-                segmentEnd = endUtc;
-            }
 
             _db.PlayoutItems.Add(new PlayoutItem
             {
                 ChannelId = channel.Id,
-                Start = cursor,
-                Finish = segmentEnd,
+                Start = startUtc,
+                Finish = endUtc,
                 Title = "Local Weather",
                 IsVirtual = true,
                 VirtualSource = VirtualContentSource.WeatherStar
             });
+        }
+        else
+        {
+            var existing = await _db.PlayoutItems
+                .Where(p =>
+                    p.ChannelId == channel.Id
+                    && p.IsVirtual
+                    && p.VirtualSource == VirtualContentSource.WeatherStar
+                    && p.Finish > startUtc)
+                .OrderByDescending(p => p.Finish)
+                .FirstOrDefaultAsync(cancellationToken);
 
-            cursor = segmentEnd;
+            if (existing is not null)
+            {
+                if (existing.Finish < endUtc)
+                {
+                    existing.Finish = endUtc;
+                }
+            }
+            else
+            {
+                _db.PlayoutItems.Add(new PlayoutItem
+                {
+                    ChannelId = channel.Id,
+                    Start = startUtc,
+                    Finish = endUtc,
+                    Title = "Local Weather",
+                    IsVirtual = true,
+                    VirtualSource = VirtualContentSource.WeatherStar
+                });
+            }
         }
 
         channel.LastPlayoutBuiltAt = DateTime.UtcNow;

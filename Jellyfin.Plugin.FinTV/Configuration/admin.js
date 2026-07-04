@@ -2,7 +2,7 @@
     'use strict';
 
     const CONTENT_TYPES = ['TV Show', 'Movie', 'Music Video', 'Music', 'Weather'];
-    const CANDIDATE_KINDS = ['Jellyfin Item', 'Collection', 'Filter Query'];
+    const CANDIDATE_KINDS = ['Jellyfin Item', 'Collection', 'Filter Query', 'Playlist / List'];
     const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const CONTENT_TYPE_VALUES = {
         0: 0, 1: 1, 2: 2, 3: 3, 4: 4,
@@ -39,6 +39,10 @@
     let aiPlayoutTemplates = [];
     let aiPreview = null;
     let weatherDockerStatus = null;
+    let finTvLists = [];
+    let listNameCache = {};
+    let specialPresentations = [];
+    let specialChannelId = null;
 
     function $(id) {
         if (configPage) {
@@ -593,8 +597,37 @@
     function candidateSummary(candidate) {
         if (candidate.kind === 1 && candidate.collectionName) return `Collection: ${candidate.collectionName}`;
         if (candidate.kind === 2 && candidate.filterJson) return 'Filter query';
+        if (candidate.kind === 3 && candidate.finTvListId) return `List: ${listNameCache[candidate.finTvListId] || candidate.finTvListId}`;
         if (candidate.jellyfinItemId) return itemLabel(candidate.jellyfinItemId);
         return CANDIDATE_KINDS[candidate.kind] || 'Candidate';
+    }
+
+    function slotIndexFromTime(value) {
+        if (!value) return 0;
+        const parts = value.split(':');
+        const h = parseInt(parts[0], 10) || 0;
+        const m = parseInt(parts[1], 10) || 0;
+        return Math.min(47, Math.floor((h * 60 + m) / 30));
+    }
+
+    function slotTimeInputValue(index) {
+        const totalMinutes = index * 30;
+        const h = Math.floor(totalMinutes / 60);
+        const m = totalMinutes % 60;
+        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    }
+
+    async function ensureFinTvLists(force) {
+        if (!force && finTvLists.length) {
+            return finTvLists;
+        }
+
+        finTvLists = await api('/lists') || [];
+        listNameCache = {};
+        finTvLists.forEach((list) => {
+            listNameCache[list.id] = list.name;
+        });
+        return finTvLists;
     }
 
     async function refreshDashboardStats() {
@@ -772,6 +805,8 @@
                 `<option value="${c.id}">${formatChannelNumber(c.number)} - ${escapeHtml(c.name)}</option>`).join('');
             if (!selectedChannelId && channels[0]) selectedChannelId = channels[0].id;
             select.value = selectedChannelId || '';
+
+            populateSpecialChannelSelect();
 
             await refreshDashboardStats();
         } catch (err) {
@@ -1008,7 +1043,9 @@
             lineupIsWeather = !!(data.isWeather || getLineupChannel()?.contentType === CONTENT_TYPE_VALUES.Weather);
             lineupSlots = (data.lineup && data.lineup.slots) || [];
             lineupOverrides = data.overrides || [];
-            if (lineupSlots.length === 0) {
+            if (lineupIsWeather) {
+                lineupSlots = [{ slotIndex: 0, spanSlots: 48, candidates: [] }];
+            } else if (lineupSlots.length === 0) {
                 lineupSlots = Array.from({ length: 48 }, (_, i) => ({ slotIndex: i, candidates: [] }));
             }
 
@@ -1051,7 +1088,7 @@
                 : 'default coordinates';
 
             if (hint) {
-                hint.textContent = 'Weather channels stream live local weather 24/7. The lineup grid below shows the guide schedule; slots are filled automatically with Local Weather.';
+                hint.textContent = 'Weather channels stream live local weather 24/7 as one continuous programme block.';
             }
 
             if (weatherBanner) {
@@ -1077,16 +1114,14 @@
 
     function renderWeatherLineupGrid() {
         const grid = $('lineup-grid');
-        grid.innerHTML = lineupSlots.sort((a, b) => a.slotIndex - b.slotIndex).map((s) =>
-            `<div class="slot-card has-items weather-slot" data-slot="${s.slotIndex}">
-                <div class="time">${slotTime(s.slotIndex)}</div>
-                <div class="summary">Local Weather</div>
-                <div class="count">Live 24/7</div>
-            </div>`).join('');
+        grid.innerHTML = `<div class="slot-card has-items weather-slot weather-single-slot">
+                <div class="time">All day</div>
+                <div class="summary">Local Weather — Live 24/7</div>
+                <div class="count">Continuous WeatherStar feed</div>
+            </div>`;
 
-        grid.querySelectorAll('.slot-card').forEach((card) => {
-            card.onclick = () => toast('Weather channels use a live 24/7 feed. Edit coordinates on the Channels tab.', 'info');
-        });
+        grid.querySelector('.weather-single-slot').onclick = () =>
+            toast('Weather channels use a live 24/7 feed. Edit coordinates on the Channels tab.', 'info');
     }
 
     function renderLineupGrid() {
@@ -1156,6 +1191,7 @@
                     <option value="0">Jellyfin item</option>
                     <option value="1">Collection name</option>
                     <option value="2">Filter JSON</option>
+                    <option value="3">FinTV list</option>
                 </select>
             </div>
             <div id="slot-add-panel"></div>`;
@@ -1186,7 +1222,7 @@
                     slot.candidates.push({ kind: 1, collectionName: name, weight: 1, sortOrder: slot.candidates.length });
                     refreshCandidateList(slot);
                 };
-            } else {
+            } else if (kind === 2) {
                 panel.innerHTML = `<label class="field"><span>Filter JSON</span>
                     <textarea id="slot-filter" class="emby-input" rows="3" placeholder='{"genre":"Comedy"}'></textarea></label>
                     <button type="button" class="emby-button" id="slot-add-filter">Add filter</button>`;
@@ -1196,6 +1232,20 @@
                     slot.candidates.push({ kind: 2, filterJson: json, weight: 1, sortOrder: slot.candidates.length });
                     refreshCandidateList(slot);
                 };
+            } else if (kind === 3) {
+                ensureFinTvLists().then((lists) => {
+                    panel.innerHTML = `<label class="field"><span>FinTV list</span>
+                        <select id="slot-list-id" class="emby-select">
+                            ${lists.map((l) => `<option value="${l.id}">${escapeHtml(l.name)}</option>`).join('')}
+                        </select></label>
+                        <button type="button" class="emby-button" id="slot-add-list" style="margin-top:.5rem">Add list</button>`;
+                    document.getElementById('slot-add-list').onclick = () => {
+                        const listId = document.getElementById('slot-list-id').value;
+                        if (!listId) return;
+                        slot.candidates.push({ kind: 3, finTvListId: listId, weight: 1, sortOrder: slot.candidates.length });
+                        refreshCandidateList(slot);
+                    };
+                });
             }
         }
 
@@ -1304,7 +1354,7 @@
 
             if (data.isWeather) {
                 $('lineup-preview-banner').classList.remove('hidden');
-                $('lineup-preview-banner').textContent = `Preview for ${data.date}: 48/48 slots — ${data.title || 'Local Weather'} (live 24/7).`;
+                $('lineup-preview-banner').textContent = `Preview for ${data.date}: 1/1 block — ${data.title || 'Local Weather'} (live 24/7).`;
                 return;
             }
 
@@ -2560,6 +2610,379 @@
         return configPage;
     }
 
+    async function loadLists() {
+        try {
+            await ensureFinTvLists(true);
+            renderListsTable();
+        } catch (err) {
+            reportApiError(err, 'Could not load FinTV lists.');
+        }
+    }
+
+    function renderListsTable() {
+        const el = $('lists-table');
+        if (!finTvLists.length) {
+            el.innerHTML = '<div class="empty-state">No FinTV lists registered yet. Add a Jellyfin playlist to use it in lineups.</div>';
+            return;
+        }
+
+        el.innerHTML = finTvLists.map((list) => {
+            const mode = list.playbackMode === 1 ? 'Random' : 'Sequential';
+            return `<div class="list-card">
+                <div>
+                    <strong>${escapeHtml(list.name)}</strong>
+                    <div class="meta">${list.itemCount || 0} items · ${mode}</div>
+                </div>
+                <div class="row-actions">
+                    <button type="button" data-edit-list="${list.id}">Edit</button>
+                    <button type="button" data-delete-list="${list.id}">Delete</button>
+                </div>
+            </div>`;
+        }).join('');
+
+        el.querySelectorAll('[data-edit-list]').forEach((btn) => {
+            btn.onclick = () => openListForm(btn.dataset.editList);
+        });
+        el.querySelectorAll('[data-delete-list]').forEach((btn) => {
+            btn.onclick = () => deleteList(btn.dataset.deleteList);
+        });
+    }
+
+    async function openListForm(editId) {
+        const existing = editId ? finTvLists.find((l) => l.id === editId) : null;
+        let jellyfinOptions = '';
+
+        if (!existing) {
+            const playlists = await api('/lists/jellyfin-playlists?unregisteredOnly=true') || [];
+            if (!playlists.length) {
+                toast('No unregistered Jellyfin playlists found.', 'info');
+                return;
+            }
+
+            jellyfinOptions = playlists.map((p) =>
+                `<option value="${p.id}">${escapeHtml(p.name)} (${p.itemCount} items)</option>`).join('');
+        }
+
+        const body = existing
+            ? `<label class="field"><span>Name</span><input id="list-name" class="emby-input" value="${escapeHtml(existing.name)}"></label>
+               <label class="field"><span>Playback mode</span>
+                 <select id="list-mode" class="emby-select">
+                   <option value="0"${existing.playbackMode === 0 ? ' selected' : ''}>Sequential</option>
+                   <option value="1"${existing.playbackMode === 1 ? ' selected' : ''}>Random</option>
+                 </select></label>`
+            : `<label class="field"><span>Jellyfin playlist</span>
+                 <select id="list-jellyfin-id" class="emby-select">${jellyfinOptions}</select></label>
+               <label class="field"><span>Display name (optional)</span><input id="list-name" class="emby-input"></label>
+               <label class="field"><span>Playback mode</span>
+                 <select id="list-mode" class="emby-select">
+                   <option value="0">Sequential</option>
+                   <option value="1">Random</option>
+                 </select></label>`;
+
+        openModal(existing ? 'Edit FinTV List' : 'Add FinTV List', body, `
+            <button type="button" class="emby-button" id="list-cancel">Cancel</button>
+            <button type="button" class="raised button-submit emby-button" id="list-save">Save</button>`);
+
+        document.getElementById('list-cancel').onclick = closeModal;
+        document.getElementById('list-save').onclick = async () => {
+            try {
+                if (existing) {
+                    await api('/lists/' + existing.id, {
+                        method: 'PUT',
+                        body: JSON.stringify({
+                            name: document.getElementById('list-name').value.trim(),
+                            playbackMode: parseInt(document.getElementById('list-mode').value, 10)
+                        })
+                    });
+                } else {
+                    await api('/lists', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            jellyfinPlaylistId: document.getElementById('list-jellyfin-id').value,
+                            name: document.getElementById('list-name').value.trim(),
+                            playbackMode: parseInt(document.getElementById('list-mode').value, 10)
+                        })
+                    });
+                }
+
+                closeModal();
+                toast('List saved.', 'success');
+                await loadLists();
+            } catch (err) {
+                reportApiError(err, 'Could not save list.');
+            }
+        };
+    }
+
+    async function deleteList(id) {
+        if (!confirm('Remove this FinTV list registration?')) return;
+        try {
+            await api('/lists/' + id, { method: 'DELETE' });
+            toast('List removed.', 'success');
+            await loadLists();
+        } catch (err) {
+            reportApiError(err, 'Could not delete list.');
+        }
+    }
+
+    function populateSpecialChannelSelect() {
+        const select = $('special-channel-select');
+        if (!select) return;
+        select.innerHTML = channels
+            .filter((c) => c.contentType !== CONTENT_TYPE_VALUES.Weather)
+            .map((c) => `<option value="${c.id}">${escapeHtml(formatChannelNumber(c.number) + ' · ' + c.name)}</option>`)
+            .join('');
+        if (!specialChannelId && select.options.length) {
+            specialChannelId = select.value;
+        } else if (specialChannelId) {
+            select.value = specialChannelId;
+        }
+    }
+
+    async function loadSpecialPresentations() {
+        populateSpecialChannelSelect();
+        specialChannelId = $('special-channel-select').value;
+        if (!specialChannelId) {
+            $('special-list').innerHTML = '<div class="empty-state">Create a non-weather channel first.</div>';
+            return;
+        }
+
+        try {
+            await ensureFinTvLists();
+            specialPresentations = await api('/special-presentations/' + specialChannelId) || [];
+            renderSpecialPresentationList();
+        } catch (err) {
+            reportApiError(err, 'Could not load special presentations.');
+        }
+    }
+
+    function presentationSummary(p) {
+        const candidates = p.candidates || [];
+        if (!candidates.length) return 'No content';
+        if (candidates.length === 1) return candidateSummary(candidates[0]);
+        return `${candidates.length} candidates`;
+    }
+
+    function renderSpecialPresentationList() {
+        const el = $('special-list');
+        if (!specialPresentations.length) {
+            el.innerHTML = '<div class="empty-state">No special presentations configured for this channel.</div>';
+            return;
+        }
+
+        el.innerHTML = specialPresentations.map((p) => {
+            const span = Math.max(1, p.spanSlots || 1);
+            return `<div class="presentation-card">
+                <div>
+                    <strong>${escapeHtml(p.name)}</strong>${p.enabled ? '' : ' <span class="meta">(disabled)</span>'}
+                    <div class="meta">${DAYS[p.dayOfWeek]} · ${slotTimeInputValue(p.slotIndex)} · ${span * 30} min · ${escapeHtml(presentationSummary(p))}</div>
+                </div>
+                <div class="row-actions">
+                    <button type="button" data-edit-special="${p.id}">Edit</button>
+                    <button type="button" data-delete-special="${p.id}">Delete</button>
+                </div>
+            </div>`;
+        }).join('');
+
+        el.querySelectorAll('[data-edit-special]').forEach((btn) => {
+            btn.onclick = () => openSpecialPresentationForm(btn.dataset.editSpecial);
+        });
+        el.querySelectorAll('[data-delete-special]').forEach((btn) => {
+            btn.onclick = () => deleteSpecialPresentation(btn.dataset.deleteSpecial);
+        });
+    }
+
+    function buildRuleFilterJson() {
+        const tags = (document.getElementById('sp-tags')?.value || '')
+            .split(',')
+            .map((t) => t.trim())
+            .filter(Boolean);
+        const filter = {};
+        const genre = document.getElementById('sp-genre')?.value.trim();
+        const titleContains = document.getElementById('sp-title')?.value.trim();
+        const minYear = document.getElementById('sp-min-year')?.value;
+        const maxYear = document.getElementById('sp-max-year')?.value;
+        const minRating = document.getElementById('sp-min-rating')?.value.trim();
+        const maxRating = document.getElementById('sp-max-rating')?.value.trim();
+        if (genre) filter.genre = genre;
+        if (tags.length) filter.tags = tags;
+        if (titleContains) filter.titleContains = titleContains;
+        if (minYear) filter.minYear = parseInt(minYear, 10);
+        if (maxYear) filter.maxYear = parseInt(maxYear, 10);
+        if (minRating) filter.minRating = minRating;
+        if (maxRating) filter.maxRating = maxRating;
+        return JSON.stringify(filter);
+    }
+
+    async function openSpecialPresentationForm(editId) {
+        const existing = editId ? specialPresentations.find((p) => p.id === editId) : null;
+        await ensureFinTvLists();
+        const channel = channels.find((c) => c.id === specialChannelId);
+        const draft = existing
+            ? JSON.parse(JSON.stringify(existing))
+            : { name: '', enabled: true, dayOfWeek: 1, slotIndex: 36, spanSlots: 2, candidates: [] };
+
+        let contentMode = 0;
+        if (draft.candidates?.length === 1) {
+            if (draft.candidates[0].kind === 2) contentMode = 1;
+            if (draft.candidates[0].kind === 3) contentMode = 2;
+        }
+
+        const body = `
+            <label class="field"><span>Name</span><input id="sp-name" class="emby-input" value="${escapeHtml(draft.name || '')}"></label>
+            <label class="field checkbox-field"><input id="sp-enabled" type="checkbox"${draft.enabled !== false ? ' checked' : ''}><span>Enabled</span></label>
+            <label class="field"><span>Day of week</span>
+                <select id="sp-day" class="emby-select">${DAYS.map((d, i) =>
+                    `<option value="${i}"${draft.dayOfWeek === i ? ' selected' : ''}>${d}</option>`).join('')}</select></label>
+            <label class="field"><span>Start time</span><input id="sp-time" type="time" class="emby-input" value="${slotTimeInputValue(draft.slotIndex || 0)}"></label>
+            <label class="field"><span>Block length (30-min slots)</span><input id="sp-span" type="number" min="1" max="8" class="emby-input" value="${Math.max(1, draft.spanSlots || 1)}"></label>
+            <label class="field"><span>Content mode</span>
+                <select id="sp-content-mode" class="emby-select">
+                    <option value="0">Fixed items</option>
+                    <option value="1">Rule-based</option>
+                    <option value="2">FinTV list</option>
+                </select></label>
+            <div id="sp-content-panel"></div>`;
+
+        openModal(existing ? 'Edit Special Presentation' : 'Add Special Presentation', body, `
+            <button type="button" class="emby-button" id="sp-cancel">Cancel</button>
+            <button type="button" class="raised button-submit emby-button" id="sp-save">Save</button>`);
+
+        document.getElementById('sp-content-mode').value = String(contentMode);
+        draft.candidates = draft.candidates || [];
+
+        function renderContentPanel() {
+            const mode = parseInt(document.getElementById('sp-content-mode').value, 10);
+            const panel = document.getElementById('sp-content-panel');
+            if (mode === 1) {
+                let filter = {};
+                try { filter = JSON.parse(draft.candidates[0]?.filterJson || '{}'); } catch (e) { filter = {}; }
+                panel.innerHTML = `
+                    <label class="field"><span>Genre</span><input id="sp-genre" class="emby-input" value="${escapeHtml(filter.genre || '')}"></label>
+                    <label class="field"><span>Tags (comma-separated)</span><input id="sp-tags" class="emby-input" value="${escapeHtml((filter.tags || []).join(', '))}"></label>
+                    <label class="field"><span>Title contains</span><input id="sp-title" class="emby-input" value="${escapeHtml(filter.titleContains || '')}"></label>
+                    <div class="form-grid">
+                        <label class="field"><span>Min year</span><input id="sp-min-year" type="number" class="emby-input" value="${filter.minYear || ''}"></label>
+                        <label class="field"><span>Max year</span><input id="sp-max-year" type="number" class="emby-input" value="${filter.maxYear || ''}"></label>
+                    </div>
+                    <div class="form-grid">
+                        <label class="field"><span>Min rating</span><input id="sp-min-rating" class="emby-input" placeholder="PG" value="${escapeHtml(filter.minRating || '')}"></label>
+                        <label class="field"><span>Max rating</span><input id="sp-max-rating" class="emby-input" placeholder="PG-13" value="${escapeHtml(filter.maxRating || '')}"></label>
+                    </div>`;
+                return;
+            }
+
+            if (mode === 2) {
+                panel.innerHTML = `<label class="field"><span>FinTV list</span>
+                    <select id="sp-list-id" class="emby-select">
+                        ${finTvLists.map((l) => `<option value="${l.id}"${draft.candidates[0]?.finTvListId === l.id ? ' selected' : ''}>${escapeHtml(l.name)}</option>`).join('')}
+                    </select></label>`;
+                return;
+            }
+
+            panel.innerHTML = `
+                <div id="sp-candidates" class="candidate-list">${renderCandidateRows(draft.candidates)}</div>
+                <label class="field"><span>Search library</span>
+                    <input id="sp-search" type="search" class="emby-input" placeholder="Type at least 2 characters…"></label>
+                <div id="sp-search-results" class="search-results"></div>`;
+
+            bindCandidateRowActions(draft);
+            let timer;
+            document.getElementById('sp-search').oninput = (ev) => {
+                clearTimeout(timer);
+                timer = setTimeout(async () => {
+                    const q = ev.target.value;
+                    const resultsEl = document.getElementById('sp-search-results');
+                    if (!q || q.trim().length < 2) {
+                        resultsEl.innerHTML = '';
+                        return;
+                    }
+                    const params = new URLSearchParams({ q: q.trim(), limit: '20' });
+                    if (channel) params.set('contentType', channel.contentType);
+                    const results = await api('/catalog/search?' + params.toString());
+                    resultsEl.innerHTML = (results || []).map((item) =>
+                        `<div class="search-result" data-id="${item.id}">
+                            <strong>${escapeHtml(item.name)}</strong>
+                            <div class="sub">${escapeHtml(item.type)}</div>
+                        </div>`).join('') || '<div class="search-result">No matches</div>';
+                    resultsEl.querySelectorAll('.search-result[data-id]').forEach((row) => {
+                        row.onclick = () => {
+                            itemTitleCache[row.dataset.id] = row.querySelector('strong').textContent;
+                            draft.candidates.push({ kind: 0, jellyfinItemId: row.dataset.id, weight: 1, sortOrder: draft.candidates.length });
+                            document.getElementById('sp-candidates').innerHTML = renderCandidateRows(draft.candidates);
+                            bindCandidateRowActions(draft);
+                        };
+                    });
+                }, 250);
+            };
+        }
+
+        document.getElementById('sp-content-mode').onchange = renderContentPanel;
+        renderContentPanel();
+
+        document.getElementById('sp-cancel').onclick = closeModal;
+        document.getElementById('sp-save').onclick = async () => {
+            const name = document.getElementById('sp-name').value.trim();
+            if (!name) {
+                toast('Presentation name is required.', 'error');
+                return;
+            }
+
+            const mode = parseInt(document.getElementById('sp-content-mode').value, 10);
+            let candidates = [];
+            if (mode === 1) {
+                candidates = [{ kind: 2, filterJson: buildRuleFilterJson(), weight: 1, sortOrder: 0 }];
+            } else if (mode === 2) {
+                const listId = document.getElementById('sp-list-id').value;
+                if (!listId) {
+                    toast('Select a FinTV list.', 'error');
+                    return;
+                }
+                candidates = [{ kind: 3, finTvListId: listId, weight: 1, sortOrder: 0 }];
+            } else {
+                candidates = draft.candidates;
+            }
+
+            if (!candidates.length) {
+                toast('Add at least one content candidate.', 'error');
+                return;
+            }
+
+            const payload = {
+                name,
+                enabled: document.getElementById('sp-enabled').checked,
+                dayOfWeek: parseInt(document.getElementById('sp-day').value, 10),
+                slotIndex: slotIndexFromTime(document.getElementById('sp-time').value),
+                spanSlots: Math.max(1, Math.min(8, parseInt(document.getElementById('sp-span').value, 10) || 1)),
+                candidates
+            };
+
+            try {
+                if (existing) {
+                    await api('/special-presentations/' + existing.id, { method: 'PUT', body: JSON.stringify(payload) });
+                } else {
+                    await api('/special-presentations/' + specialChannelId, { method: 'POST', body: JSON.stringify(payload) });
+                }
+                closeModal();
+                toast('Special presentation saved.', 'success');
+                await loadSpecialPresentations();
+            } catch (err) {
+                reportApiError(err, 'Could not save special presentation.');
+            }
+        };
+    }
+
+    async function deleteSpecialPresentation(id) {
+        if (!confirm('Delete this special presentation?')) return;
+        try {
+            await api('/special-presentations/' + id, { method: 'DELETE' });
+            toast('Special presentation deleted.', 'success');
+            await loadSpecialPresentations();
+        } catch (err) {
+            reportApiError(err, 'Could not delete special presentation.');
+        }
+    }
+
     function syncConfigPageFromEvent(event) {
         const page = normalizeConfigPageRoot(event && event.target);
         if (page) {
@@ -2585,6 +3008,8 @@
         if (name === 'weather') loadWeather();
         if (name === 'presets') loadPresets();
         if (name === 'lineups') loadLineups();
+        if (name === 'list') loadLists();
+        if (name === 'special') loadSpecialPresentations();
         if (name === 'commercials') loadCommercials();
         if (name === 'logos') loadLogos();
     }
@@ -2661,6 +3086,9 @@
         click('btn-rebuild-lineup', rebuildLineup);
         click('btn-preview-lineup', previewLineup);
         click('btn-add-override', openOverrideForm);
+        click('btn-add-list', () => openListForm().catch((e) => toast(e.message, 'error')));
+        click('btn-add-special', () => openSpecialPresentationForm().catch((e) => toast(e.message, 'error')));
+        change('special-channel-select', loadSpecialPresentations);
 
         click('btn-sync-commercials', () => api('/commercials/sync', { method: 'POST' })
             .then(() => { toast('Commercial sync started.', 'success'); return loadCommercials(); })
