@@ -1,5 +1,8 @@
 namespace Jellyfin.Plugin.FinTV.Domain;
 
+using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Entities.TV;
+
 /// <summary>
 /// Built-in AI lineup briefs for Binarygeek119 channel presets.
 /// </summary>
@@ -17,21 +20,25 @@ public static class ChannelAiRules
         ["fintv-reality"] = new(
             "Reality TV themed shows and movies only. Items must have a Reality genre. Exclude crime, cops, and game shows.",
             ChannelCatalogMode.Mixed),
-        ["fintv-news"] = new("News programming only from the fintv-news library tag.", ChannelCatalogMode.TvOnly),
+        ["fintv-news"] = new("News programming only (News genre preferred).", ChannelCatalogMode.TvOnly),
         ["fintv-past-tense-news"] = new(
             "Only content from the Jellyfin library named Past Tense News. Schedule clips in chronological order of the events they cover and treat each story as breaking live news.",
             ChannelCatalogMode.TvOnly),
         ["fintv-crime"] = new(
-            "Crime and cop themed TV shows only. Items must have a Crime, Cop, Police, or Detective genre. No game shows.",
-            ChannelCatalogMode.TvOnly),
+            "Crime and cop themed TV shows and movies. Match Crime/Cop/Police/Detective genres or crime-related plot/overview text. No game shows.",
+            ChannelCatalogMode.Mixed),
         ["fintv-comedy"] = new(
             "Comedy themed TV shows and movies only. Items must have a Comedy genre. Build a Fox-style Animation Domination block at 6pm (slots 36-41).",
             ChannelCatalogMode.Mixed),
         ["fintv-game-shows"] = new("Game shows only.", ChannelCatalogMode.TvOnly),
         ["fintv-education"] = new("Educational TV and documentaries (History, Discovery, science, nature).", ChannelCatalogMode.Mixed),
-        ["fintv-youtube"] = new("YouTube-sourced content only from the fintv-youtube library tag.", ChannelCatalogMode.TvOnly),
-        ["fintv-creature"] = new("Creature and monster movies.", ChannelCatalogMode.MovieOnly),
-        ["fintv-hero"] = new("Hero-themed movies (superhero or otherwise).", ChannelCatalogMode.MovieOnly),
+        ["fintv-youtube"] = new("YouTube-style or web video content.", ChannelCatalogMode.TvOnly),
+        ["fintv-creature"] = new(
+            "Creature and monster movies and TV. Match Horror/Sci-Fi/Monster genres or creature/monster keywords in title, plot, and tags.",
+            ChannelCatalogMode.Mixed),
+        ["fintv-hero"] = new(
+            "Hero-themed movies and TV about anyone who saves or protects people — superheroes, first responders, doctors, rescuers, soldiers, and everyday heroes. Prefer uplifting stories of courage and rescue. Match relevant genres or save/rescue/hero keywords in title, plot, and tags.",
+            ChannelCatalogMode.Mixed),
         ["fintv-funny"] = new("Comedian-led movies and TV.", ChannelCatalogMode.Mixed),
         ["fintv-holiday"] = new(
             "Seasonal holiday channel. Only play TV and movies themed to the active holiday window (up to 30 days before the observance). Match content using Jellyfin tags, plot/overview text, title keywords, and release/premiere month. When no holiday window is active the channel is off-season. Build cable-style marathons that loop smartly.",
@@ -59,6 +66,18 @@ public static class ChannelAiRules
 
     private static readonly Dictionary<string, ChannelCatalogGenreConstraints> GenreConstraints = new(StringComparer.OrdinalIgnoreCase)
     {
+        ["fintv-flashback"] = new ChannelCatalogGenreConstraints
+        {
+            ExcludedGenreKeywords = new[] { "Crime", "Cop", "Police", "Detective", "Game Show", "Game-Show", "GameShow" }
+        },
+        ["fintv-retro"] = new ChannelCatalogGenreConstraints
+        {
+            ExcludedGenreKeywords = new[] { "Crime", "Cop", "Police", "Detective", "Game Show", "Game-Show", "GameShow" }
+        },
+        ["fintv-open-swim"] = new ChannelCatalogGenreConstraints
+        {
+            ExcludedGenreKeywords = new[] { "Horror", "Thriller", "Crime", "War", "Mystery" }
+        },
         ["fintv-reality"] = new ChannelCatalogGenreConstraints
         {
             RequiredGenreKeywords = new[] { "Reality" },
@@ -67,11 +86,68 @@ public static class ChannelAiRules
         ["fintv-crime"] = new ChannelCatalogGenreConstraints
         {
             RequiredGenreKeywords = new[] { "Crime", "Cop", "Police", "Detective" },
+            RequiredPlotKeywords = new[]
+            {
+                "crime", "criminal", "cop", "cops", "police", "detective", "robbery", "robber",
+                "heist", "murder", "homicide", "investigation", "undercover", "fbi", "cia",
+                "gangster", "mob", "mafia", "prison", "prosecutor", "law enforcement", "sheriff",
+                "arson", "kidnapping", "larceny", "felony", "swat", "forensic"
+            },
             ExcludedGenreKeywords = new[] { "Game Show", "Game-Show", "GameShow" }
         },
         ["fintv-comedy"] = new ChannelCatalogGenreConstraints
         {
             RequiredGenreKeywords = new[] { "Comedy" }
+        },
+        ["fintv-funny"] = new ChannelCatalogGenreConstraints
+        {
+            RequiredGenreKeywords = new[] { "Comedy" }
+        },
+        ["fintv-game-shows"] = new ChannelCatalogGenreConstraints
+        {
+            RequiredGenreKeywords = new[] { "Game Show", "Game-Show", "GameShow", "Quiz", "Trivia" }
+        },
+        ["fintv-education"] = new ChannelCatalogGenreConstraints
+        {
+            RequiredGenreKeywords = new[] { "Documentary", "Educational", "Education", "History", "Science", "Nature" }
+        },
+        ["fintv-creature"] = new ChannelCatalogGenreConstraints
+        {
+            RequiredGenreKeywords = new[] { "Horror", "Sci-Fi", "Science Fiction", "Monster", "Creature", "Thriller", "Fantasy" },
+            RequiredPlotKeywords = new[]
+            {
+                "monster", "creature", "beast", "kaiju", "godzilla", "alien", "extraterrestrial", "ufo",
+                "vampire", "werewolf", "wolfman", "zombie", "undead", "ghoul", "demon", "devil",
+                "mutant", "abomination", "sea monster", "giant shark", "dinosaur", "dragon",
+                "frankenstein", "mummy", "cryptid", "bigfoot", "sasquatch", "tentacle", "blob",
+                "creature feature", "double feature", "body horror", "giant spider", "giant ant",
+                "king kong", "gill-man", "swamp thing", "loch ness", "yeti", "reanimated"
+            }
+        },
+        ["fintv-hero"] = new ChannelCatalogGenreConstraints
+        {
+            RequiredGenreKeywords = new[]
+            {
+                "Action", "Adventure", "Superhero", "Fantasy", "Sci-Fi", "Science Fiction",
+                "Drama", "Medical", "Hospital", "War", "Biography"
+            },
+            RequiredPlotKeywords = new[]
+            {
+                "hero", "heroine", "heroes", "savior", "saviour", "save lives", "saves lives",
+                "saved lives", "saving lives", "save the", "saves the", "saved the", "saving the",
+                "rescue", "rescues", "rescued", "rescuing", "protector", "protects", "protecting",
+                "defender", "defends", "champion", "guardian", "crusader", "brave", "courage",
+                "selfless", "sacrifice", "first responder", "firefighter", "fireman", "fire fighter",
+                "paramedic", "lifeguard", "EMT", "medic", "doctor", "surgeon", "nurse",
+                "superhero", "super hero", "superpower", "super power", "vigilante",
+                "superman", "batman", "wonder woman", "spider-man", "spiderman", "iron man",
+                "captain america", "avenger", "marvel", "x-men", "war hero", "medal of honor",
+                "unsung hero", "everyday hero", "disaster relief", "against all odds"
+            }
+        },
+        ["fintv-news"] = new ChannelCatalogGenreConstraints
+        {
+            RequiredGenreKeywords = new[] { "News", "Newscast", "Journalism" }
         }
     };
 
@@ -218,10 +294,21 @@ public static class ChannelAiRules
     /// <param name="channel">Channel entity.</param>
     /// <returns>True when year, genre, or library constraints apply.</returns>
     public static bool HasCatalogConstraints(Channel channel)
-        => GetYearConstraints(channel) is not null
+    {
+        if (GetYearConstraints(channel) is not null
             || GetGenreConstraints(channel) is not null
             || GetLibraryConstraints(channel) is not null
-            || HolidayChannelCalendar.IsHolidayChannel(channel);
+            || HolidayChannelCalendar.IsHolidayChannel(channel))
+        {
+            return true;
+        }
+
+        var filter = FilterDefinition.Parse(channel.FilterJson);
+        return filter is not null
+            && (!string.IsNullOrWhiteSpace(filter.MinRating)
+                || !string.IsNullOrWhiteSpace(filter.MaxRating)
+                || !string.IsNullOrWhiteSpace(filter.TitleContains));
+    }
 
     /// <summary>
     /// Resolves catalog mode from channel state and optional library tag.
@@ -327,22 +414,13 @@ public class ChannelCatalogGenreConstraints
 {
     public IReadOnlyList<string> RequiredGenreKeywords { get; set; } = Array.Empty<string>();
 
+    public IReadOnlyList<string> RequiredPlotKeywords { get; set; } = Array.Empty<string>();
+
     public IReadOnlyList<string> ExcludedGenreKeywords { get; set; } = Array.Empty<string>();
 
     public bool Matches(IReadOnlyList<string>? genres)
     {
         genres ??= Array.Empty<string>();
-        if (genres.Count == 0)
-        {
-            return RequiredGenreKeywords.Count == 0;
-        }
-
-        if (RequiredGenreKeywords.Count > 0
-            && !genres.Any(genre => RequiredGenreKeywords.Any(keyword =>
-                genre.Contains(keyword, StringComparison.OrdinalIgnoreCase))))
-        {
-            return false;
-        }
 
         if (ExcludedGenreKeywords.Count > 0
             && genres.Any(genre => ExcludedGenreKeywords.Any(keyword =>
@@ -351,7 +429,90 @@ public class ChannelCatalogGenreConstraints
             return false;
         }
 
-        return true;
+        if (RequiredGenreKeywords.Count == 0 && RequiredPlotKeywords.Count == 0)
+        {
+            return true;
+        }
+
+        if (RequiredPlotKeywords.Count > 0)
+        {
+            return RequiredGenreKeywords.Count > 0
+                && genres.Any(genre => RequiredGenreKeywords.Any(keyword =>
+                    genre.Contains(keyword, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        if (genres.Count == 0)
+        {
+            return false;
+        }
+
+        return genres.Any(genre => RequiredGenreKeywords.Any(keyword =>
+            genre.Contains(keyword, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    public bool MatchesItem(BaseItem item)
+    {
+        if (item is Episode)
+        {
+            return false;
+        }
+
+        var genres = item.Genres?.ToList() ?? new List<string>();
+
+        if (ExcludedGenreKeywords.Count > 0
+            && genres.Any(genre => ExcludedGenreKeywords.Any(keyword =>
+                genre.Contains(keyword, StringComparison.OrdinalIgnoreCase))))
+        {
+            return false;
+        }
+
+        if (RequiredGenreKeywords.Count == 0 && RequiredPlotKeywords.Count == 0)
+        {
+            return true;
+        }
+
+        if (RequiredGenreKeywords.Count > 0
+            && genres.Any(genre => RequiredGenreKeywords.Any(keyword =>
+                genre.Contains(keyword, StringComparison.OrdinalIgnoreCase))))
+        {
+            return true;
+        }
+
+        if (RequiredPlotKeywords.Count > 0 && MatchesPlotOrTitle(item))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool MatchesPlotOrTitle(BaseItem item)
+    {
+        var searchable = new List<string>();
+        if (!string.IsNullOrWhiteSpace(item.Name))
+        {
+            searchable.Add(item.Name);
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.Overview))
+        {
+            searchable.Add(item.Overview);
+        }
+
+        var itemTags = item.Tags?.ToList();
+        if (itemTags is { Count: > 0 })
+        {
+            searchable.Add(string.Join(' ', itemTags));
+        }
+
+        if (searchable.Count == 0)
+        {
+            return false;
+        }
+
+        var blob = string.Join(' ', searchable);
+        return RequiredPlotKeywords.Any(keyword =>
+            blob.Contains(keyword, StringComparison.OrdinalIgnoreCase));
     }
 }
 

@@ -7,6 +7,11 @@ namespace Jellyfin.Plugin.FinTV.Domain;
 /// </summary>
 public class FilterDefinition
 {
+    /// <summary>
+    /// FinTV preset identifier (e.g. fintv-retro). Used for channel rules, not Jellyfin tag queries.
+    /// </summary>
+    public string? PresetId { get; set; }
+
     public string? Genre { get; set; }
 
     public List<string>? Tags { get; set; }
@@ -39,6 +44,37 @@ public class FilterDefinition
     }
 
     public static string? ExtractFintvLibraryTag(string? filterJson)
-        => Parse(filterJson)?.Tags?
+    {
+        var filter = Parse(filterJson);
+        if (filter is null)
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.PresetId))
+        {
+            return filter.PresetId;
+        }
+
+        return filter.Tags?
             .FirstOrDefault(tag => tag.StartsWith("fintv-", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Optional Jellyfin tags from filter JSON (excludes FinTV preset identifiers).
+    /// </summary>
+    public static IReadOnlyList<string> GetOptionalJellyfinTags(string? filterJson)
+    {
+        var filter = Parse(filterJson);
+        if (filter?.Tags is not { Count: > 0 })
+        {
+            return Array.Empty<string>();
+        }
+
+        return filter.Tags
+            .Where(tag =>
+                !string.IsNullOrWhiteSpace(tag)
+                && !tag.StartsWith("fintv-", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
 }

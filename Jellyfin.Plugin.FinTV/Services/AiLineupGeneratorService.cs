@@ -67,7 +67,7 @@ public class AiLineupGeneratorService
                     "No holiday-themed shows or movies found — tag items with holiday keywords in Jellyfin tags, genres, or plot.");
             }
 
-            throw new InvalidOperationException("No tagged shows/movies found for this channel — tag your library first.");
+            throw new InvalidOperationException(BuildEmptyCatalogError(channel, manifest));
         }
 
         var libraryTag = ChannelAiRules.ExtractLibraryTag(channel.FilterJson);
@@ -185,6 +185,60 @@ public class AiLineupGeneratorService
         };
     }
 
+    private static string BuildEmptyCatalogError(Channel channel, AiCatalogManifest manifest)
+    {
+        var yearConstraints = ChannelAiRules.GetYearConstraints(channel);
+        var genreConstraints = ChannelAiRules.GetGenreConstraints(channel);
+        var libraryConstraints = ChannelAiRules.GetLibraryConstraints(channel);
+        var channelFilter = FilterDefinition.Parse(channel.FilterJson);
+
+        if (manifest.TagMatchedCount > 0 && yearConstraints is not null)
+        {
+            return
+                $"Found {manifest.TagMatchedCount} library item(s) but none match release years {yearConstraints.MinYear}–{yearConstraints.MaxYear}. "
+                + "Add Premiere Date or Production Year metadata in Jellyfin (series use first-episode year).";
+        }
+
+        if (manifest.TagMatchedCount > 0 && genreConstraints is not null)
+        {
+            var genreHint = genreConstraints.RequiredGenreKeywords.Count > 0
+                ? string.Join(", ", genreConstraints.RequiredGenreKeywords)
+                : "this channel's genre rules";
+            var plotHint = genreConstraints.RequiredPlotKeywords.Count > 0
+                ? " or plot/overview keywords"
+                : string.Empty;
+            return
+                $"Found {manifest.TagMatchedCount} library item(s) but none match the required genres ({genreHint}){plotHint}. "
+                + "Check genre and plot metadata on your shows and movies in Jellyfin.";
+        }
+
+        if (manifest.TagMatchedCount > 0 && !string.IsNullOrWhiteSpace(channelFilter?.MaxRating))
+        {
+            return
+                $"Found {manifest.TagMatchedCount} library item(s) but none are rated {channelFilter.MaxRating} or lower. "
+                + "Set Official Rating metadata in Jellyfin or adjust the channel filter.";
+        }
+
+        if (manifest.TagMatchedCount > 0 && libraryConstraints is not null)
+        {
+            return
+                $"No items found in the Jellyfin library \"{libraryConstraints.LibraryName}\" for this channel.";
+        }
+
+        if (manifest.TagMatchedCount > 0)
+        {
+            return
+                $"Found {manifest.TagMatchedCount} library item(s) but none match this channel's catalog mode ({manifest.CatalogMode}).";
+        }
+
+        if (libraryConstraints is not null)
+        {
+            return $"No content found in the Jellyfin library \"{libraryConstraints.LibraryName}\".";
+        }
+
+        return "No matching content found in your Jellyfin library for this channel. Ensure items have genres, release years, and ratings metadata.";
+    }
+
     private static List<LineupSlotDto> ValidateAndBuildSlots(
         List<AiGeneratedSlot>? aiSlots,
         HashSet<Guid> validIds,
@@ -224,8 +278,7 @@ public class AiLineupGeneratorService
             if (catalogById.TryGetValue(candidateId.Value, out var entry))
             {
                 if (yearConstraints is not null
-                    && entry.Year.HasValue
-                    && !yearConstraints.ContainsYear(entry.Year))
+                    && (!entry.Year.HasValue || !yearConstraints.ContainsYear(entry.Year)))
                 {
                     continue;
                 }
@@ -268,7 +321,7 @@ public class AiLineupGeneratorService
         }
 
         var fallbackFilter = string.IsNullOrWhiteSpace(channelFilterJson)
-            ? "{\"tags\":[]}"
+            ? "{}"
             : channelFilterJson;
 
         for (var i = 0; i < 48; i++)

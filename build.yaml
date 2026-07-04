@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.62"
+version: "0.0.2.68"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -81,6 +81,15 @@ artifacts:
   - "tools/yt-dlp/win-x64/yt-dlp.exe"
   - "scripts/install-docker-cli-jellyfin.sh"
 changelog: |-
+  - Broaden Hero TV to anyone who saves or protects people (first responders, doctors, rescuers, not just superheroes)
+  - Hero TV matches hero content by genre, plot/overview, title, or Jellyfin tags; includes TV series
+  - Creature Double Feature matches monster content by genre, plot/overview, title, or Jellyfin tags; includes TV series
+  - Cops And Robbers matches crime/cop content by genre or plot/overview text, including movies
+  - Channel lineups and AI catalogs now use Jellyfin metadata (year, genre, rating, library) instead of requiring fintv-* tags on every item
+  - Preset channels store presetId in filter JSON; re-apply presets with Update existing to refresh channel filters
+  - Fix AI lineup catalog lookup using case-insensitive Jellyfin tag matching with broad-library fallback
+  - Improve empty AI catalog errors with required tag name, year range, and tagged-item counts
+  - Include untagged-year library items in channel catalogs when release year metadata is missing
   - Fix case-insensitive JSON parsing for channel filters, admin API payloads, and stored FinTV JSON
   - Fix Retro TV and FlashBack AI catalogs enforcing release year limits (1910-1969 and 1970-2010)
   - Fix AI movie merged time slots to use runtime so long features get enough 30-minute blocks

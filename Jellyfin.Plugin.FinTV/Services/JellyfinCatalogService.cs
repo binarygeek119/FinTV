@@ -158,50 +158,75 @@ public class JellyfinCatalogService
             query.Name = collectionName;
         }
 
+        var requiredTags = CollectRequiredTags(channel, filter);
+        var items = GetItemsWithTagFallback(
+            query,
+            requiredTags,
+            () =>
+            {
+                var fallbackQuery = new InternalItemsQuery
+                {
+                    Recursive = query.Recursive,
+                    IsVirtualItem = query.IsVirtualItem,
+                    IncludeItemTypes = query.IncludeItemTypes,
+                    OrderBy = query.OrderBy,
+                    ParentId = query.ParentId,
+                    Name = query.Name
+                };
+
+                ApplyFilterToQueryWithoutTags(fallbackQuery, filter);
+                if (!parentId.HasValue)
+                {
+                    MergeChannelFilter(fallbackQuery, channel);
+                }
+
+                return fallbackQuery;
+            });
+
         return ApplyFilterDefinitionConstraints(
-            ApplyCatalogConstraints(_libraryManager.GetItemsResult(query).Items.ToList(), channel, scheduleDate),
+            ApplyChannelFilterMetadata(
+                ApplyCatalogConstraints(items, channel, scheduleDate),
+                channel),
             filter);
     }
 
     public IReadOnlyList<BaseItem> BrowseForAiManifest(Channel channel, ChannelCatalogMode catalogMode, int limit)
+        => BrowseForAiManifestWithStats(channel, catalogMode, limit).Items;
+
+    public AiCatalogBrowseStats BrowseForAiManifestWithStats(Channel channel, ChannelCatalogMode catalogMode, int limit)
     {
         var scheduleDate = _holidays.GetScheduleDateUtc(DateTime.UtcNow);
         var kinds = GetManifestItemTypes(channel, catalogMode);
-        var query = new InternalItemsQuery
+        var requiredTags = CollectRequiredTags(channel, slotFilter: null);
+        var clampedLimit = Math.Clamp(limit, 1, 1000);
+
+        var query = CreateManifestBrowseQuery(kinds, channel, clampedLimit);
+        var items = GetItemsWithTagFallback(
+            query,
+            requiredTags,
+            () => CreateManifestBrowseQuery(kinds, channel, clampedLimit));
+
+        var libraryItemCount = items.Count;
+        var filtered = ApplyChannelFilterMetadata(
+            ApplyCatalogConstraints(items, channel, scheduleDate),
+            channel);
+
+        return new AiCatalogBrowseStats
         {
-            Recursive = true,
-            IsVirtualItem = false,
-            IncludeItemTypes = kinds,
-            OrderBy = new[] { (ItemSortBy.SortName, Jellyfin.Database.Implementations.Enums.SortOrder.Ascending) }
+            Items = filtered.Take(clampedLimit).ToList(),
+            TagMatchedCount = libraryItemCount,
+            AfterConstraintCount = filtered.Count
         };
-
-        if (!ChannelAiRules.HasCatalogConstraints(channel))
-        {
-            query.Limit = Math.Clamp(limit, 1, 1000);
-        }
-
-        MergeChannelFilter(query, channel);
-        var filtered = ApplyCatalogConstraints(_libraryManager.GetItemsResult(query).Items.ToList(), channel, scheduleDate);
-        return filtered.Take(Math.Clamp(limit, 1, 1000)).ToList();
     }
 
     public int CountForAiManifest(Channel channel, ChannelCatalogMode catalogMode)
     {
         if (!ChannelAiRules.HasCatalogConstraints(channel))
         {
-            var kinds = GetManifestItemTypes(channel, catalogMode);
-            var query = new InternalItemsQuery
-            {
-                Recursive = true,
-                IsVirtualItem = false,
-                IncludeItemTypes = kinds
-            };
-
-            MergeChannelFilter(query, channel);
-            return _libraryManager.GetItemsResult(query).TotalRecordCount;
+            return BrowseForAiManifestWithStats(channel, catalogMode, 10000).TagMatchedCount;
         }
 
-        return BrowseForAiManifest(channel, catalogMode, 10000).Count;
+        return BrowseForAiManifestWithStats(channel, catalogMode, 10000).AfterConstraintCount;
     }
 
     public int? GetCatalogReleaseYear(BaseItem item, ChannelCatalogYearConstraints? constraints)
@@ -252,7 +277,13 @@ public class JellyfinCatalogService
             return false;
         }
 
-        return constraints.ContainsYear(GetCatalogReleaseYear(item, constraints));
+        var year = GetCatalogReleaseYear(item, constraints);
+        if (!year.HasValue)
+        {
+            return true;
+        }
+
+        return constraints.ContainsYear(year);
     }
 
     public bool MatchesGenreConstraints(BaseItem item, ChannelCatalogGenreConstraints constraints)
@@ -262,7 +293,7 @@ public class JellyfinCatalogService
             return false;
         }
 
-        return constraints.Matches(item.Genres?.ToList());
+        return constraints.MatchesItem(item);
     }
 
     private IReadOnlyList<BaseItem> ApplyCatalogConstraints(
@@ -435,6 +466,122 @@ public class JellyfinCatalogService
         }
     }
 
+    private static void ApplyFilterToQueryWithoutTags(InternalItemsQuery query, FilterDefinition? filter)
+    {
+        if (filter is null)
+        {
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.Genre))
+        {
+            query.Genres = new[] { filter.Genre };
+        }
+    }
+
+    private static IReadOnlyList<string> CollectRequiredTags(Channel channel, FilterDefinition? slotFilter)
+    {
+        var tags = new List<string>();
+        tags.AddRange(FilterDefinition.GetOptionalJellyfinTags(channel.FilterJson));
+
+        if (slotFilter?.Tags is { Count: > 0 })
+        {
+            tags.AddRange(slotFilter.Tags.Where(tag => !string.IsNullOrWhiteSpace(tag)));
+        }
+
+        return tags
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static bool ItemMatchesRequiredTags(BaseItem item, IReadOnlyList<string> requiredTags)
+    {
+        if (requiredTags.Count == 0)
+        {
+            return true;
+        }
+
+        var itemTags = item.Tags?.ToList();
+        if (itemTags is null || itemTags.Count == 0)
+        {
+            return false;
+        }
+
+        return requiredTags.All(required =>
+            itemTags.Any(tag => tag.Equals(required, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static IReadOnlyList<BaseItem> FilterByRequiredTags(
+        IReadOnlyList<BaseItem> items,
+        IReadOnlyList<string> requiredTags)
+    {
+        if (requiredTags.Count == 0)
+        {
+            return items;
+        }
+
+        return items.Where(item => ItemMatchesRequiredTags(item, requiredTags)).ToList();
+    }
+
+    private IReadOnlyList<BaseItem> GetItemsWithTagFallback(
+        InternalItemsQuery query,
+        IReadOnlyList<string> requiredTags,
+        Func<InternalItemsQuery> createFallbackQuery)
+    {
+        var items = FilterByRequiredTags(_libraryManager.GetItemsResult(query).Items.ToList(), requiredTags);
+        if (requiredTags.Count > 0 && items.Count == 0 && query.Tags is { Length: > 0 })
+        {
+            var fallbackQuery = createFallbackQuery();
+            items = FilterByRequiredTags(
+                _libraryManager.GetItemsResult(fallbackQuery).Items.ToList(),
+                requiredTags);
+        }
+
+        return items;
+    }
+
+    private InternalItemsQuery CreateManifestBrowseQuery(
+        BaseItemKind[] kinds,
+        Channel channel,
+        int limit)
+    {
+        var query = new InternalItemsQuery
+        {
+            Recursive = true,
+            IsVirtualItem = false,
+            IncludeItemTypes = kinds,
+            OrderBy = new[] { (ItemSortBy.SortName, Jellyfin.Database.Implementations.Enums.SortOrder.Ascending) }
+        };
+
+        if (!ChannelAiRules.HasCatalogConstraints(channel))
+        {
+            query.Limit = limit;
+        }
+
+        MergeChannelFilter(query, channel);
+        return query;
+    }
+
+    private static IReadOnlyList<BaseItem> ApplyChannelFilterMetadata(
+        IReadOnlyList<BaseItem> items,
+        Channel channel)
+    {
+        var filter = FilterDefinition.Parse(channel.FilterJson);
+        if (filter is null)
+        {
+            return items;
+        }
+
+        if (string.IsNullOrWhiteSpace(filter.TitleContains)
+            && string.IsNullOrWhiteSpace(filter.MinRating)
+            && string.IsNullOrWhiteSpace(filter.MaxRating))
+        {
+            return items;
+        }
+
+        return ApplyFilterDefinitionConstraints(items, filter);
+    }
+
     private static IReadOnlyList<BaseItem> ApplyFilterDefinitionConstraints(
         IReadOnlyList<BaseItem> items,
         FilterDefinition? filter)
@@ -490,7 +637,17 @@ public class JellyfinCatalogService
     {
         var itemScore = ParseRatingScore(itemRating);
         var maxScore = ParseRatingScore(maxRating);
-        return itemScore.HasValue && maxScore.HasValue && itemScore.Value <= maxScore.Value;
+        if (!maxScore.HasValue)
+        {
+            return true;
+        }
+
+        if (!itemScore.HasValue)
+        {
+            return true;
+        }
+
+        return itemScore.Value <= maxScore.Value;
     }
 
     private static int? ParseRatingScore(string? rating)
@@ -538,11 +695,6 @@ public class JellyfinCatalogService
         if (!string.IsNullOrWhiteSpace(channelFilter.Genre))
         {
             query.Genres = new[] { channelFilter.Genre };
-        }
-
-        if (channelFilter.Tags is { Count: > 0 })
-        {
-            query.Tags = channelFilter.Tags.ToArray();
         }
     }
 
@@ -681,6 +833,15 @@ public class JellyfinCatalogService
 
         return items.Select(MapItem).Take(1).ToList();
     }
+}
+
+public class AiCatalogBrowseStats
+{
+    public IReadOnlyList<BaseItem> Items { get; init; } = Array.Empty<BaseItem>();
+
+    public int TagMatchedCount { get; init; }
+
+    public int AfterConstraintCount { get; init; }
 }
 
 public class MusicLibraryInfo

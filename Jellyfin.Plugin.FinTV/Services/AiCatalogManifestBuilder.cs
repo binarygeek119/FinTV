@@ -24,8 +24,9 @@ public class AiCatalogManifestBuilder
         var maxItems = Plugin.Instance?.Configuration.Ai.MaxCatalogItemsInPrompt ?? 250;
         var yearConstraints = ChannelAiRules.GetYearConstraints(channel);
         var genreConstraints = ChannelAiRules.GetGenreConstraints(channel);
-        var totalAvailable = _catalog.CountForAiManifest(channel, catalogMode);
-        var items = _catalog.BrowseForAiManifest(channel, catalogMode, maxItems);
+        var browseStats = _catalog.BrowseForAiManifestWithStats(channel, catalogMode, maxItems);
+        var totalAvailable = browseStats.AfterConstraintCount;
+        var items = browseStats.Items;
 
         var entries = items
             .Select(item => MapEntry(item, catalogMode, yearConstraints, genreConstraints))
@@ -38,6 +39,7 @@ public class AiCatalogManifestBuilder
             CatalogMode = catalogMode,
             TotalAvailable = totalAvailable,
             IncludedInPrompt = entries.Count,
+            TagMatchedCount = browseStats.TagMatchedCount,
             Catalog = entries
         };
     }
@@ -158,6 +160,8 @@ public class AiCatalogManifest
     public int TotalAvailable { get; set; }
 
     public int IncludedInPrompt { get; set; }
+
+    public int TagMatchedCount { get; set; }
 
     public List<AiCatalogEntry> Catalog { get; set; } = new();
 }

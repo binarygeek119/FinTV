@@ -30,18 +30,18 @@ public static class ChannelPresets
     [
         Preset(119, 119.1m, "FlashBack TV", ChannelContentType.TvShow, "TV Shows", "1970–2010 TV and movies (first-episode year for series)", "fintv-flashback", "Shows/FlashBack_TV.png", catalogMode: ChannelCatalogMode.Mixed, minYear: 1970, maxYear: 2010),
         Preset(120, 119.2m, "Retro TV", ChannelContentType.TvShow, "TV Shows", "1910–1969 TV and movies (first-episode year for series)", "fintv-retro", "Shows/Retro_TV.png", catalogMode: ChannelCatalogMode.Mixed, minYear: 1910, maxYear: 1969),
-        Preset(121, 119.3m, "[OpenSwim]", ChannelContentType.TvShow, "TV Shows", "Kids and teen shows and movies only", "fintv-open-swim", "Shows/[open_swim].png", catalogMode: ChannelCatalogMode.Mixed),
+        Preset(121, 119.3m, "[OpenSwim]", ChannelContentType.TvShow, "TV Shows", "Kids and teen shows and movies only", "fintv-open-swim", "Shows/[open_swim].png", catalogMode: ChannelCatalogMode.Mixed, maxRating: "TV-PG"),
         Preset(122, 119.4m, "Flip Television", ChannelContentType.TvShow, "TV Shows", "Reality TV themed shows and movies", "fintv-reality", "Shows/Flip_Television.png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(123, 119.5m, "BinaryGeek119 News", ChannelContentType.TvShow, "TV Shows", "News", "fintv-news", logoPath: null),
         Preset(124, 119.6m, "WeatherStar4000", ChannelContentType.Weather, "TV Shows", "Weather channel", "fintv-weatherstar4000", "Weather/WeatherStar4000.png", weather: true),
         Preset(125, 124.1m, "Past Tense News", ChannelContentType.TvShow, "TV Shows", "Content from Jellyfin library Past Tense News only", "fintv-past-tense-news", logoPath: null),
-        Preset(128, 124.2m, "Cops And Robbers", ChannelContentType.TvShow, "TV Shows", "Crime and cop themed TV shows only", "fintv-crime", "Shows/cops_and_robbers.png"),
+        Preset(128, 124.2m, "Cops And Robbers", ChannelContentType.TvShow, "TV Shows", "Crime and cop themed TV shows and movies (genre or plot)", "fintv-crime", "Shows/cops_and_robbers.png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(129, 124.3m, "Slappy", ChannelContentType.TvShow, "TV Shows", "Comedy TV and movies with 6pm Animation Domination block", "fintv-comedy", "Shows/Slappy.png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(130, 126.1m, "Winning", ChannelContentType.TvShow, "TV Shows", "Game shows channel", "fintv-game-shows", "Shows/winning.png"),
         Preset(133, 126.2m, "GET LEARNEDED", ChannelContentType.TvShow, "TV Shows", "Educational tv shows and movies", "fintv-education", "Shows/GET_LEARNEDED.png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(134, 126.3m, "YouTube TV", ChannelContentType.TvShow, "TV Shows", "Youtube channels", "fintv-youtube", logoPath: null),
-        Preset(203, 203.1m, "Creature Double Feature", ChannelContentType.Movie, "Movies", "Creature, monster movies", "fintv-creature", "Movies/Creature_Double_Feature.png", catalogMode: ChannelCatalogMode.MovieOnly),
-        Preset(204, 203.2m, "Hero TV", ChannelContentType.Movie, "Movies", "Super hero movies", "fintv-hero", "Movies/Hero_TV.png", catalogMode: ChannelCatalogMode.MovieOnly),
+        Preset(203, 203.1m, "Creature Double Feature", ChannelContentType.Movie, "Movies", "Creature and monster movies and TV (genre, plot, or tags)", "fintv-creature", "Movies/Creature_Double_Feature.png", catalogMode: ChannelCatalogMode.Mixed),
+        Preset(204, 203.2m, "Hero TV", ChannelContentType.Movie, "Movies", "Anyone who saves or protects people — heroes, rescuers, and champions", "fintv-hero", "Movies/Hero_TV.png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(205, 203.3m, "That's Funny", ChannelContentType.Movie, "Movies", "Comedian movies and tv shows", "fintv-funny", logoPath: null, catalogMode: ChannelCatalogMode.Mixed),
         Preset(207, 203.4m, "The Holiday Channel", ChannelContentType.Movie, "Movies", "Seasonal holiday TV and movies; off-season plays The Holiday Channel.mkv", "fintv-holiday", "The Holiday Channel/The Holiday Channel-plane.png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(312, 312.1m, "The Parody Channel", ChannelContentType.MusicVideo, "Music Videos", "Parody music videos", "fintv-parody", "Music Videos Channels/The-Parody-Channel.png"),
@@ -70,7 +70,8 @@ public static class ChannelPresets
         bool weather = false,
         ChannelCatalogMode? catalogMode = null,
         int? minYear = null,
-        int? maxYear = null)
+        int? maxYear = null,
+        string? maxRating = null)
     {
         return new ChannelPresetDefinition
         {
@@ -84,25 +85,31 @@ public static class ChannelPresets
             LibraryTag = libraryTag,
             LogoRelativePath = logoPath,
             UseBinarygeek119Logo = useLogo,
-            FilterJson = BuildFilterJson(libraryTag, minYear, maxYear),
+            FilterJson = BuildFilterJson(libraryTag, minYear, maxYear, maxRating),
             IsWeatherChannel = weather,
             CatalogMode = catalogMode ?? ChannelAiRules.GetByLibraryTag(libraryTag)?.DefaultCatalogMode
         };
     }
 
-    private static string BuildFilterJson(string libraryTag, int? minYear, int? maxYear)
+    private static string BuildFilterJson(string libraryTag, int? minYear, int? maxYear, string? maxRating)
     {
-        if (minYear.HasValue || maxYear.HasValue)
+        var filter = new Dictionary<string, object?> { ["presetId"] = libraryTag };
+        if (minYear.HasValue)
         {
-            return FinTvJson.Serialize(new
-            {
-                tags = new[] { libraryTag },
-                minYear,
-                maxYear
-            });
+            filter["minYear"] = minYear.Value;
         }
 
-        return FinTvJson.Serialize(new { tags = new[] { libraryTag } });
+        if (maxYear.HasValue)
+        {
+            filter["maxYear"] = maxYear.Value;
+        }
+
+        if (!string.IsNullOrWhiteSpace(maxRating))
+        {
+            filter["maxRating"] = maxRating;
+        }
+
+        return FinTvJson.Serialize(filter);
     }
 }
 
