@@ -43,8 +43,11 @@ public class AiChannelAutoApplyService
         return !ChannelAiRules.IsExcludedFromAi(tag);
     }
 
-    public async Task ApplyDefaultSettingsAsync(Channel channel, CancellationToken cancellationToken = default)
+    public async Task ApplyDefaultSettingsAsync(Guid channelId, CancellationToken cancellationToken = default)
     {
+        var channel = await _db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken)
+            ?? throw new InvalidOperationException("Channel not found.");
+
         var tag = ChannelAiRules.ExtractLibraryTag(channel.FilterJson);
         var rule = ChannelAiRules.GetByLibraryTag(tag);
         if (rule is not null)
@@ -79,10 +82,25 @@ public class AiChannelAutoApplyService
             return AiAutoApplyChannelResult.Skipped("AI auto-apply is disabled.");
         }
 
+        var result = await ApplyChannelLineupAsync(channelId, cancellationToken);
+        if (result.Ok)
+        {
+            _logger.LogInformation(
+                "Auto-applied AI lineup for channel {ChannelName} with 14-day playout rebuild.",
+                result.ChannelName);
+        }
+
+        return result;
+    }
+
+    public async Task<AiAutoApplyChannelResult> ApplyChannelLineupAsync(
+        Guid channelId,
+        CancellationToken cancellationToken = default)
+    {
         var channel = await _db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
         if (channel is null)
         {
-            return AiAutoApplyChannelResult.Failed("Channel not found.");
+            return AiAutoApplyChannelResult.Failed("Channel not found.", channelId);
         }
 
         if (!IsEligible(channel))
@@ -92,7 +110,7 @@ public class AiChannelAutoApplyService
 
         try
         {
-            await ApplyDefaultSettingsAsync(channel, cancellationToken);
+            await ApplyDefaultSettingsAsync(channel.Id, cancellationToken);
             var preview = await _generator.GenerateAsync(channel.Id, null, cancellationToken);
             await _generator.ApplyAsync(
                 channel.Id,
@@ -101,17 +119,12 @@ public class AiChannelAutoApplyService
                 _playoutGenerator,
                 cancellationToken);
 
-            _logger.LogInformation(
-                "Auto-applied AI lineup for channel {ChannelNumber} {ChannelName} with 14-day playout rebuild.",
-                channel.Number,
-                channel.Name);
-
             return AiAutoApplyChannelResult.Succeeded(channel.Id, channel.Name);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "AI auto-apply failed for channel {ChannelId}", channelId);
-            return AiAutoApplyChannelResult.Failed(ex.Message);
+            _logger.LogWarning(ex, "AI lineup apply failed for channel {ChannelId}", channelId);
+            return AiAutoApplyChannelResult.Failed(ex.Message, channel.Id, channel.Name);
         }
     }
 
@@ -183,14 +196,16 @@ public class AiChannelAutoApplyService
         }
 
         var channels = await _db.Channels
+            .AsNoTracking()
             .Where(c => c.Enabled && c.ContentType != ChannelContentType.Weather)
             .OrderBy(c => c.Number)
+            .Select(c => new { c.Id, c.Name, c.FilterJson, c.ContentType })
             .ToListAsync(cancellationToken);
 
         var results = new List<AiAutoApplyChannelResult>();
         foreach (var channel in channels)
         {
-            if (!IsEligible(channel))
+            if (!IsEligible(new Channel { FilterJson = channel.FilterJson, ContentType = channel.ContentType }))
             {
                 results.Add(AiAutoApplyChannelResult.Skipped($"{channel.Name} is not eligible for AI lineups."));
                 continue;
@@ -198,23 +213,9 @@ public class AiChannelAutoApplyService
 
             cancellationToken.ThrowIfCancellationRequested();
 
-            try
-            {
-                await ApplyDefaultSettingsAsync(channel, cancellationToken);
-                var preview = await _generator.GenerateAsync(channel.Id, null, cancellationToken);
-                await _generator.ApplyAsync(
-                    channel.Id,
-                    preview.LineupSlots,
-                    rebuildPlayout: true,
-                    _playoutGenerator,
-                    cancellationToken);
-                results.Add(AiAutoApplyChannelResult.Succeeded(channel.Id, channel.Name));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "AI apply-all failed for channel {ChannelId}", channel.Id);
-                results.Add(AiAutoApplyChannelResult.Failed(ex.Message, channel.Id, channel.Name));
-            }
+            using var scope = _scopeFactory.CreateScope();
+            var service = scope.ServiceProvider.GetRequiredService<AiChannelAutoApplyService>();
+            results.Add(await service.ApplyChannelLineupAsync(channel.Id, cancellationToken));
         }
 
         return results;

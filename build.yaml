@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.60"
+version: "0.0.2.61"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -81,6 +81,8 @@ artifacts:
   - "tools/yt-dlp/win-x64/yt-dlp.exe"
   - "scripts/install-docker-cli-jellyfin.sh"
 changelog: |-
+  - Fix AI Generate All failing every channel after the first due to shared database context concurrency errors
+  - Show the first channel error in the Generate All admin toast when bulk lineup generation fails
   - Add List tab to register Jellyfin playlists as reusable FinTV content pools (sequential or random playback)
   - Add Special Presentation tab for recurring day/time blocks that override AI or default lineup slots
   - Add Playlist/List candidate kind for lineups, overrides, and special presentations

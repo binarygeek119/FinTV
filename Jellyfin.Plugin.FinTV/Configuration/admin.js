@@ -2367,10 +2367,16 @@
         if (!confirm('Generate AI lineups for all channels? This may take several minutes.')) return;
         try {
             const data = await api('/ai/generate-all', { method: 'POST', body: '{}' });
+            const failed = (data.results || []).filter((r) => !r.ok && !r.skipped);
             const ok = (data.results || []).filter((r) => r.ok).length;
-            const fail = (data.results || []).filter((r) => !r.ok && !r.skipped).length;
+            const fail = failed.length;
             const skipped = (data.results || []).filter((r) => r.skipped).length;
-            toast(`Generate all finished: ${ok} succeeded, ${fail} failed${skipped ? `, ${skipped} skipped` : ''}.`, fail ? 'info' : 'success');
+            let message = `Generate all finished: ${ok} succeeded, ${fail} failed${skipped ? `, ${skipped} skipped` : ''}.`;
+            if (fail && failed[0]?.error) {
+                const sample = failed[0].name ? `${failed[0].name}: ${failed[0].error}` : failed[0].error;
+                message += ` First error: ${sample}`;
+            }
+            toast(message, fail ? 'info' : 'success');
             await loadAi();
         } catch (err) {
             toast(err.message, 'error');
