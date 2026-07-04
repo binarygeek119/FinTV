@@ -128,35 +128,57 @@
   </PropertyGroup>
 
   <Target Name="CopyAllPlaywrightDrivers" AfterTargets="CopyPlaywrightFilesToOutput">
+    <PropertyGroup Condition="Exists('$(PlaywrightBrowsersRoot)')">
+      <PlaywrightNodeLicense>$([System.IO.Path]::Combine('$(PlaywrightBrowsersRoot)', 'node', 'LICENSE'))</PlaywrightNodeLicense>
+      <PlaywrightPs1Script>$([System.IO.Path]::Combine('$(PlaywrightPackageRoot)', 'buildTransitive', 'playwright.ps1'))</PlaywrightPs1Script>
+    </PropertyGroup>
     <ItemGroup Condition="Exists('$(PlaywrightBrowsersRoot)')">
-      <AllPlaywrightDriverFiles Include="$(PlaywrightBrowsersRoot)\node\win32_x64\**\*.*" />
-      <AllPlaywrightDriverFiles Include="$(PlaywrightBrowsersRoot)\node\LICENSE" Condition="Exists('$(PlaywrightBrowsersRoot)\node\LICENSE')" />
-      <AllPlaywrightDriverFiles Include="$(PlaywrightBrowsersRoot)\package\**\*.*" />
+      <AllPlaywrightDriverFiles Include="$(PlaywrightBrowsersRoot)/node/win32_x64/**/*.*" />
+      <AllPlaywrightPackageFiles Include="$(PlaywrightBrowsersRoot)/package/**/*.*" />
     </ItemGroup>
     <Copy SourceFiles="@(AllPlaywrightDriverFiles)"
-          DestinationFiles="@(AllPlaywrightDriverFiles->'$(OutputPath).playwright\%(RecursiveDir)%(Filename)%(Extension)')"
+          DestinationFolder="$(OutputPath).playwright/node/win32_x64/%(RecursiveDir)"
           SkipUnchangedFiles="true"
           Condition="'@(AllPlaywrightDriverFiles)' != ''" />
-    <Copy SourceFiles="$(PlaywrightPackageRoot)buildTransitive\playwright.ps1"
+    <Copy SourceFiles="$(PlaywrightNodeLicense)"
+          DestinationFiles="$(OutputPath).playwright/node/LICENSE"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(PlaywrightNodeLicense)')" />
+    <Copy SourceFiles="@(AllPlaywrightPackageFiles)"
+          DestinationFolder="$(OutputPath).playwright/package/%(RecursiveDir)"
+          SkipUnchangedFiles="true"
+          Condition="'@(AllPlaywrightPackageFiles)' != ''" />
+    <Copy SourceFiles="$(PlaywrightPs1Script)"
           DestinationFiles="$(OutputPath)playwright.ps1"
           SkipUnchangedFiles="true"
-          Condition="Exists('$(PlaywrightPackageRoot)buildTransitive\playwright.ps1')" />
+          Condition="Exists('$(PlaywrightPs1Script)')" />
   </Target>
 
   <Target Name="CopyAllPlaywrightDriversToPublish" AfterTargets="Publish">
+    <PropertyGroup Condition="Exists('$(PlaywrightBrowsersRoot)')">
+      <PlaywrightNodeLicense>$([System.IO.Path]::Combine('$(PlaywrightBrowsersRoot)', 'node', 'LICENSE'))</PlaywrightNodeLicense>
+      <PlaywrightPs1Script>$([System.IO.Path]::Combine('$(PlaywrightPackageRoot)', 'buildTransitive', 'playwright.ps1'))</PlaywrightPs1Script>
+    </PropertyGroup>
     <ItemGroup Condition="Exists('$(PlaywrightBrowsersRoot)')">
-      <AllPlaywrightDriverPublishFiles Include="$(PlaywrightBrowsersRoot)\node\win32_x64\**\*.*" />
-      <AllPlaywrightDriverPublishFiles Include="$(PlaywrightBrowsersRoot)\node\LICENSE" Condition="Exists('$(PlaywrightBrowsersRoot)\node\LICENSE')" />
-      <AllPlaywrightDriverPublishFiles Include="$(PlaywrightBrowsersRoot)\package\**\*.*" />
+      <AllPlaywrightDriverPublishFiles Include="$(PlaywrightBrowsersRoot)/node/win32_x64/**/*.*" />
+      <AllPlaywrightPackagePublishFiles Include="$(PlaywrightBrowsersRoot)/package/**/*.*" />
     </ItemGroup>
     <Copy SourceFiles="@(AllPlaywrightDriverPublishFiles)"
-          DestinationFiles="@(AllPlaywrightDriverPublishFiles->'$(PublishDir).playwright\%(RecursiveDir)%(Filename)%(Extension)')"
+          DestinationFolder="$(PublishDir).playwright/node/win32_x64/%(RecursiveDir)"
           SkipUnchangedFiles="true"
           Condition="'$(PublishDir)' != '' AND '@(AllPlaywrightDriverPublishFiles)' != ''" />
-    <Copy SourceFiles="$(PlaywrightPackageRoot)buildTransitive\playwright.ps1"
+    <Copy SourceFiles="$(PlaywrightNodeLicense)"
+          DestinationFiles="$(PublishDir).playwright/node/LICENSE"
+          SkipUnchangedFiles="true"
+          Condition="'$(PublishDir)' != '' AND Exists('$(PlaywrightNodeLicense)')" />
+    <Copy SourceFiles="@(AllPlaywrightPackagePublishFiles)"
+          DestinationFolder="$(PublishDir).playwright/package/%(RecursiveDir)"
+          SkipUnchangedFiles="true"
+          Condition="'$(PublishDir)' != '' AND '@(AllPlaywrightPackagePublishFiles)' != ''" />
+    <Copy SourceFiles="$(PlaywrightPs1Script)"
           DestinationFiles="$(PublishDir)playwright.ps1"
           SkipUnchangedFiles="true"
-          Condition="'$(PublishDir)' != '' AND Exists('$(PlaywrightPackageRoot)buildTransitive\playwright.ps1')" />
+          Condition="'$(PublishDir)' != '' AND Exists('$(PlaywrightPs1Script)')" />
   </Target>
 
 </Project>
