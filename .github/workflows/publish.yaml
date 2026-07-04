@@ -90,13 +90,20 @@ jobs:
           if not assemblies:
               raise SystemExit("build.yaml must define assemblies")
 
+          IMAGE_RESOURCE = "Jellyfin.Plugin.FinTV.logo.png"
+
           tmp_path = f"{zip_path}.tmp"
           with zipfile.ZipFile(zip_path, "r") as zin, zipfile.ZipFile(tmp_path, "w") as zout:
               for item in zin.infolist():
+                  if item.filename == "logo.png":
+                      continue
+
                   data = zin.read(item.filename)
                   if item.filename == "meta.json":
                       meta = json.loads(data)
                       meta["assemblies"] = assemblies
+                      meta["imageResourceName"] = IMAGE_RESOURCE
+                      meta["imagePath"] = ""
                       data = json.dumps(meta, indent=4, sort_keys=True).encode("utf-8")
                   zout.writestr(item, data)
 

@@ -63,6 +63,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<PlayoutBuilderService>();
         serviceCollection.AddHostedService(sp => sp.GetRequiredService<PlayoutBuilderService>());
         serviceCollection.AddHostedService<DatabaseInitializer>();
+        serviceCollection.AddHostedService<PluginManifestRepairHostedService>();
         serviceCollection.AddSingleton<BlackframeChapterTask>();
     }
 

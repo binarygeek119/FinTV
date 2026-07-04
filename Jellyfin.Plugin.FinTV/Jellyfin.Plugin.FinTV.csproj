@@ -34,6 +34,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="..\logo.png" Link="logo.png" LogicalName="Jellyfin.Plugin.FinTV.logo.png" />
     <EmbeddedResource Include="Configuration\configPage.html" />
     <EmbeddedResource Include="Configuration\admin.js" />
     <EmbeddedResource Include="Configuration\admin.css" />

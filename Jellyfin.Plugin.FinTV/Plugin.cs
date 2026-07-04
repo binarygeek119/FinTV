@@ -3,6 +3,7 @@ using System.Reflection;
 using Jellyfin.Plugin.FinTV.Configuration;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
+using MediaBrowser.Controller.Plugins;
 using MediaBrowser.Model.Plugins;
 using MediaBrowser.Model.Serialization;
 
@@ -11,8 +12,13 @@ namespace Jellyfin.Plugin.FinTV;
 /// <summary>
 /// FinTV Jellyfin plugin entry point.
 /// </summary>
-public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
+public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages, IHasEmbeddedImage
 {
+    /// <summary>
+    /// Embedded resource name for the FinTV plugin catalog icon.
+    /// </summary>
+    public const string PluginImageResourceName = "Jellyfin.Plugin.FinTV.logo.png";
+
     /// <summary>
     /// Initializes a new instance of the <see cref="Plugin"/> class.
     /// </summary>
@@ -28,6 +34,9 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     /// Gets the active plugin instance.
     /// </summary>
     public static Plugin? Instance { get; private set; }
+
+    /// <inheritdoc />
+    public string ImageResourceName => PluginImageResourceName;
 
     /// <inheritdoc />
     public override string Name => "FinTV";
