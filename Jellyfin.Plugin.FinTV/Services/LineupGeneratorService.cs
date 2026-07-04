@@ -148,8 +148,11 @@ public class LineupGeneratorService
         }
 
         await _channelService.SaveAnchorAsync(channel.Id, anchor, cancellationToken);
-        channel.LastPlayoutBuiltAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync(cancellationToken);
+        await _db.Channels
+            .Where(c => c.Id == channel.Id)
+            .ExecuteUpdateAsync(
+                setters => setters.SetProperty(c => c.LastPlayoutBuiltAt, DateTime.UtcNow),
+                cancellationToken);
     }
 
     private static bool IsSlotConsumedByEarlierSpan(IReadOnlyList<LineupSlot> slots, int slotIndex)

@@ -12,6 +12,8 @@ namespace Jellyfin.Plugin.FinTV.Services;
 /// </summary>
 public class AiChannelAutoApplyService
 {
+    private static readonly SemaphoreSlim BulkApplyLock = new(1, 1);
+
     private readonly FinTvDbContext _db;
     private readonly AiLineupGeneratorService _generator;
     private readonly LineupGeneratorService _playoutGenerator;
@@ -97,7 +99,9 @@ public class AiChannelAutoApplyService
         Guid channelId,
         CancellationToken cancellationToken = default)
     {
-        var channel = await _db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
+        using var gate = await ChannelApplyLocks.AcquireAsync(channelId, cancellationToken);
+        var channel = await _db.Channels.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
         if (channel is null)
         {
             return AiAutoApplyChannelResult.Failed("Channel not found.", channelId);
@@ -110,21 +114,25 @@ public class AiChannelAutoApplyService
 
         try
         {
-            await ApplyDefaultSettingsAsync(channel.Id, cancellationToken);
-            var preview = await _generator.GenerateAsync(channel.Id, null, cancellationToken);
+            await ApplyDefaultSettingsAsync(channelId, cancellationToken);
+            _db.ChangeTracker.Clear();
+
+            var preview = await _generator.GenerateAsync(channelId, null, cancellationToken);
+            _db.ChangeTracker.Clear();
+
             await _generator.ApplyAsync(
-                channel.Id,
+                channelId,
                 preview.LineupSlots,
                 rebuildPlayout: true,
                 _playoutGenerator,
                 cancellationToken);
 
-            return AiAutoApplyChannelResult.Succeeded(channel.Id, channel.Name);
+            return AiAutoApplyChannelResult.Succeeded(channelId, channel.Name);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "AI lineup apply failed for channel {ChannelId}", channelId);
-            return AiAutoApplyChannelResult.Failed(ex.Message, channel.Id, channel.Name);
+            return AiAutoApplyChannelResult.Failed(ex.Message, channelId, channel.Name);
         }
     }
 
@@ -195,30 +203,38 @@ public class AiChannelAutoApplyService
             throw new InvalidOperationException("AI lineup generation is disabled.");
         }
 
-        var channels = await _db.Channels
-            .AsNoTracking()
-            .Where(c => c.Enabled && c.ContentType != ChannelContentType.Weather)
-            .OrderBy(c => c.Number)
-            .Select(c => new { c.Id, c.Name, c.FilterJson, c.ContentType })
-            .ToListAsync(cancellationToken);
-
-        var results = new List<AiAutoApplyChannelResult>();
-        foreach (var channel in channels)
+        await BulkApplyLock.WaitAsync(cancellationToken);
+        try
         {
-            if (!IsEligible(new Channel { FilterJson = channel.FilterJson, ContentType = channel.ContentType }))
+            var channels = await _db.Channels
+                .AsNoTracking()
+                .Where(c => c.Enabled && c.ContentType != ChannelContentType.Weather)
+                .OrderBy(c => c.Number)
+                .Select(c => new { c.Id, c.Name, c.FilterJson, c.ContentType })
+                .ToListAsync(cancellationToken);
+
+            var results = new List<AiAutoApplyChannelResult>();
+            foreach (var channel in channels)
             {
-                results.Add(AiAutoApplyChannelResult.Skipped($"{channel.Name} is not eligible for AI lineups."));
-                continue;
+                if (!IsEligible(new Channel { FilterJson = channel.FilterJson, ContentType = channel.ContentType }))
+                {
+                    results.Add(AiAutoApplyChannelResult.Skipped($"{channel.Name} is not eligible for AI lineups."));
+                    continue;
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+
+                using var scope = _scopeFactory.CreateScope();
+                var service = scope.ServiceProvider.GetRequiredService<AiChannelAutoApplyService>();
+                results.Add(await service.ApplyChannelLineupAsync(channel.Id, cancellationToken));
             }
 
-            cancellationToken.ThrowIfCancellationRequested();
-
-            using var scope = _scopeFactory.CreateScope();
-            var service = scope.ServiceProvider.GetRequiredService<AiChannelAutoApplyService>();
-            results.Add(await service.ApplyChannelLineupAsync(channel.Id, cancellationToken));
+            return results;
         }
-
-        return results;
+        finally
+        {
+            BulkApplyLock.Release();
+        }
     }
 }
 

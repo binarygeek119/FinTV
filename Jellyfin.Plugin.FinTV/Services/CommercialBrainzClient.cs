@@ -1,18 +1,15 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Jellyfin.Plugin.FinTV.Configuration;
+using Jellyfin.Plugin.FinTV.Domain;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.FinTV.Services;
 
 public class CommercialBrainzClient
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true
-    };
+    private static readonly JsonSerializerOptions JsonOptions = FinTvJson.Options;
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<CommercialBrainzClient> _logger;

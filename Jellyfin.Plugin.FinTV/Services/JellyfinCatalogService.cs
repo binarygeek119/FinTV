@@ -77,7 +77,7 @@ public class JellyfinCatalogService
         FilterDefinition? filter = null;
         try
         {
-            filter = JsonSerializer.Deserialize<FilterDefinition>(filterJson);
+            filter = FilterDefinition.Parse(filterJson);
         }
         catch
         {
@@ -529,27 +529,20 @@ public class JellyfinCatalogService
             return;
         }
 
-        try
+        var channelFilter = FilterDefinition.Parse(channel.FilterJson);
+        if (channelFilter is null)
         {
-            var channelFilter = JsonSerializer.Deserialize<FilterDefinition>(channel.FilterJson);
-            if (channelFilter is null)
-            {
-                return;
-            }
-
-            if (!string.IsNullOrWhiteSpace(channelFilter.Genre))
-            {
-                query.Genres = new[] { channelFilter.Genre };
-            }
-
-            if (channelFilter.Tags is { Count: > 0 })
-            {
-                query.Tags = channelFilter.Tags.ToArray();
-            }
+            return;
         }
-        catch
+
+        if (!string.IsNullOrWhiteSpace(channelFilter.Genre))
         {
-            // ignore malformed channel filter
+            query.Genres = new[] { channelFilter.Genre };
+        }
+
+        if (channelFilter.Tags is { Count: > 0 })
+        {
+            query.Tags = channelFilter.Tags.ToArray();
         }
     }
 
@@ -688,23 +681,6 @@ public class JellyfinCatalogService
 
         return items.Select(MapItem).Take(1).ToList();
     }
-}
-
-public class FilterDefinition
-{
-    public string? Genre { get; set; }
-
-    public List<string>? Tags { get; set; }
-
-    public string? TitleContains { get; set; }
-
-    public int? MinYear { get; set; }
-
-    public int? MaxYear { get; set; }
-
-    public string? MinRating { get; set; }
-
-    public string? MaxRating { get; set; }
 }
 
 public class MusicLibraryInfo

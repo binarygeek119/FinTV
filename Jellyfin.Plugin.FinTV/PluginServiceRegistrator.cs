@@ -1,7 +1,10 @@
+using System.Text.Json;
 using Jellyfin.Plugin.FinTV.Data;
+using Jellyfin.Plugin.FinTV.Domain;
 using Jellyfin.Plugin.FinTV.Services;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -17,6 +20,8 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
         _ = applicationHost;
+
+        ConfigureJsonOptions(serviceCollection);
 
         serviceCollection.AddDbContext<FinTvDbContext>((sp, options) =>
         {
@@ -59,5 +64,22 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddHostedService(sp => sp.GetRequiredService<PlayoutBuilderService>());
         serviceCollection.AddHostedService<DatabaseInitializer>();
         serviceCollection.AddSingleton<BlackframeChapterTask>();
+    }
+
+    private static void ConfigureJsonOptions(IServiceCollection serviceCollection)
+    {
+        serviceCollection.Configure<JsonOptions>(options =>
+        {
+            options.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
+            options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+            options.JsonSerializerOptions.AllowTrailingCommas = true;
+        });
+
+        serviceCollection.Configure<Microsoft.AspNetCore.Http.Json.JsonOptions>(options =>
+        {
+            options.SerializerOptions.PropertyNameCaseInsensitive = true;
+            options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+            options.SerializerOptions.AllowTrailingCommas = true;
+        });
     }
 }

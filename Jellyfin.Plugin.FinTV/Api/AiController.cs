@@ -6,6 +6,7 @@ using MediaBrowser.Common.Api;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Jellyfin.Plugin.FinTV.Api;
 
@@ -22,19 +23,22 @@ public class AiController : ControllerBase
     private readonly LlmClientService _llm;
     private readonly FinTvDbContext _db;
     private readonly LineupGeneratorService _playoutGenerator;
+    private readonly IServiceScopeFactory _scopeFactory;
 
     public AiController(
         AiLineupGeneratorService generator,
         AiChannelAutoApplyService autoApply,
         LlmClientService llm,
         FinTvDbContext db,
-        LineupGeneratorService playoutGenerator)
+        LineupGeneratorService playoutGenerator,
+        IServiceScopeFactory scopeFactory)
     {
         _generator = generator;
         _autoApply = autoApply;
         _llm = llm;
         _db = db;
         _playoutGenerator = playoutGenerator;
+        _scopeFactory = scopeFactory;
     }
 
     [HttpGet("settings")]
@@ -286,6 +290,7 @@ public class AiController : ControllerBase
     {
         try
         {
+            using var gate = await ChannelApplyLocks.AcquireAsync(channelId, cancellationToken);
             await _generator.ApplyAsync(
                 channelId,
                 request?.Slots ?? new List<LineupSlotDto>(),
@@ -312,7 +317,9 @@ public class AiController : ControllerBase
             return BadRequest(new { message = "AI lineup generation is disabled." });
         }
 
-        var results = await _autoApply.ApplyToAllEligibleChannelsAsync(cancellationToken);
+        using var scope = _scopeFactory.CreateScope();
+        var autoApply = scope.ServiceProvider.GetRequiredService<AiChannelAutoApplyService>();
+        var results = await autoApply.ApplyToAllEligibleChannelsAsync(cancellationToken);
         return Ok(new
         {
             results = results.Select(r => new

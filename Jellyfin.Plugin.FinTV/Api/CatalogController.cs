@@ -124,7 +124,7 @@ public class CatalogController : ControllerBase
             ContentType = contentType ?? ChannelContentType.TvShow,
             FilterJson = string.IsNullOrWhiteSpace(tag)
                 ? null
-                : System.Text.Json.JsonSerializer.Serialize(new { tags = new[] { tag } }),
+                : FinTvJson.Serialize(new { tags = new[] { tag } }),
             CatalogMode = catalogMode
         };
 

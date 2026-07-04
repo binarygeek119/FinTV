@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 namespace Jellyfin.Plugin.FinTV.Domain;
 
 /// <summary>
@@ -30,8 +28,8 @@ public static class ChannelPresets
     /// </summary>
     public static IReadOnlyList<ChannelPresetDefinition> All { get; } =
     [
-        Preset(119, 119.1m, "FlashBack TV", ChannelContentType.TvShow, "TV Shows", "1970–2010 TV and movies (first-episode year for series)", "fintv-flashback", "Shows/FlashBack_TV.png", catalogMode: ChannelCatalogMode.Mixed),
-        Preset(120, 119.2m, "Retro TV", ChannelContentType.TvShow, "TV Shows", "1910–1969 TV and movies (first-episode year for series)", "fintv-retro", "Shows/Retro_TV.png", catalogMode: ChannelCatalogMode.Mixed),
+        Preset(119, 119.1m, "FlashBack TV", ChannelContentType.TvShow, "TV Shows", "1970–2010 TV and movies (first-episode year for series)", "fintv-flashback", "Shows/FlashBack_TV.png", catalogMode: ChannelCatalogMode.Mixed, minYear: 1970, maxYear: 2010),
+        Preset(120, 119.2m, "Retro TV", ChannelContentType.TvShow, "TV Shows", "1910–1969 TV and movies (first-episode year for series)", "fintv-retro", "Shows/Retro_TV.png", catalogMode: ChannelCatalogMode.Mixed, minYear: 1910, maxYear: 1969),
         Preset(121, 119.3m, "[OpenSwim]", ChannelContentType.TvShow, "TV Shows", "Kids and teen shows and movies only", "fintv-open-swim", "Shows/[open_swim].png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(122, 119.4m, "Flip Television", ChannelContentType.TvShow, "TV Shows", "Reality TV themed shows and movies", "fintv-reality", "Shows/Flip_Television.png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(123, 119.5m, "BinaryGeek119 News", ChannelContentType.TvShow, "TV Shows", "News", "fintv-news", logoPath: null),
@@ -70,7 +68,9 @@ public static class ChannelPresets
         string? logoPath,
         bool useLogo = true,
         bool weather = false,
-        ChannelCatalogMode? catalogMode = null)
+        ChannelCatalogMode? catalogMode = null,
+        int? minYear = null,
+        int? maxYear = null)
     {
         return new ChannelPresetDefinition
         {
@@ -84,10 +84,25 @@ public static class ChannelPresets
             LibraryTag = libraryTag,
             LogoRelativePath = logoPath,
             UseBinarygeek119Logo = useLogo,
-            FilterJson = JsonSerializer.Serialize(new { tags = new[] { libraryTag } }),
+            FilterJson = BuildFilterJson(libraryTag, minYear, maxYear),
             IsWeatherChannel = weather,
             CatalogMode = catalogMode ?? ChannelAiRules.GetByLibraryTag(libraryTag)?.DefaultCatalogMode
         };
+    }
+
+    private static string BuildFilterJson(string libraryTag, int? minYear, int? maxYear)
+    {
+        if (minYear.HasValue || maxYear.HasValue)
+        {
+            return FinTvJson.Serialize(new
+            {
+                tags = new[] { libraryTag },
+                minYear,
+                maxYear
+            });
+        }
+
+        return FinTvJson.Serialize(new { tags = new[] { libraryTag } });
     }
 }
 

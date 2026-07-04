@@ -55,12 +55,25 @@ public class LineupService
     {
         var lineup = await _db.Lineups
             .Include(l => l.Slots)
-                .ThenInclude(s => s.Candidates)
             .FirstOrDefaultAsync(l => l.ChannelId == channelId && l.IsDefault, cancellationToken)
             ?? throw new InvalidOperationException("Default lineup not found.");
 
-        ReplaceSlots(lineup.Slots, slots, lineupId: lineup.Id, overrideId: null);
-        await _db.SaveChangesAsync(cancellationToken);
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            try
+            {
+                await ReplaceSlotsAsync(lineup.Slots, slots, lineupId: lineup.Id, overrideId: null, cancellationToken);
+                return;
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < 2)
+            {
+                _db.ChangeTracker.Clear();
+                lineup = await _db.Lineups
+                    .Include(l => l.Slots)
+                    .FirstOrDefaultAsync(l => l.Id == lineup.Id, cancellationToken)
+                    ?? throw new InvalidOperationException("Default lineup not found.");
+            }
+        }
     }
 
     public async Task<LineupOverride> CreateOverrideAsync(Guid channelId, LineupOverrideDto dto, CancellationToken cancellationToken = default)
@@ -104,9 +117,110 @@ public class LineupService
         entity.SpecificDate = dto.SpecificDate;
         entity.Name = dto.Name;
 
-        ReplaceSlots(entity.Slots, dto.Slots, lineupId: null, overrideId: entity.Id);
-        await _db.SaveChangesAsync(cancellationToken);
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            try
+            {
+                await ReplaceSlotsAsync(entity.Slots, dto.Slots, lineupId: null, overrideId: entity.Id, cancellationToken);
+                return entity;
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < 2)
+            {
+                _db.ChangeTracker.Clear();
+                entity = await _db.LineupOverrides
+                    .Include(o => o.Slots)
+                        .ThenInclude(s => s.Candidates)
+                    .FirstOrDefaultAsync(o => o.Id == overrideId, cancellationToken);
+                if (entity is null)
+                {
+                    return null;
+                }
+
+                entity.Kind = dto.Kind;
+                entity.DayOfWeek = dto.DayOfWeek;
+                entity.SpecificDate = dto.SpecificDate;
+                entity.Name = dto.Name;
+            }
+        }
+
         return entity;
+    }
+
+    private async Task ReplaceSlotsAsync(
+        ICollection<LineupSlot> existingCollection,
+        IReadOnlyList<LineupSlotDto> incoming,
+        Guid? lineupId,
+        Guid? overrideId,
+        CancellationToken cancellationToken)
+    {
+        if (lineupId.HasValue)
+        {
+            var slotIds = await _db.LineupSlots
+                .Where(s => s.LineupId == lineupId.Value)
+                .Select(s => s.Id)
+                .ToListAsync(cancellationToken);
+
+            if (slotIds.Count > 0)
+            {
+                await _db.SlotCandidates
+                    .Where(c => slotIds.Contains(c.LineupSlotId))
+                    .ExecuteDeleteAsync(cancellationToken);
+            }
+
+            await _db.LineupSlots
+                .Where(s => s.LineupId == lineupId.Value)
+                .ExecuteDeleteAsync(cancellationToken);
+
+            DetachTrackedLineupSlots(lineupId: lineupId.Value, overrideId: null);
+        }
+        else if (overrideId.HasValue)
+        {
+            var slotIds = await _db.LineupSlots
+                .Where(s => s.LineupOverrideId == overrideId.Value)
+                .Select(s => s.Id)
+                .ToListAsync(cancellationToken);
+
+            if (slotIds.Count > 0)
+            {
+                await _db.SlotCandidates
+                    .Where(c => slotIds.Contains(c.LineupSlotId))
+                    .ExecuteDeleteAsync(cancellationToken);
+            }
+
+            await _db.LineupSlots
+                .Where(s => s.LineupOverrideId == overrideId.Value)
+                .ExecuteDeleteAsync(cancellationToken);
+
+            DetachTrackedLineupSlots(lineupId: null, overrideId: overrideId.Value);
+        }
+
+        existingCollection.Clear();
+
+        foreach (var dto in incoming.OrderBy(s => s.SlotIndex))
+        {
+            var slot = MapSlot(dto, lineupId, overrideId);
+            existingCollection.Add(slot);
+            _db.LineupSlots.Add(slot);
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+    }
+
+    private void DetachTrackedLineupSlots(Guid? lineupId, Guid? overrideId)
+    {
+        foreach (var entry in _db.ChangeTracker.Entries<LineupSlot>()
+            .Where(entry => lineupId.HasValue
+                ? entry.Entity.LineupId == lineupId.Value
+                : entry.Entity.LineupOverrideId == overrideId)
+            .ToList())
+        {
+            entry.State = EntityState.Detached;
+        }
+
+        foreach (var entry in _db.ChangeTracker.Entries<SlotCandidate>().ToList())
+        {
+            entry.State = EntityState.Detached;
+        }
     }
 
     public async Task<bool> DeleteOverrideAsync(Guid overrideId, CancellationToken cancellationToken = default)
@@ -164,18 +278,6 @@ public class LineupService
         if (channel?.ContentType == ChannelContentType.Weather)
         {
             throw new InvalidOperationException("Lineup overrides are not supported on weather channels.");
-        }
-    }
-
-    private void ReplaceSlots(ICollection<LineupSlot> existing, IReadOnlyList<LineupSlotDto> incoming, Guid? lineupId, Guid? overrideId)
-    {
-        _db.RemoveRange(existing);
-        existing.Clear();
-
-        foreach (var dto in incoming.OrderBy(s => s.SlotIndex))
-        {
-            var slot = MapSlot(dto, lineupId, overrideId);
-            existing.Add(slot);
         }
     }
 

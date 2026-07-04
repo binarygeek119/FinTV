@@ -160,7 +160,11 @@ public static class ChannelAiRules
     /// <param name="channel">Channel entity.</param>
     /// <returns>Year constraints or null.</returns>
     public static ChannelCatalogYearConstraints? GetYearConstraints(Channel channel)
-        => GetYearConstraints(ExtractLibraryTag(channel.FilterJson));
+    {
+        var fromTag = GetYearConstraints(ExtractLibraryTag(channel.FilterJson));
+        var fromFilter = GetYearConstraintsFromFilter(channel.FilterJson);
+        return fromTag ?? fromFilter;
+    }
 
     /// <summary>
     /// Gets optional genre/theme constraints for catalog and AI filtering.
@@ -252,21 +256,27 @@ public static class ChannelAiRules
     /// <param name="filterJson">Channel filter JSON.</param>
     /// <returns>Library tag or null.</returns>
     public static string? ExtractLibraryTag(string? filterJson)
+        => FilterDefinition.ExtractFintvLibraryTag(filterJson);
+
+    /// <summary>
+    /// Gets year constraints encoded directly in channel filter JSON.
+    /// </summary>
+    /// <param name="filterJson">Channel filter JSON.</param>
+    /// <returns>Year constraints or null.</returns>
+    public static ChannelCatalogYearConstraints? GetYearConstraintsFromFilter(string? filterJson)
     {
-        if (string.IsNullOrWhiteSpace(filterJson))
+        var filter = FilterDefinition.Parse(filterJson);
+        if (filter?.MinYear is null && filter?.MaxYear is null)
         {
             return null;
         }
 
-        try
+        return new ChannelCatalogYearConstraints
         {
-            var filter = System.Text.Json.JsonSerializer.Deserialize<FilterTagsOnly>(filterJson);
-            return filter?.Tags?.FirstOrDefault(t => t.StartsWith("fintv-", StringComparison.OrdinalIgnoreCase));
-        }
-        catch
-        {
-            return null;
-        }
+            MinYear = filter.MinYear ?? 1888,
+            MaxYear = filter.MaxYear ?? DateTime.UtcNow.Year + 1,
+            UseFirstEpisodeYearForSeries = true
+        };
     }
 
     /// <summary>
@@ -274,11 +284,6 @@ public static class ChannelAiRules
     /// </summary>
     public static bool IsExcludedFromAi(string? libraryTag)
         => string.Equals(libraryTag, "fintv-news", StringComparison.OrdinalIgnoreCase);
-
-    private sealed class FilterTagsOnly
-    {
-        public List<string>? Tags { get; set; }
-    }
 }
 
 /// <summary>

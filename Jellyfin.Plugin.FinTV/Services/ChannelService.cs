@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Jellyfin.Plugin.FinTV.Data;
 using Jellyfin.Plugin.FinTV.Domain;
 using Microsoft.EntityFrameworkCore;
@@ -126,7 +125,7 @@ public class ChannelService
             return;
         }
 
-        channel.PlayoutAnchorJson = JsonSerializer.Serialize(anchor);
+        channel.PlayoutAnchorJson = FinTvJson.Serialize(anchor);
         await _db.SaveChangesAsync(cancellationToken);
     }
 
@@ -138,7 +137,7 @@ public class ChannelService
             return default;
         }
 
-        return JsonSerializer.Deserialize<T>(channel.PlayoutAnchorJson);
+        return FinTvJson.Deserialize<T>(channel.PlayoutAnchorJson);
     }
 
     private static decimal NormalizeChannelNumber(decimal number)

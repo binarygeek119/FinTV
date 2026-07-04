@@ -1,7 +1,6 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Jellyfin.Plugin.FinTV.Configuration;
 using Jellyfin.Plugin.FinTV.Domain;
 using Microsoft.Extensions.Logging;
@@ -10,11 +9,7 @@ namespace Jellyfin.Plugin.FinTV.Services;
 
 public class LlmClientService
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-    };
+    private static readonly JsonSerializerOptions JsonOptions = FinTvJson.Options;
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<LlmClientService> _logger;

@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Jellyfin.Plugin.FinTV.Configuration;
 using Jellyfin.Plugin.FinTV.Data;
 using Jellyfin.Plugin.FinTV.Domain;
@@ -9,11 +8,7 @@ namespace Jellyfin.Plugin.FinTV.Services;
 
 public class AiLineupGeneratorService
 {
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-    };
+    private static readonly JsonSerializerOptions JsonOptions = FinTvJson.Options;
 
     private readonly FinTvDbContext _db;
     private readonly AiCatalogManifestBuilder _manifestBuilder;
@@ -89,7 +84,13 @@ public class AiLineupGeneratorService
 
         var validIds = manifest.Catalog.Select(c => c.Id).ToHashSet();
         var catalogById = manifest.Catalog.ToDictionary(c => c.Id);
-        var slots = ValidateAndBuildSlots(aiResponse.Slots, validIds, catalogById, channel.FilterJson);
+        var yearConstraints = ChannelAiRules.GetYearConstraints(channel);
+        var slots = ValidateAndBuildSlots(
+            aiResponse.Slots,
+            validIds,
+            catalogById,
+            channel.FilterJson,
+            yearConstraints);
 
         return BuildPreview(channel, slots, manifest, provider, playoutTemplate);
     }
@@ -103,6 +104,7 @@ public class AiLineupGeneratorService
     {
         EnsureAiEnabled();
         await _lineups.UpdateDefaultSlotsAsync(channelId, NormalizeSlots(slots), cancellationToken);
+        _db.ChangeTracker.Clear();
 
         if (!rebuildPlayout)
         {
@@ -187,7 +189,8 @@ public class AiLineupGeneratorService
         List<AiGeneratedSlot>? aiSlots,
         HashSet<Guid> validIds,
         Dictionary<Guid, AiCatalogEntry> catalogById,
-        string? channelFilterJson)
+        string? channelFilterJson,
+        ChannelCatalogYearConstraints? yearConstraints)
     {
         var occupied = new bool[48];
         var result = ChannelService.CreateEmptySlots()
@@ -220,10 +223,16 @@ public class AiLineupGeneratorService
 
             if (catalogById.TryGetValue(candidateId.Value, out var entry))
             {
-                span = Math.Clamp(
-                    aiSlot.SpanSlots ?? ComputeSpanFromRuntime(entry.RuntimeMinutes),
-                    1,
-                    8);
+                if (yearConstraints is not null
+                    && entry.Year.HasValue
+                    && !yearConstraints.ContainsYear(entry.Year))
+                {
+                    continue;
+                }
+
+                span = entry.RuntimeMinutes > 0
+                    ? ComputeSpanFromRuntime(entry.RuntimeMinutes)
+                    : Math.Clamp(aiSlot.SpanSlots ?? 1, 1, 8);
                 if (aiSlot.SlotIndex + span > 48)
                 {
                     span = 48 - aiSlot.SlotIndex;
@@ -365,7 +374,8 @@ public class AiLineupGeneratorService
             {"slots":[{"slotIndex":0,"spanSlots":1,"jellyfinItemId":"guid"}, ...]}
             Rules:
             - Only use jellyfinItemId values from the provided catalog
-            - spanSlots = number of consecutive 30-minute blocks (1-8). Use longer spans for movies.
+            - spanSlots = number of consecutive 30-minute blocks (1-8). Use ceil(runtimeMinutes / 30) for movies and long episodes.
+            - Assign enough spanSlots to cover the item runtime; under-sized spans truncate content during playout.
             - Do not overlap spans. slotIndex + spanSlots must be <= 48.
             - Vary content across dayparts; avoid repeating the same title in adjacent blocks.
             - Catalog modes: TvOnly (series), MovieOnly, Mixed (TV+movies), MusicVideoOnly (music videos).

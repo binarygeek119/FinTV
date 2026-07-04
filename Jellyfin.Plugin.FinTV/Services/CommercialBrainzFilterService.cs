@@ -153,7 +153,7 @@ public class CommercialBrainzFilterService
             Network = video.Network,
             ChannelName = video.ChannelName,
             AgeLimit = classification.AgeLimit,
-            TagsJson = tags.Count == 0 ? null : JsonSerializer.Serialize(tags),
+            TagsJson = tags.Count == 0 ? null : FinTvJson.Serialize(tags),
             IsBanned = classification.IsBanned,
             IsAdultRated = classification.IsAdultRated,
             IsLateNight = classification.IsLateNight,
