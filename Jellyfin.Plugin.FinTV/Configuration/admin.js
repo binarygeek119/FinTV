@@ -243,6 +243,18 @@
                 && !responseText);
     }
 
+    function normalizeApiResponseData(data) {
+        if (data == null || data === '') {
+            return null;
+        }
+
+        if (typeof data === 'object') {
+            return normalizeApiResponse(data);
+        }
+
+        return normalizeApiResponse(parseApiJsonBody(data));
+    }
+
     function ajaxViaApiClient(ajaxOptions) {
         return new Promise((resolve, reject) => {
             let settled = false;
@@ -255,17 +267,21 @@
                 action(value);
             };
 
-            ajaxOptions.success = (data, _textStatus, xhr) => {
-                if (xhr.status === 204 || data == null || data === '') {
+            const handleSuccess = (data, statusCode) => {
+                if (statusCode === 204 || data == null || data === '') {
                     finish(resolve, null);
                     return;
                 }
 
                 try {
-                    finish(resolve, normalizeApiResponse(parseApiJsonBody(data)));
+                    finish(resolve, normalizeApiResponseData(data));
                 } catch (parseErr) {
                     finish(reject, parseErr);
                 }
+            };
+
+            ajaxOptions.success = (data, _textStatus, xhr) => {
+                handleSuccess(data, xhr && xhr.status);
             };
 
             ajaxOptions.error = (xhr, textStatus) => {
@@ -287,7 +303,13 @@
             }
 
             if (ajaxResult && typeof ajaxResult.then === 'function') {
-                ajaxResult.catch(async (err) => {
+                ajaxResult.then((data) => {
+                    if (settled) {
+                        return;
+                    }
+
+                    handleSuccess(data);
+                }).catch(async (err) => {
                     if (settled) {
                         return;
                     }
@@ -339,6 +361,13 @@
         if (body) {
             fetchOptions.headers['Content-Type'] = 'application/json';
             fetchOptions.body = body;
+        }
+
+        if (typeof ApiClient !== 'undefined' && typeof ApiClient.accessToken === 'function') {
+            const token = ApiClient.accessToken();
+            if (token) {
+                fetchOptions.headers['X-Emby-Token'] = token;
+            }
         }
 
         return fetch(url, fetchOptions).then(async (res) => {
@@ -849,7 +878,8 @@
 
     async function saveChannel(e) {
         e.preventDefault();
-        if (!syncConfigPage()) {
+        syncConfigPageFromEvent(e);
+        if (!configPage) {
             toast('FinTV admin page is not ready. Close and reopen FinTV settings.', 'error');
             return;
         }
@@ -2498,6 +2528,29 @@
         }
     }
 
+    function normalizeConfigPageRoot(node) {
+        if (!node) {
+            return null;
+        }
+
+        if (node.id === 'FinTVConfigPage') {
+            return node;
+        }
+
+        if (typeof node.querySelector === 'function') {
+            const nested = node.querySelector('#FinTVConfigPage');
+            if (nested) {
+                return nested;
+            }
+        }
+
+        if (typeof node.closest === 'function') {
+            return node.closest('#FinTVConfigPage');
+        }
+
+        return null;
+    }
+
     function syncConfigPage(preferred) {
         const resolved = resolveConfigPage(preferred || configPage);
         if (resolved) {
@@ -2505,6 +2558,16 @@
         }
 
         return configPage;
+    }
+
+    function syncConfigPageFromEvent(event) {
+        const page = normalizeConfigPageRoot(event && event.target);
+        if (page) {
+            configPage = page;
+            return page;
+        }
+
+        return syncConfigPage();
     }
 
     function switchTab(name) {
@@ -2673,6 +2736,8 @@
     }
 
     function resolveConfigPage(preferred) {
+        preferred = normalizeConfigPageRoot(preferred);
+
         if (isActiveConfigPage(preferred)) {
             return preferred;
         }
@@ -2684,7 +2749,11 @@
             }
         }
 
-        return null;
+        if (preferred && document.contains(preferred)) {
+            return preferred;
+        }
+
+        return pages.length ? pages[pages.length - 1] : null;
     }
 
     function bootFinTvAdmin(page) {
