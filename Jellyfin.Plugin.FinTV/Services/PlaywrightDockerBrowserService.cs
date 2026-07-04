@@ -25,6 +25,16 @@ public class PlaywrightDockerBrowserService
 
     public string CdpEndpoint => $"http://127.0.0.1:{DefaultCdpPort}";
 
+    public async Task<bool> IsDockerAvailableAsync(CancellationToken cancellationToken = default)
+    {
+        var result = await Cli.Wrap("docker")
+            .WithArguments(["version", "--format", "{{.Server.Version}}"])
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteBufferedAsync(cancellationToken);
+
+        return result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.StandardOutput);
+    }
+
     public async Task EnsureBrowserReadyAsync(CancellationToken cancellationToken = default)
     {
         await ContainerLock.WaitAsync(cancellationToken);

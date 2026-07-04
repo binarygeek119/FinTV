@@ -32,11 +32,14 @@ stat -c '%g' /var/run/docker.sock
 
 Use that value in `group_add` in compose.
 
+3. Set `shm_size: "1gb"` so Playwright Chromium can start inside the Jellyfin container
+4. Add `extra_hosts: ["host.docker.internal:host-gateway"]` when using local ws4kp/ws3kp URLs
+
 ## FinTV behavior with this image
 
 | Feature | How it works |
 |---------|----------------|
-| Weather channel capture | Uses baked-in Chromium and .NET Playwright driver (`PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`, `PLAYWRIGHT_DRIVER_SEARCH_PATH=/opt/playwright-driver`; no plugin `.playwright/node` or sidecar) |
+| Weather channel capture | Uses baked-in Chromium (`chrome-linux/chrome`, not headless_shell). If that fails, falls back to the `fintv-playwright-chromium` Docker sidecar (requires docker.sock). |
 | Weather tab Docker buttons | Uses in-container `docker` CLI against the mounted host socket |
 | FinTV plugin install | Install from the FinTV catalog as usual; not bundled in this image |
 

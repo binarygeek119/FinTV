@@ -50,29 +50,52 @@ public class PlaywrightRuntimeService
 
     /// <summary>
     /// Connects to a browser using Docker CDP on Linux or a local launch on Windows.
+    /// Falls back to the Docker CDP sidecar when baked-in Chromium crashes inside a container.
     /// </summary>
     /// <param name="playwright">Playwright instance.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Connected browser.</returns>
-    public async Task<IBrowser> ConnectBrowserAsync(IPlaywright playwright, CancellationToken cancellationToken = default)
+    /// <returns>Connected browser and whether it uses the shared Docker CDP sidecar.</returns>
+    public async Task<(IBrowser Browser, bool SharedDockerCdp)> ConnectBrowserAsync(
+        IPlaywright playwright,
+        CancellationToken cancellationToken = default)
     {
         if (UsesDockerBrowser)
         {
             await _dockerBrowser.EnsureBrowserReadyAsync(cancellationToken);
             _logger.LogDebug("Connecting to Playwright Docker browser at {CdpEndpoint}", _dockerBrowser.CdpEndpoint);
-            return await playwright.Chromium.ConnectOverCDPAsync(_dockerBrowser.CdpEndpoint);
+            var browser = await playwright.Chromium.ConnectOverCDPAsync(_dockerBrowser.CdpEndpoint);
+            return (browser, true);
         }
 
-        return await playwright.Chromium.LaunchAsync(CreateLaunchOptions());
+        try
+        {
+            var browser = await playwright.Chromium.LaunchAsync(CreateLaunchOptions());
+            return (browser, false);
+        }
+        catch (PlaywrightException ex)
+        {
+            if (!await _dockerBrowser.IsDockerAvailableAsync(cancellationToken))
+            {
+                throw;
+            }
+
+            _logger.LogWarning(
+                ex,
+                "Local Playwright Chromium failed inside Jellyfin; falling back to Docker CDP browser sidecar");
+            await _dockerBrowser.EnsureBrowserReadyAsync(cancellationToken);
+            var fallbackBrowser = await playwright.Chromium.ConnectOverCDPAsync(_dockerBrowser.CdpEndpoint);
+            return (fallbackBrowser, true);
+        }
     }
 
     /// <summary>
     /// Releases a browser connection without stopping the shared Docker Chromium process.
     /// </summary>
     /// <param name="browser">Browser to release.</param>
-    public async Task ReleaseBrowserAsync(IBrowser browser)
+    /// <param name="sharedDockerCdp">Whether the browser came from the shared Docker CDP sidecar.</param>
+    public async Task ReleaseBrowserAsync(IBrowser browser, bool sharedDockerCdp = false)
     {
-        if (UsesDockerBrowser)
+        if (UsesDockerBrowser || sharedDockerCdp)
         {
             foreach (var context in browser.Contexts.ToArray())
             {
@@ -92,9 +115,12 @@ public class PlaywrightRuntimeService
     /// <returns>Adjusted URL when Docker mode is active.</returns>
     public string AdjustWeatherPageUrlForRuntime(string url)
     {
-        return UsesDockerBrowser
-            ? PlaywrightDockerBrowserService.AdjustWeatherPageUrlForDocker(url)
-            : url;
+        if (ShouldRewriteLocalhostForDocker(url))
+        {
+            return PlaywrightDockerBrowserService.AdjustWeatherPageUrlForDocker(url);
+        }
+
+        return url;
     }
 
     /// <summary>
@@ -108,7 +134,7 @@ public class PlaywrightRuntimeService
             Headless = true
         };
 
-        if (OperatingSystem.IsLinux() && !UsesDockerBrowser)
+        if (OperatingSystem.IsLinux())
         {
             options.Args =
             [
@@ -117,9 +143,62 @@ public class PlaywrightRuntimeService
                 "--disable-dev-shm-usage",
                 "--disable-gpu"
             ];
+
+            var chromeExecutable = ResolveBundledChromeExecutable();
+            if (chromeExecutable is not null)
+            {
+                options.ExecutablePath = chromeExecutable;
+                _logger.LogDebug("Using bundled Playwright Chrome executable at {ExecutablePath}", chromeExecutable);
+            }
         }
 
         return options;
+    }
+
+    private static bool ShouldRewriteLocalhostForDocker(string url)
+    {
+        if (UsesDockerBrowserFlag())
+        {
+            return true;
+        }
+
+        if (!File.Exists("/.dockerenv"))
+        {
+            return false;
+        }
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        return uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)
+            || uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase)
+            || uri.Host.Equals("::1", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool UsesDockerBrowserFlag()
+        => OperatingSystem.IsLinux()
+            && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH"));
+
+    private static string? ResolveBundledChromeExecutable()
+    {
+        var browsersPath = Environment.GetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH");
+        if (string.IsNullOrWhiteSpace(browsersPath) || !Directory.Exists(browsersPath))
+        {
+            return null;
+        }
+
+        foreach (var chromiumDir in Directory.EnumerateDirectories(browsersPath, "chromium-*"))
+        {
+            var chrome = Path.Combine(chromiumDir, "chrome-linux", "chrome");
+            if (File.Exists(chrome))
+            {
+                return chrome;
+            }
+        }
+
+        return null;
     }
 
     private void ConfigureEnvironment()

@@ -78,6 +78,10 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     PLAYWRIGHT_DRIVER_SEARCH_PATH=/opt/playwright-driver \
     FINTV_DOCKER_READY=1
 
+RUN chown -R jellyfin:jellyfin /ms-playwright /opt/playwright-driver
+
+USER jellyfin
+
 LABEL org.opencontainers.image.title="Jellyfin Unstable (FinTV-ready)" \
       org.opencontainers.image.description="Official jellyfin/jellyfin:unstable with Docker CLI 29.5.2, Playwright Chromium, and .NET Playwright driver for FinTV" \
       org.opencontainers.image.source="https://github.com/binarygeek119/FinTV" \

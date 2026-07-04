@@ -56,10 +56,11 @@ public class WeatherStarChannelService
         var backgroundMusicPath = _ebs.ResolveBackgroundMusicPath();
 
         IBrowser? browser = null;
+        var sharedDockerCdp = false;
         try
         {
             using var playwright = await _playwrightRuntime.CreateAsync(cancellationToken);
-            browser = await _playwrightRuntime.ConnectBrowserAsync(playwright, cancellationToken);
+            (browser, sharedDockerCdp) = await _playwrightRuntime.ConnectBrowserAsync(playwright, cancellationToken);
             await using var context = await browser.NewContextAsync(new BrowserNewContextOptions
             {
                 ViewportSize = new ViewportSize { Width = width, Height = height }
@@ -107,7 +108,7 @@ public class WeatherStarChannelService
         {
             if (browser is not null)
             {
-                await _playwrightRuntime.ReleaseBrowserAsync(browser);
+                await _playwrightRuntime.ReleaseBrowserAsync(browser, sharedDockerCdp);
             }
         }
     }

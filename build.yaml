@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.69"
+version: "0.0.2.70"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -81,6 +81,7 @@ artifacts:
   - "tools/yt-dlp/win-x64/yt-dlp.exe"
   - "scripts/install-docker-cli-jellyfin.sh"
 changelog: |-
+  - Fix WeatherStar on FinTV Jellyfin Docker by launching full Chromium instead of headless_shell and falling back to the Playwright CDP sidecar when needed
   - Fix plugin logo.png file lock during updates by serving the icon from an embedded DLL resource instead of a disk file
   - Broaden Hero TV to anyone who saves or protects people (first responders, doctors, rescuers, not just superheroes)
   - Hero TV matches hero content by genre, plot/overview, title, or Jellyfin tags; includes TV series
