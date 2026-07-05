@@ -16,12 +16,12 @@ COPY scripts/yt-dlp-version.txt /tmp/yt-dlp-version.txt
 
 # Match host Docker Engine API (static CLI, not distro docker.io package).
 # Install yt-dlp standalone binary for CommercialBrainz YouTube commercial streaming.
-# Install fpcalc (chromaprint-tools) for audio fingerprinting.
+# Install fpcalc (libchromaprint-tools) for audio fingerprinting.
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         ca-certificates \
-        chromaprint-tools \
         curl \
+        libchromaprint-tools \
     && YTDLP_VERSION="$(tr -d '\r\n' < /tmp/yt-dlp-version.txt)" \
     && case "${TARGETARCH:-amd64}" in \
         amd64) docker_arch="x86_64"; ytdlp_asset="yt-dlp_linux" ;; \

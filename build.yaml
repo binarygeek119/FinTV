@@ -78,7 +78,7 @@ artifacts:
   - "logos/binarygeek119/Weather/WeatherStar4000.png"
   - "scripts/install-docker-cli-jellyfin.sh"
 changelog: |-
-  - Add fpcalc (chromaprint-tools) to FinTV Jellyfin Docker image for audio fingerprinting
+  - Add fpcalc (libchromaprint-tools) to FinTV Jellyfin Docker image for audio fingerprinting
   - Remove baked-in Playwright Chromium from FinTV Jellyfin Docker image; weather uses fintv-playwright-chromium sidecar only
   - Add Weather tab option to auto-set wide=true for 16:9 weather channels (wide=false for 4:3)
   - Move yt-dlp from the plugin zip into the FinTV Jellyfin Docker image (/usr/local/bin/yt-dlp)

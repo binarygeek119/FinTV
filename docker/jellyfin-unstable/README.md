@@ -4,7 +4,7 @@ Custom Docker image extending official [`jellyfin/jellyfin:unstable`](https://hu
 
 - **Docker CLI 29.5.2** (static binary from download.docker.com, matches Docker Engine 29.x API 1.54)
 - **yt-dlp** at `/usr/local/bin/yt-dlp` (CommercialBrainz YouTube commercial streaming)
-- **fpcalc** at `/usr/bin/fpcalc` (`chromaprint-tools`, audio fingerprinting)
+- **fpcalc** at `/usr/bin/fpcalc` (`libchromaprint-tools`, audio fingerprinting)
 - **Automatic rebuilds** published to GHCR when upstream Jellyfin unstable changes
 
 Weather channel capture uses a separate **`fintv-playwright-chromium`** container (Playwright's official image). This Jellyfin image does not bundle Chromium.
@@ -43,7 +43,7 @@ Use that value in `group_add` in compose.
 |---------|----------------|
 | Weather channel capture | Starts `fintv-playwright-chromium` via Docker and connects over CDP (requires docker.sock) |
 | CommercialBrainz YouTube ads | Uses `yt-dlp` from `/usr/local/bin/yt-dlp` in this image |
-| Audio fingerprinting | Uses `fpcalc` from `/usr/bin/fpcalc` (`chromaprint-tools`) |
+| Audio fingerprinting | Uses `fpcalc` from `/usr/bin/fpcalc` (`libchromaprint-tools`) |
 | Weather tab Docker buttons | Uses in-container `docker` CLI against the mounted host socket |
 | FinTV plugin install | Install from the FinTV catalog as usual; not bundled in this image |
 
