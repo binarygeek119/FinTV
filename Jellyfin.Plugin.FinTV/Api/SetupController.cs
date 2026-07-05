@@ -55,6 +55,8 @@ public class SetupController : ControllerBase
             ebsBackgroundMusicLibraryName = Plugin.Instance?.Configuration.EbsBackgroundMusicLibraryName ?? "Background Music",
             ebsBackgroundMusicLibraryId = Plugin.Instance?.Configuration.EbsBackgroundMusicLibraryId ?? string.Empty,
             weatherStarBaseUrl = Plugin.Instance?.Configuration.WeatherStarBaseUrl ?? WeatherStarChannelService.DefaultWeatherStarBaseUrl,
+            autoStartPlaywrightDockerSidecar = Plugin.Instance?.Configuration.AutoStartPlaywrightDockerSidecar ?? false,
+            autoStartWeatherStarDocker = Plugin.Instance?.Configuration.AutoStartWeatherStarDocker ?? false,
             playoutDaysToBuild = PlayoutScheduleHelper.GetPlayoutDaysToBuild(),
             ws4kpHostPort = Plugin.Instance?.Configuration.Ws4kp.HostPort ?? 8080,
             ws4kpImage = Plugin.Instance?.Configuration.Ws4kp.Image ?? "ghcr.io/netbymatt/ws4kp",
@@ -100,6 +102,16 @@ public class SetupController : ControllerBase
         if (request.WeatherStarBaseUrl is not null)
         {
             plugin.Configuration.WeatherStarBaseUrl = WeatherStarChannelService.NormalizeWeatherStarBaseUrl(request.WeatherStarBaseUrl);
+        }
+
+        if (request.AutoStartPlaywrightDockerSidecar.HasValue)
+        {
+            plugin.Configuration.AutoStartPlaywrightDockerSidecar = request.AutoStartPlaywrightDockerSidecar.Value;
+        }
+
+        if (request.AutoStartWeatherStarDocker.HasValue)
+        {
+            plugin.Configuration.AutoStartWeatherStarDocker = request.AutoStartWeatherStarDocker.Value;
         }
 
         plugin.SaveConfiguration();
@@ -155,6 +167,16 @@ public class SetupSettingsRequest
     /// Gets or sets the WeatherStar 4000 base URL used by weather channels.
     /// </summary>
     public string? WeatherStarBaseUrl { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether the Playwright Docker CDP sidecar starts during Jellyfin startup.
+    /// </summary>
+    public bool? AutoStartPlaywrightDockerSidecar { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether the self-hosted WeatherStar Docker container starts during Jellyfin startup.
+    /// </summary>
+    public bool? AutoStartWeatherStarDocker { get; set; }
 }
 
 /// <summary>

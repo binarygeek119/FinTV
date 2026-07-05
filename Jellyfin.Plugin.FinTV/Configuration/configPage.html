@@ -456,6 +456,18 @@
                     </div>
                 </div>
                 <div class="card section-card">
+                    <h3>Docker startup</h3>
+                    <p class="hint">Pre-start containers when Jellyfin boots so the first weather tune does not wait on image pulls. Runs in the background a few seconds after startup.</p>
+                    <label class="field checkbox-field">
+                        <input type="checkbox" id="weather-auto-start-playwright" class="emby-checkbox">
+                        <span>Auto-start Playwright Chromium sidecar (<code>fintv-playwright-chromium</code>) on Jellyfin startup</span>
+                    </label>
+                    <label class="field checkbox-field">
+                        <input type="checkbox" id="weather-auto-start-ws4kp" class="emby-checkbox">
+                        <span>Auto-start WeatherStar Docker on Jellyfin startup (ws4kp or ws3kp matching your base URL; ws4kp if URL is not local)</span>
+                    </label>
+                </div>
+                <div class="card section-card">
                     <h3>WeatherStar base URL</h3>
                     <p class="hint">FinTV appends each weather channel&apos;s latitude and longitude as <code>?lat=…&amp;lon=…</code>. Use Start + Use URL above for local Docker, or enter a LAN URL manually.</p>
                     <p class="hint">For testing only, you may use a public hosted demo (not for production):</p>

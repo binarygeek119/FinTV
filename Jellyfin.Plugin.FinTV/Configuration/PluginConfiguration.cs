@@ -57,6 +57,17 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public string WeatherStarBaseUrl { get; set; } = "https://weather.jmthornton.net";
 
+    /// <summary>
+    /// When true, start the Playwright Chromium Docker CDP sidecar during Jellyfin startup.
+    /// </summary>
+    public bool AutoStartPlaywrightDockerSidecar { get; set; }
+
+    /// <summary>
+    /// When true, start the self-hosted WeatherStar Docker container during Jellyfin startup.
+    /// Uses ws4kp or ws3kp based on <see cref="WeatherStarBaseUrl"/>; defaults to ws4kp when the URL is not local.
+    /// </summary>
+    public bool AutoStartWeatherStarDocker { get; set; }
+
     public BlackframeTaskState BlackframeTaskState { get; set; } = new();
 
     public CommercialBrainzSettings CommercialBrainz { get; set; } = new();

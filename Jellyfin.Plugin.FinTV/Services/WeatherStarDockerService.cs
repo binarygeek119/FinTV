@@ -225,7 +225,7 @@ public class WeatherStarDockerService
             || host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase)
             || host.Equals("::1", StringComparison.OrdinalIgnoreCase);
 
-    private async Task<bool> IsDockerAvailableAsync(CancellationToken cancellationToken)
+    public async Task<bool> IsDockerAvailableAsync(CancellationToken cancellationToken = default)
     {
         var result = await Cli.Wrap("docker")
             .WithArguments(["version", "--format", "{{.Server.Version}}"])

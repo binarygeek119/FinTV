@@ -120,6 +120,23 @@ public class PlaywrightDockerBrowserService
     private async Task StartContainerAsync(CancellationToken cancellationToken)
     {
         _logger.LogInformation(
+            "Pulling Playwright Docker image {Image}",
+            DefaultImage);
+
+        var pull = await Cli.Wrap("docker")
+            .WithArguments(["pull", DefaultImage])
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteBufferedAsync(cancellationToken);
+
+        if (pull.ExitCode != 0)
+        {
+            _logger.LogWarning(
+                "Docker pull failed for {Image}: {Details}",
+                DefaultImage,
+                string.IsNullOrWhiteSpace(pull.StandardError) ? pull.StandardOutput : pull.StandardError);
+        }
+
+        _logger.LogInformation(
             "Starting Playwright Docker browser container {ContainerName} from {Image}",
             ContainerName,
             DefaultImage);

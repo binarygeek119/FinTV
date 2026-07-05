@@ -2485,6 +2485,12 @@
             if ($('ws4kp-image')) $('ws4kp-image').value = settings.ws4kpImage || 'ghcr.io/netbymatt/ws4kp';
             if ($('ws3kp-host-port')) $('ws3kp-host-port').value = settings.ws3kpHostPort ?? 8083;
             if ($('ws3kp-image')) $('ws3kp-image').value = settings.ws3kpImage || 'ghcr.io/netbymatt/ws3kp';
+            if ($('weather-auto-start-playwright')) {
+                $('weather-auto-start-playwright').checked = !!settings.autoStartPlaywrightDockerSidecar;
+            }
+            if ($('weather-auto-start-ws4kp')) {
+                $('weather-auto-start-ws4kp').checked = !!settings.autoStartWeatherStarDocker;
+            }
             const dockerStatus = await api('/weather/docker/status');
             renderWeatherDockerStatus(dockerStatus);
         } catch (err) {
@@ -2526,7 +2532,11 @@
         try {
             await api('/setup/settings', {
                 method: 'PUT',
-                body: JSON.stringify({ weatherStarBaseUrl: weatherStarBaseUrl || null })
+                body: JSON.stringify({
+                    weatherStarBaseUrl: weatherStarBaseUrl || null,
+                    autoStartPlaywrightDockerSidecar: !!$('weather-auto-start-playwright')?.checked,
+                    autoStartWeatherStarDocker: !!$('weather-auto-start-ws4kp')?.checked
+                })
             });
             toast('Weather settings saved.', 'success');
         } catch (err) {

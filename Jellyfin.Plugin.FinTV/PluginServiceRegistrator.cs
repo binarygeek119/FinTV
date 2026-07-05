@@ -64,6 +64,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddHostedService(sp => sp.GetRequiredService<PlayoutBuilderService>());
         serviceCollection.AddHostedService<DatabaseInitializer>();
         serviceCollection.AddHostedService<PluginManifestRepairHostedService>();
+        serviceCollection.AddHostedService<DockerAutoStartHostedService>();
         serviceCollection.AddSingleton<BlackframeChapterTask>();
     }
 
