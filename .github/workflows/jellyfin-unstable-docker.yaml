@@ -9,6 +9,7 @@ on:
       - master
     paths:
       - 'docker/jellyfin-unstable/**'
+      - 'scripts/yt-dlp-version.txt'
       - '.github/workflows/jellyfin-unstable-docker.yaml'
 
 permissions:
@@ -83,7 +84,8 @@ jobs:
         if: steps.should.outputs.build == 'true'
         uses: docker/build-push-action@v6
         with:
-          context: docker/jellyfin-unstable
+          context: .
+          file: docker/jellyfin-unstable/Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |

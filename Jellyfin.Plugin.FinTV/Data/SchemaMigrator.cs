@@ -12,6 +12,7 @@ internal static class SchemaMigrator
     private const string AiPlayoutTemplateMigrationKey = "ai-playout-template-v1";
     private const string FinTvListsMigrationKey = "fintv-lists-v1";
     private const string SpecialPresentationMigrationKey = "special-presentation-v1";
+    private const string WeatherLocationMigrationKey = "weather-location-query-v1";
     private static readonly Regex SqlIdentifierRegex = new("^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.Compiled);
 
     public static async Task MigrateAsync(FinTvDbContext db, ILogger logger, CancellationToken cancellationToken)
@@ -53,6 +54,12 @@ internal static class SchemaMigrator
         {
             await MigrateSpecialPresentationsAsync(db, logger, cancellationToken);
             await MarkMigrationAppliedAsync(db, SpecialPresentationMigrationKey, cancellationToken);
+        }
+
+        if (!await IsMigrationAppliedAsync(db, WeatherLocationMigrationKey, cancellationToken))
+        {
+            await MigrateWeatherLocationQueryAsync(db, logger, cancellationToken);
+            await MarkMigrationAppliedAsync(db, WeatherLocationMigrationKey, cancellationToken);
         }
     }
 
@@ -308,6 +315,29 @@ internal static class SchemaMigrator
             """
             CREATE INDEX IF NOT EXISTS "IX_SpecialPresentations_ChannelId_DayOfWeek_SlotIndex"
             ON "SpecialPresentations" ("ChannelId", "DayOfWeek", "SlotIndex");
+            """,
+            cancellationToken);
+    }
+
+    private static async Task MigrateWeatherLocationQueryAsync(
+        FinTvDbContext db,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        if (!await TableExistsAsync(db, "Channels", cancellationToken))
+        {
+            return;
+        }
+
+        logger.LogInformation("Applying weather location query schema migration");
+
+        await AddColumnIfMissingAsync(db, "Channels", "WeatherLocationQuery", "TEXT", cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE "Channels"
+            SET "WeatherLocationQuery" = '50317, Des Moines, IA, USA'
+            WHERE "ContentType" = 4
+              AND ("WeatherLocationQuery" IS NULL OR TRIM("WeatherLocationQuery") = '');
             """,
             cancellationToken);
     }

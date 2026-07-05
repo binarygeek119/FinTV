@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Threading.Channels;
 using Jellyfin.Plugin.FinTV.Domain;
 using Jellyfin.Plugin.FinTV.Streaming;
@@ -11,6 +10,26 @@ namespace Jellyfin.Plugin.FinTV.Services;
 public class WeatherStarChannelService
 {
     public const string DefaultWeatherStarBaseUrl = "https://weather.jmthornton.net";
+
+    public const string DefaultWeatherLocationQuery = "50317, Des Moines, IA, USA";
+
+    public const string DefaultWeatherStarPermalinkQuery =
+        "hazards=true&current-weather=true&latest-observations=true&hourly=true&hourly-graph=true&travel=true&regional-forecast=true&local-forecast=true&extended-forecast=true&almanac=true&spc-outlook=true&radar=true&stickyKiosk=true&customTextEnable=false&speed=1.00&viewMode=standard&units=us&customText=&mediaVolume=0.75&wide=false&portrait=false&enhanced=false&scanLines=false";
+
+    private static readonly HashSet<string> LocationQueryKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "latLonQuery",
+        "latLon",
+        "txtLocation",
+        "lat",
+        "lon"
+    };
+
+    private static readonly HashSet<string> CaptureTimeQueryKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "kiosk",
+        "wide"
+    };
 
     private const double CaptureFps = 12;
     private static readonly TimeSpan PageRefreshInterval = TimeSpan.FromMinutes(30);
@@ -40,8 +59,6 @@ public class WeatherStarChannelService
 
     public async Task StreamAsync(Domain.Channel channel, Stream output, CancellationToken cancellationToken)
     {
-        var lat = channel.WeatherLatitude ?? 41.60574;
-        var lon = channel.WeatherLongitude ?? -93.55002;
         var baseUrl = Plugin.Instance?.Configuration.WeatherStarBaseUrl;
         var localVariant = _weatherDocker.ResolveLocalVariant(baseUrl);
         if (localVariant.HasValue)
@@ -49,8 +66,18 @@ public class WeatherStarChannelService
             await _weatherDocker.EnsureRunningAsync(localVariant.Value, cancellationToken);
         }
 
+        var locationQuery = string.IsNullOrWhiteSpace(channel.WeatherLocationQuery)
+            ? DefaultWeatherLocationQuery
+            : channel.WeatherLocationQuery.Trim();
+        var permalinkQuery = Plugin.Instance?.Configuration.WeatherStarPermalinkQuery;
+        var autoWideForSixteenNine = Plugin.Instance?.Configuration.WeatherStarAutoWideForSixteenNine ?? true;
         var weatherPageUrl = _playwrightRuntime.AdjustWeatherPageUrlForRuntime(
-            BuildWeatherPageUrl(lat, lon, baseUrl));
+            BuildWeatherPageUrl(
+                locationQuery,
+                baseUrl,
+                permalinkQuery,
+                autoWideForSixteenNine,
+                channel.AspectRatio));
         var (width, height) = GetResolution(channel);
         var ffmpegPath = _mediaEncoder.EncoderPath;
         var backgroundMusicPath = _ebs.ResolveBackgroundMusicPath();
@@ -113,11 +140,79 @@ public class WeatherStarChannelService
         }
     }
 
-    internal static string BuildWeatherPageUrl(double lat, double lon, string? baseUrl = null)
+    internal static string BuildWeatherPageUrl(
+        string locationQuery,
+        string? baseUrl = null,
+        string? permalinkQuery = null,
+        bool autoWideForSixteenNine = false,
+        AspectRatioMode aspectRatio = AspectRatioMode.SixteenNine)
     {
         var root = NormalizeWeatherStarBaseUrl(baseUrl);
-        var separator = root.Contains('?', StringComparison.Ordinal) ? '&' : '?';
-        return $"{root}{separator}lat={FormatCoordinate(lat)}&lon={FormatCoordinate(lon)}";
+        var parameters = ParseQueryParameters(permalinkQuery ?? DefaultWeatherStarPermalinkQuery);
+
+        foreach (var key in LocationQueryKeys)
+        {
+            parameters.Remove(key);
+        }
+
+        parameters["kiosk"] = "true";
+        if (autoWideForSixteenNine)
+        {
+            parameters["wide"] = aspectRatio == AspectRatioMode.FourThree ? "false" : "true";
+        }
+
+        var trimmedLocation = locationQuery.Trim();
+        parameters["latLonQuery"] = trimmedLocation;
+        parameters["txtLocation"] = trimmedLocation;
+
+        return $"{root}?{FormatQueryParameters(parameters)}";
+    }
+
+    internal static (string BaseUrl, string Query) SplitPermalink(string permalink)
+    {
+        if (string.IsNullOrWhiteSpace(permalink))
+        {
+            return (DefaultWeatherStarBaseUrl, DefaultWeatherStarPermalinkQuery);
+        }
+
+        var trimmed = permalink.Trim();
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+        {
+            return (DefaultWeatherStarBaseUrl, NormalizePermalinkQuery(trimmed));
+        }
+
+        var query = NormalizePermalinkQuery(uri.Query);
+        var baseUrl = uri.GetLeftPart(UriPartial.Path).TrimEnd('/');
+        return (string.IsNullOrWhiteSpace(baseUrl) ? DefaultWeatherStarBaseUrl : baseUrl, query);
+    }
+
+    internal static string NormalizePermalinkQuery(string? query)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return DefaultWeatherStarPermalinkQuery;
+        }
+
+        var trimmed = query.Trim();
+        if (trimmed.StartsWith("?", StringComparison.Ordinal))
+        {
+            trimmed = trimmed[1..];
+        }
+
+        var parameters = ParseQueryParameters(trimmed);
+        foreach (var key in LocationQueryKeys)
+        {
+            parameters.Remove(key);
+        }
+
+        foreach (var key in CaptureTimeQueryKeys)
+        {
+            parameters.Remove(key);
+        }
+
+        return parameters.Count == 0
+            ? DefaultWeatherStarPermalinkQuery
+            : FormatQueryParameters(parameters);
     }
 
     internal static string NormalizeWeatherStarBaseUrl(string? baseUrl)
@@ -127,12 +222,55 @@ public class WeatherStarChannelService
             return DefaultWeatherStarBaseUrl;
         }
 
-        return baseUrl.Trim().TrimEnd('/');
+        var trimmed = baseUrl.Trim();
+        if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+        {
+            return uri.GetLeftPart(UriPartial.Path).TrimEnd('/');
+        }
+
+        var queryIndex = trimmed.IndexOf('?', StringComparison.Ordinal);
+        return queryIndex < 0 ? trimmed.TrimEnd('/') : trimmed[..queryIndex].TrimEnd('/');
     }
 
-    internal static string FormatCoordinate(double value)
+    private static Dictionary<string, string> ParseQueryParameters(string? query)
     {
-        return value.ToString("0.#####", CultureInfo.InvariantCulture);
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return result;
+        }
+
+        var trimmed = query.Trim();
+        if (trimmed.StartsWith("?", StringComparison.Ordinal))
+        {
+            trimmed = trimmed[1..];
+        }
+
+        foreach (var segment in trimmed.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separatorIndex = segment.IndexOf('=');
+            if (separatorIndex < 0)
+            {
+                result[Uri.UnescapeDataString(segment)] = string.Empty;
+                continue;
+            }
+
+            var key = Uri.UnescapeDataString(segment[..separatorIndex]);
+            var value = Uri.UnescapeDataString(segment[(separatorIndex + 1)..]);
+            result[key] = value;
+        }
+
+        return result;
+    }
+
+    private static string FormatQueryParameters(IEnumerable<KeyValuePair<string, string>> parameters)
+    {
+        return string.Join(
+            "&",
+            parameters.Select(pair =>
+                string.IsNullOrEmpty(pair.Value)
+                    ? Uri.EscapeDataString(pair.Key)
+                    : $"{Uri.EscapeDataString(pair.Key)}={Uri.EscapeDataString(pair.Value)}"));
     }
 
     private static async Task NavigateToWeatherAsync(IPage page, string weatherPageUrl, CancellationToken cancellationToken)

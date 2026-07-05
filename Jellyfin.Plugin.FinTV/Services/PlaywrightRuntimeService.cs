@@ -6,7 +6,7 @@ namespace Jellyfin.Plugin.FinTV.Services;
 
 /// <summary>
 /// Configures Playwright for Jellyfin plugin hosting on Windows and headless Linux servers.
-/// Linux uses a Docker sidecar for Chromium unless PLAYWRIGHT_BROWSERS_PATH is preset (FinTV Jellyfin image).
+/// Linux uses the fintv-playwright-chromium Docker sidecar over CDP (Windows launches local Chromium).
 /// </summary>
 public class PlaywrightRuntimeService
 {
@@ -26,11 +26,12 @@ public class PlaywrightRuntimeService
     }
 
     /// <summary>
-    /// Gets a value indicating whether weather capture uses Docker-hosted Chromium.
+    /// Gets a value indicating whether weather capture uses the Docker CDP sidecar instead of a local browser.
     /// </summary>
     public bool UsesDockerBrowser =>
         OperatingSystem.IsLinux()
-        && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH"));
+        && (PlaywrightDockerBrowserService.RunsInsideDocker()
+            || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH")));
 
     /// <summary>
     /// Creates a Playwright instance after ensuring drivers and Chromium are available.
@@ -49,8 +50,7 @@ public class PlaywrightRuntimeService
     }
 
     /// <summary>
-    /// Connects to a browser using Docker CDP on Linux or a local launch on Windows.
-    /// Falls back to the Docker CDP sidecar when baked-in Chromium crashes inside a container.
+    /// Connects to a browser using the Docker CDP sidecar on Linux or a local launch on Windows.
     /// </summary>
     /// <param name="playwright">Playwright instance.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -59,33 +59,36 @@ public class PlaywrightRuntimeService
         IPlaywright playwright,
         CancellationToken cancellationToken = default)
     {
-        if (UsesDockerBrowser)
+        if (OperatingSystem.IsLinux())
         {
-            await _dockerBrowser.EnsureBrowserReadyAsync(cancellationToken);
-            _logger.LogDebug("Connecting to Playwright Docker browser at {CdpEndpoint}", _dockerBrowser.CdpEndpoint);
-            var browser = await playwright.Chromium.ConnectOverCDPAsync(_dockerBrowser.CdpEndpoint);
-            return (browser, true);
-        }
-
-        try
-        {
-            var browser = await playwright.Chromium.LaunchAsync(CreateLaunchOptions());
-            return (browser, false);
-        }
-        catch (PlaywrightException ex)
-        {
-            if (!await _dockerBrowser.IsDockerAvailableAsync(cancellationToken))
+            if (await _dockerBrowser.IsDockerAvailableAsync(cancellationToken))
             {
-                throw;
+                await _dockerBrowser.EnsureBrowserReadyAsync(cancellationToken);
+                _logger.LogDebug("Connecting to Playwright Docker browser at {CdpEndpoint}", _dockerBrowser.CdpEndpoint);
+                var dockerBrowser = await playwright.Chromium.ConnectOverCDPAsync(_dockerBrowser.CdpEndpoint);
+                return (dockerBrowser, true);
             }
 
-            _logger.LogWarning(
-                ex,
-                "Local Playwright Chromium failed inside Jellyfin; falling back to Docker CDP browser sidecar");
-            await _dockerBrowser.EnsureBrowserReadyAsync(cancellationToken);
-            var fallbackBrowser = await playwright.Chromium.ConnectOverCDPAsync(_dockerBrowser.CdpEndpoint);
-            return (fallbackBrowser, true);
+            if (PlaywrightDockerBrowserService.RunsInsideDocker())
+            {
+                throw new InvalidOperationException(
+                    "Docker is required for FinTV weather channels when Jellyfin runs in a container. Mount "
+                    + "/var/run/docker.sock into Jellyfin and ensure the Jellyfin user can run docker.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH")))
+            {
+                var localBrowser = await playwright.Chromium.LaunchAsync(CreateLaunchOptions());
+                return (localBrowser, false);
+            }
+
+            throw new InvalidOperationException(
+                "Docker is required for FinTV weather channels on Linux. Mount /var/run/docker.sock into Jellyfin "
+                + "and ensure the Jellyfin user can run docker.");
         }
+
+        var browser = await playwright.Chromium.LaunchAsync(CreateLaunchOptions());
+        return (browser, false);
     }
 
     /// <summary>
@@ -179,7 +182,8 @@ public class PlaywrightRuntimeService
 
     private static bool UsesDockerBrowserFlag()
         => OperatingSystem.IsLinux()
-            && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH"));
+            && (PlaywrightDockerBrowserService.RunsInsideDocker()
+                || string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH")));
 
     private static string? ResolveBundledChromeExecutable()
     {

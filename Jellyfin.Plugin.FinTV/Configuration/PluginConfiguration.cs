@@ -1,4 +1,5 @@
 using Jellyfin.Plugin.FinTV.Domain;
+using Jellyfin.Plugin.FinTV.Services;
 using MediaBrowser.Model.Plugins;
 
 namespace Jellyfin.Plugin.FinTV.Configuration;
@@ -53,9 +54,15 @@ public class PluginConfiguration : BasePluginConfiguration
         "https://github.com/binarygeek119/open-channel-logos/tree/fintv2";
 
     /// <summary>
-    /// Base URL for the WeatherStar 4000 page. FinTV appends lat/lon query parameters per channel.
+    /// Base URL for the WeatherStar page (scheme + host + port only). Display settings come from <see cref="WeatherStarPermalinkQuery"/>.
     /// </summary>
     public string WeatherStarBaseUrl { get; set; } = "https://weather.jmthornton.net";
+
+    /// <summary>
+    /// ws4kp permalink query string copied from WeatherStar (display toggles, units, speed, etc.).
+    /// FinTV merges each channel's <c>latLonQuery</c>, forces <c>kiosk=true</c>, and optionally sets <c>wide</c> at capture time.
+    /// </summary>
+    public string WeatherStarPermalinkQuery { get; set; } = WeatherStarChannelService.DefaultWeatherStarPermalinkQuery;
 
     /// <summary>
     /// When true, start the Playwright Chromium Docker CDP sidecar during Jellyfin startup.
@@ -67,6 +74,11 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Uses ws4kp or ws3kp based on <see cref="WeatherStarBaseUrl"/>; defaults to ws4kp when the URL is not local.
     /// </summary>
     public bool AutoStartWeatherStarDocker { get; set; }
+
+    /// <summary>
+    /// When true, weather capture sets <c>wide=true</c> for 16:9 channels and <c>wide=false</c> for 4:3 channels.
+    /// </summary>
+    public bool WeatherStarAutoWideForSixteenNine { get; set; } = true;
 
     public BlackframeTaskState BlackframeTaskState { get; set; } = new();
 

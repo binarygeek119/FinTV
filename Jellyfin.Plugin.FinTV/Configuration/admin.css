@@ -66,6 +66,14 @@ body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 0; b
 .card input:focus, .card select:focus, .modal input:focus, .modal select:focus, .modal textarea:focus {
     outline: 2px solid rgba(59, 130, 246, .35); border-color: var(--fintv-accent);
 }
+.card input[type="checkbox"], .modal input[type="checkbox"] {
+    width: auto;
+    min-width: 1rem;
+    height: 1rem;
+    margin: 0;
+    accent-color: var(--fintv-accent);
+}
+.checkbox-field > span { color: var(--fintv-text); font-size: .9rem; }
 
 .hidden { display: none !important; }
 .hint { color: var(--fintv-muted); font-size: .9rem; margin: 0 0 .75rem; }

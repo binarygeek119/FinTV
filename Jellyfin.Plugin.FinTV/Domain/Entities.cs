@@ -36,9 +36,7 @@ public class Channel
 
     public DateTime? LastPlayoutBuiltAt { get; set; }
 
-    public double? WeatherLatitude { get; set; }
-
-    public double? WeatherLongitude { get; set; }
+    public string? WeatherLocationQuery { get; set; }
 
     public string? FilterJson { get; set; }
 

@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.71"
+version: "0.0.2.72"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -76,11 +76,20 @@ artifacts:
   - "logos/binarygeek119/The Holiday Channel/The Holiday Channel-Valentine's Day.png"
   - "logos/binarygeek119/Weather/WeatherStar3000.png"
   - "logos/binarygeek119/Weather/WeatherStar4000.png"
-  - "tools/yt-dlp/VERSION.txt"
-  - "tools/yt-dlp/linux-x64/yt-dlp"
-  - "tools/yt-dlp/win-x64/yt-dlp.exe"
   - "scripts/install-docker-cli-jellyfin.sh"
 changelog: |-
+  - Add fpcalc (chromaprint-tools) to FinTV Jellyfin Docker image for audio fingerprinting
+  - Remove baked-in Playwright Chromium from FinTV Jellyfin Docker image; weather uses fintv-playwright-chromium sidecar only
+  - Add Weather tab option to auto-set wide=true for 16:9 weather channels (wide=false for 4:3)
+  - Move yt-dlp from the plugin zip into the FinTV Jellyfin Docker image (/usr/local/bin/yt-dlp)
+  - Store ws4kp permalink display settings globally and use latLonQuery per weather channel instead of latitude/longitude
+  - Append kiosk=true and channel latLonQuery automatically when loading WeatherStar for capture
+  - Fix Playwright CDP connection reset on Unraid/Docker by sharing Jellyfin network namespace instead of publishing port 9222
+  - Fix Playwright CDP connection reset through Docker port publish by adding Chrome --remote-allow-origins=*
+  - Fix Playwright CDP sidecar by attaching it to Jellyfin's Docker network (http://fintv-playwright-chromium:9222)
+  - Fix Playwright CDP readiness to require an HTTP route from Jellyfin, not only docker exec inside the sidecar
+  - Fix Weather tab Docker startup checkboxes not visible (remove emby-checkbox styling that hid native inputs)
+  - Fix CS1573 XML doc warning for LogosController GetChannelLogo holidays parameter
   - Add Weather tab options to auto-start Playwright CDP sidecar and WeatherStar Docker on Jellyfin startup
   - Pre-pull Playwright Docker image before starting fintv-playwright-chromium sidecar
   - Fix WeatherStar on FinTV Jellyfin Docker by launching full Chromium instead of headless_shell and falling back to the Playwright CDP sidecar when needed

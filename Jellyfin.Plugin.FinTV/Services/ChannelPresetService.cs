@@ -239,8 +239,7 @@ public class ChannelPresetService
             return;
         }
 
-        channel.WeatherLatitude ??= 41.60574;
-        channel.WeatherLongitude ??= -93.55002;
+        channel.WeatherLocationQuery ??= WeatherStarChannelService.DefaultWeatherLocationQuery;
     }
 
     private async Task BuildWeatherPlayoutAsync(Channel channel, CancellationToken cancellationToken)

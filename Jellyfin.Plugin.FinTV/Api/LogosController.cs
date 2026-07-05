@@ -218,6 +218,7 @@ public class LogosController : ControllerBase
     /// <param name="channelId">Channel identifier.</param>
     /// <param name="fileName">Logo file name.</param>
     /// <param name="channels">Channel service.</param>
+    /// <param name="holidays">Holiday channel service.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Logo image file.</returns>
     [HttpGet("{channelId:guid}/{fileName}")]

@@ -89,8 +89,7 @@ public class ChannelService
         existing.CommercialPresetId = updated.CommercialPresetId;
         existing.AudioLanguage = updated.AudioLanguage;
         existing.PlayoutSeed = updated.PlayoutSeed;
-        existing.WeatherLatitude = updated.WeatherLatitude;
-        existing.WeatherLongitude = updated.WeatherLongitude;
+        existing.WeatherLocationQuery = updated.WeatherLocationQuery;
         existing.FilterJson = updated.FilterJson;
 
         await _db.SaveChangesAsync(cancellationToken);

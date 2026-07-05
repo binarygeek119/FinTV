@@ -3,13 +3,22 @@
 # Before first run on the host:
 #   stat -c '%g' /var/run/docker.sock
 # Replace DOCKER_GID below with that number.
+#
+# Use a named network (below) so FinTV can reach the Playwright sidecar by container name.
+# If Jellyfin stays on the default bridge network only, FinTV falls back to publishing
+# CDP port 9222 on the host and requires extra_hosts host.docker.internal:host-gateway.
+
+networks:
+  fintv:
 
 services:
   jellyfin:
     image: ghcr.io/binarygeek119/jellyfin-unstable-fintv:unstable
     container_name: jellyfin
     restart: unless-stopped
-    shm_size: "1gb"
+    shm_size: "1gb"  # optional; sidecar uses its own --shm-size when FinTV starts fintv-playwright-chromium
+    networks:
+      - fintv
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -17,6 +26,8 @@ services:
       # - "8920:8920"  # HTTPS (optional)
     environment:
       - TZ=America/Los_Angeles
+      # Optional: override when FinTV cannot auto-detect the compose network
+      # - FINTV_DOCKER_NETWORK=yourproject_default
     volumes:
       - ./config:/config
       - ./cache:/cache

@@ -55,8 +55,11 @@ public class SetupController : ControllerBase
             ebsBackgroundMusicLibraryName = Plugin.Instance?.Configuration.EbsBackgroundMusicLibraryName ?? "Background Music",
             ebsBackgroundMusicLibraryId = Plugin.Instance?.Configuration.EbsBackgroundMusicLibraryId ?? string.Empty,
             weatherStarBaseUrl = Plugin.Instance?.Configuration.WeatherStarBaseUrl ?? WeatherStarChannelService.DefaultWeatherStarBaseUrl,
+            weatherStarPermalinkQuery = Plugin.Instance?.Configuration.WeatherStarPermalinkQuery
+                ?? WeatherStarChannelService.DefaultWeatherStarPermalinkQuery,
             autoStartPlaywrightDockerSidecar = Plugin.Instance?.Configuration.AutoStartPlaywrightDockerSidecar ?? false,
             autoStartWeatherStarDocker = Plugin.Instance?.Configuration.AutoStartWeatherStarDocker ?? false,
+            weatherStarAutoWideForSixteenNine = Plugin.Instance?.Configuration.WeatherStarAutoWideForSixteenNine ?? true,
             playoutDaysToBuild = PlayoutScheduleHelper.GetPlayoutDaysToBuild(),
             ws4kpHostPort = Plugin.Instance?.Configuration.Ws4kp.HostPort ?? 8080,
             ws4kpImage = Plugin.Instance?.Configuration.Ws4kp.Image ?? "ghcr.io/netbymatt/ws4kp",
@@ -104,6 +107,20 @@ public class SetupController : ControllerBase
             plugin.Configuration.WeatherStarBaseUrl = WeatherStarChannelService.NormalizeWeatherStarBaseUrl(request.WeatherStarBaseUrl);
         }
 
+        if (request.WeatherStarPermalinkQuery is not null)
+        {
+            plugin.Configuration.WeatherStarPermalinkQuery =
+                WeatherStarChannelService.NormalizePermalinkQuery(request.WeatherStarPermalinkQuery);
+        }
+
+        if (request.WeatherStarFullPermalink is not null
+            && !string.IsNullOrWhiteSpace(request.WeatherStarFullPermalink))
+        {
+            var split = WeatherStarChannelService.SplitPermalink(request.WeatherStarFullPermalink);
+            plugin.Configuration.WeatherStarBaseUrl = split.BaseUrl;
+            plugin.Configuration.WeatherStarPermalinkQuery = split.Query;
+        }
+
         if (request.AutoStartPlaywrightDockerSidecar.HasValue)
         {
             plugin.Configuration.AutoStartPlaywrightDockerSidecar = request.AutoStartPlaywrightDockerSidecar.Value;
@@ -112,6 +129,11 @@ public class SetupController : ControllerBase
         if (request.AutoStartWeatherStarDocker.HasValue)
         {
             plugin.Configuration.AutoStartWeatherStarDocker = request.AutoStartWeatherStarDocker.Value;
+        }
+
+        if (request.WeatherStarAutoWideForSixteenNine.HasValue)
+        {
+            plugin.Configuration.WeatherStarAutoWideForSixteenNine = request.WeatherStarAutoWideForSixteenNine.Value;
         }
 
         plugin.SaveConfiguration();
@@ -169,6 +191,16 @@ public class SetupSettingsRequest
     public string? WeatherStarBaseUrl { get; set; }
 
     /// <summary>
+    /// Gets or sets the ws4kp permalink query string (display settings without location).
+    /// </summary>
+    public string? WeatherStarPermalinkQuery { get; set; }
+
+    /// <summary>
+    /// Gets or sets a full WeatherStar permalink; FinTV splits it into base URL and display settings.
+    /// </summary>
+    public string? WeatherStarFullPermalink { get; set; }
+
+    /// <summary>
     /// Gets or sets whether the Playwright Docker CDP sidecar starts during Jellyfin startup.
     /// </summary>
     public bool? AutoStartPlaywrightDockerSidecar { get; set; }
@@ -177,6 +209,11 @@ public class SetupSettingsRequest
     /// Gets or sets whether the self-hosted WeatherStar Docker container starts during Jellyfin startup.
     /// </summary>
     public bool? AutoStartWeatherStarDocker { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether weather capture auto-sets wide=true for 16:9 channels (and wide=false for 4:3).
+    /// </summary>
+    public bool? WeatherStarAutoWideForSixteenNine { get; set; }
 }
 
 /// <summary>

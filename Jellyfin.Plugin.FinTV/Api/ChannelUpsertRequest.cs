@@ -1,4 +1,5 @@
 using Jellyfin.Plugin.FinTV.Domain;
+using Jellyfin.Plugin.FinTV.Services;
 
 namespace Jellyfin.Plugin.FinTV.Api;
 
@@ -27,9 +28,7 @@ public class ChannelUpsertRequest
 
     public string AudioLanguage { get; set; } = "eng";
 
-    public double? WeatherLatitude { get; set; }
-
-    public double? WeatherLongitude { get; set; }
+    public string? WeatherLocationQuery { get; set; }
 
     public Channel ToChannel()
     {
@@ -45,14 +44,14 @@ public class ChannelUpsertRequest
             LogoSetId = LogoSetId,
             LogoFileName = LogoFileName,
             AudioLanguage = AudioLanguage,
-            WeatherLatitude = WeatherLatitude,
-            WeatherLongitude = WeatherLongitude
+            WeatherLocationQuery = WeatherLocationQuery
         };
 
         if (channel.ContentType == ChannelContentType.Weather)
         {
-            channel.WeatherLatitude ??= 41.60574;
-            channel.WeatherLongitude ??= -93.55002;
+            channel.WeatherLocationQuery = string.IsNullOrWhiteSpace(channel.WeatherLocationQuery)
+                ? WeatherStarChannelService.DefaultWeatherLocationQuery
+                : channel.WeatherLocationQuery.Trim();
         }
 
         return channel;

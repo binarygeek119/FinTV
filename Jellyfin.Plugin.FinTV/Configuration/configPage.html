@@ -95,15 +95,10 @@
                             </label>
                             <div id="weather-fields" class="field-group hidden">
                                 <label class="field">
-                                    <span>Weather Latitude</span>
-                                    <input id="ch-lat" type="text" inputmode="decimal" class="emby-input" placeholder="41.60574 or 41.60574,-93.55002">
+                                    <span>Weather location (latLonQuery)</span>
+                                    <input id="ch-weather-location" type="text" class="emby-input" placeholder="50317, Des Moines, IA, USA">
                                 </label>
-                                <label class="field">
-                                    <span>Weather Longitude</span>
-                                    <input id="ch-lon" type="text" inputmode="decimal" class="emby-input" placeholder="-93.55002">
-                                </label>
-                                <p class="hint">Weather channels stream live local weather 24/7. Set coordinates here and configure the WeatherStar URL on the Weather tab.</p>
-                                <p class="hint">Need coordinates from a ZIP code? Use the <a href="https://www.freemaptools.com/convert-us-zip-code-to-lat-lng.htm" target="_blank" rel="noopener">US ZIP code to latitude/longitude converter</a>.</p>
+                                <p class="hint">Weather channels stream live local weather 24/7. Enter a ZIP code, city, or address (ws4kp latLonQuery). Configure WeatherStar display settings on the Weather tab.</p>
                             </div>
                             <label class="field checkbox-field">
                                 <input id="ch-enabled" type="checkbox" checked>
@@ -205,7 +200,7 @@
                 </div>
                 <div class="card section-card">
                     <h3>CommercialBrainz YouTube Pool</h3>
-                    <p class="hint">CommercialBrainz sync stores YouTube metadata only. At break time FinTV streams each spot directly into the channel (no local download). Windows and Linux builds bundle <code>yt-dlp</code>; a system install in <code>PATH</code> is used as fallback.</p>
+                    <p class="hint">CommercialBrainz sync stores YouTube metadata only. At break time FinTV streams each spot directly into the channel (no local download). The FinTV Jellyfin Docker image includes <code>yt-dlp</code>; on Windows install yt-dlp and ensure it is on <code>PATH</code>.</p>
                     <div class="form-grid">
                         <label class="field"><span>Enabled</span><input id="cb-enabled" type="checkbox" class="emby-checkbox"></label>
                         <label class="field"><span>Base URL</span><input id="cb-base-url" type="url" class="emby-input" value="https://commercialbrainz.duckdns.org" placeholder="https://commercialbrainz.duckdns.org"></label>
@@ -459,29 +454,37 @@
                     <h3>Docker startup</h3>
                     <p class="hint">Pre-start containers when Jellyfin boots so the first weather tune does not wait on image pulls. Runs in the background a few seconds after startup.</p>
                     <label class="field checkbox-field">
-                        <input type="checkbox" id="weather-auto-start-playwright" class="emby-checkbox">
+                        <input type="checkbox" id="weather-auto-start-playwright">
                         <span>Auto-start Playwright Chromium sidecar (<code>fintv-playwright-chromium</code>) on Jellyfin startup</span>
                     </label>
                     <label class="field checkbox-field">
-                        <input type="checkbox" id="weather-auto-start-ws4kp" class="emby-checkbox">
+                        <input type="checkbox" id="weather-auto-start-ws4kp">
                         <span>Auto-start WeatherStar Docker on Jellyfin startup (ws4kp or ws3kp matching your base URL; ws4kp if URL is not local)</span>
+                    </label>
+                    <label class="field checkbox-field">
+                        <input type="checkbox" id="weather-auto-wide-169" checked>
+                        <span>Auto-set <code>wide=true</code> for 16:9 weather channels (<code>wide=false</code> for 4:3)</span>
                     </label>
                 </div>
                 <div class="card section-card">
                     <h3>WeatherStar base URL</h3>
-                    <p class="hint">FinTV appends each weather channel&apos;s latitude and longitude as <code>?lat=…&amp;lon=…</code>. Use Start + Use URL above for local Docker, or enter a LAN URL manually.</p>
-                    <p class="hint">For testing only, you may use a public hosted demo (not for production):</p>
-                    <ul class="weather-resource-list">
-                        <li><a href="https://weather.jmthornton.net/" target="_blank" rel="noopener">https://weather.jmthornton.net/</a> <button type="button" class="emby-button btn-inline weather-url-preset" data-url="https://weather.jmthornton.net">Use URL</button></li>
-                        <li><a href="https://4000.weatherstar.dev/" target="_blank" rel="noopener">https://4000.weatherstar.dev/</a> <button type="button" class="emby-button btn-inline weather-url-preset" data-url="https://4000.weatherstar.dev">Use URL</button></li>
-                        <li><a href="https://weatherstar3000.netbymatt.com/" target="_blank" rel="noopener">https://weatherstar3000.netbymatt.com/</a> <button type="button" class="emby-button btn-inline weather-url-preset" data-url="https://weatherstar3000.netbymatt.com">Use URL</button></li>
-                    </ul>
-                    <p class="hint">Weather channels use headless Chromium via Playwright and EBS background music. <strong>Linux Docker (recommended):</strong> use the FinTV-ready Jellyfin image (<code>ghcr.io/binarygeek119/jellyfin-unstable-fintv</code>) so Chromium and the Playwright driver are baked in. <strong>Stock Linux:</strong> FinTV uses <code>mcr.microsoft.com/playwright:v1.49.0-jammy</code> over CDP; localhost WeatherStar URLs are rewritten to <code>host.docker.internal</code>.</p>
+                    <p class="hint">Paste a full ws4kp permalink to import your display settings, or edit the base URL and query string separately. FinTV merges each channel&apos;s <code>latLonQuery</code>, forces <code>kiosk=true</code>, and can set <code>wide</code> from the channel aspect ratio when capturing.</p>
+                    <label class="field">
+                        <span>Import full permalink</span>
+                        <input id="weather-full-permalink" type="url" class="emby-input" placeholder="http://192.168.1.2:8082/?hazards=true&amp;...">
+                    </label>
+                    <div class="actions" style="margin-bottom:1rem">
+                        <button type="button" id="btn-import-weather-permalink" class="emby-button">Import permalink settings</button>
+                    </div>
                     <label class="field">
                         <span>WeatherStar base URL</span>
                         <input id="weather-base-url" type="url" class="emby-input" placeholder="http://127.0.0.1:8080">
                     </label>
-                    <p class="hint">Examples: <code>http://127.0.0.1:8080</code> (ws4kp), <code>http://127.0.0.1:8083</code> (ws3kp). Do not include <code>lat</code> or <code>lon</code> here.</p>
+                    <label class="field">
+                        <span>WeatherStar display settings (permalink query)</span>
+                        <textarea id="weather-permalink-query" class="emby-input" rows="5" placeholder="hazards=true&amp;current-weather=true&amp;..."></textarea>
+                    </label>
+                    <p class="hint">Do not include <code>latLonQuery</code>, <code>latLon</code>, <code>txtLocation</code>, <code>kiosk</code>, or <code>wide</code> here when auto-wide is enabled — FinTV sets those per channel at capture time.</p>
                     <div class="actions">
                         <button type="button" id="btn-save-weather" class="raised button-submit emby-button">Save Weather Settings</button>
                         <button type="button" id="btn-use-test-weather-url" class="emby-button">Use jmthornton test URL</button>

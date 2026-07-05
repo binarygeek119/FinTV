@@ -10,10 +10,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BUILD_YAML = ROOT / "build.yaml"
 LOGOS_DIR = ROOT / "Jellyfin.Plugin.FinTV" / "Assets" / "logos" / "binarygeek119"
-YTDLP_DIR = ROOT / "Jellyfin.Plugin.FinTV" / "Assets" / "tools" / "yt-dlp"
 SCRIPTS_DIR = ROOT / "Jellyfin.Plugin.FinTV" / "Assets" / "scripts"
 CSPROJ = ROOT / "Jellyfin.Plugin.FinTV" / "Jellyfin.Plugin.FinTV.csproj"
 # Linux driver ships in ghcr.io/binarygeek119/jellyfin-unstable-fintv, not the plugin zip.
+# yt-dlp ships in the FinTV Jellyfin Docker image, not the plugin zip.
 PLAYWRIGHT_NODE_PLATFORMS = ("win32_x64",)
 
 
@@ -39,17 +39,6 @@ def logo_artifacts() -> list[str]:
     return [
         f'  - "logos/binarygeek119/{path.relative_to(LOGOS_DIR).as_posix()}"'
         for path in sorted(LOGOS_DIR.rglob("*"))
-        if path.is_file()
-    ]
-
-
-def yt_dlp_artifacts() -> list[str]:
-    if not YTDLP_DIR.exists():
-        return []
-
-    return [
-        f'  - "tools/yt-dlp/{path.relative_to(YTDLP_DIR).as_posix()}"'
-        for path in sorted(YTDLP_DIR.rglob("*"))
         if path.is_file()
     ]
 
@@ -107,13 +96,8 @@ def main() -> int:
         print(f"No bundled logos found at {LOGOS_DIR}")
         return 1
 
-    if not YTDLP_DIR.exists():
-        print(f"No bundled yt-dlp found at {YTDLP_DIR}")
-        return 1
-
     playwright_version = read_playwright_version()
     logos = logo_artifacts()
-    yt_dlp = yt_dlp_artifacts()
     scripts = script_artifacts()
     playwright = playwright_artifacts(playwright_version)
     if not playwright:
@@ -143,15 +127,14 @@ def main() -> int:
         lines[: artifacts_index + 1]
         + base_artifacts
         + logos
-        + yt_dlp
         + scripts
         + playwright
         + lines[changelog_index:]
     )
     BUILD_YAML.write_text("\n".join(updated) + "\n", encoding="utf-8")
     print(
-        f"Added {len(logos)} logo artifacts, {len(yt_dlp)} yt-dlp artifacts, "
-        f"{len(scripts)} script artifacts, and {len(playwright)} Playwright artifacts to build.yaml"
+        f"Added {len(logos)} logo artifacts, {len(scripts)} script artifacts, "
+        f"and {len(playwright)} Playwright artifacts to build.yaml"
     )
     return 0
 

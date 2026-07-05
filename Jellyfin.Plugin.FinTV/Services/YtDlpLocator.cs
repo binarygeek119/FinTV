@@ -1,10 +1,10 @@
-using System.Reflection;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.FinTV.Services;
 
 /// <summary>
-/// Resolves the yt-dlp executable, preferring the bundled binary shipped with the plugin.
+/// Resolves the yt-dlp executable from FINTV_YTDLP_PATH or the process PATH.
+/// The FinTV Jellyfin Docker image installs yt-dlp at /usr/local/bin/yt-dlp.
 /// </summary>
 public sealed class YtDlpLocator
 {
@@ -26,66 +26,21 @@ public sealed class YtDlpLocator
             return _cachedPath;
         }
 
-        var bundled = ResolveBundled();
-        if (bundled is not null)
+        var overridePath = Environment.GetEnvironmentVariable("FINTV_YTDLP_PATH");
+        if (!string.IsNullOrWhiteSpace(overridePath) && File.Exists(overridePath))
         {
-            _cachedPath = bundled;
-            return bundled;
+            _cachedPath = overridePath;
+            _logger.LogDebug("Using yt-dlp from FINTV_YTDLP_PATH at {Path}", overridePath);
+            return overridePath;
         }
 
         _cachedPath = FindOnPath("yt-dlp") ?? FindOnPath("youtube-dl");
+        if (_cachedPath is not null)
+        {
+            _logger.LogDebug("Using yt-dlp from PATH at {Path}", _cachedPath);
+        }
+
         return _cachedPath;
-    }
-
-    private string? ResolveBundled()
-    {
-        var pluginDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
-        if (string.IsNullOrEmpty(pluginDir))
-        {
-            return null;
-        }
-
-        string? candidate = null;
-        if (OperatingSystem.IsWindows())
-        {
-            candidate = Path.Combine(pluginDir, "tools", "yt-dlp", "win-x64", "yt-dlp.exe");
-        }
-        else if (OperatingSystem.IsLinux())
-        {
-            candidate = Path.Combine(pluginDir, "tools", "yt-dlp", "linux-x64", "yt-dlp");
-        }
-
-        if (candidate is null || !File.Exists(candidate))
-        {
-            return null;
-        }
-
-        EnsureExecutable(candidate);
-        _logger.LogDebug("Using bundled yt-dlp at {Path}", candidate);
-        return candidate;
-    }
-
-    private void EnsureExecutable(string path)
-    {
-        if (!OperatingSystem.IsLinux())
-        {
-            return;
-        }
-
-        try
-        {
-            var mode = File.GetUnixFileMode(path);
-            if ((mode & UnixFileMode.UserExecute) == 0)
-            {
-                File.SetUnixFileMode(
-                    path,
-                    mode | UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Could not set execute permission on bundled yt-dlp at {Path}", path);
-        }
     }
 
     private static string? FindOnPath(string name)

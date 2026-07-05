@@ -24,7 +24,7 @@ Inspired by [ErsatzTV/legacy](https://github.com/ErsatzTV/legacy) scheduling con
 
 - Jellyfin **12.0+** (including 12.0 RC builds)
 - FFmpeg (bundled with Jellyfin)
-- For WeatherStar channel: **Windows** uses bundled Playwright Chromium; **Linux Docker** can use the [FinTV-ready Jellyfin unstable image](docker/jellyfin-unstable/README.md) or Playwright's sidecar container (Docker required)
+- For WeatherStar channel: **Windows** uses bundled Playwright Chromium; **Linux Docker** uses the `fintv-playwright-chromium` sidecar (Docker socket required)
 
 > **Jellyfin 10.11 users:** use [FinTV v0.0.1.3](https://github.com/binarygeek119/FinTV/releases/tag/v0.0.1.3) instead. v0.0.2.0+ targets Jellyfin 12 on .NET 10.
 
@@ -121,9 +121,9 @@ Click **Start** then **Use URL** to set the base URL to `http://127.0.0.1:8080` 
 
 **Windows:** FinTV downloads Chromium automatically into `{JellyfinData}/plugins/configurations/FinTV/playwright-browsers` on the first weather tune.
 
-**Linux (recommended):** Use the FinTV-ready Jellyfin Docker image [`ghcr.io/binarygeek119/jellyfin-unstable-fintv:unstable`](docker/jellyfin-unstable/README.md). It includes Playwright Chromium and the .NET Playwright driver with correct permissions (`PLAYWRIGHT_BROWSERS_PATH=/ms-playwright`, `PLAYWRIGHT_DRIVER_SEARCH_PATH=/opt/playwright-driver`). Mount the Docker socket for WeatherStar container buttons.
+**Linux (recommended):** Use the FinTV-ready Jellyfin Docker image [`ghcr.io/binarygeek119/jellyfin-unstable-fintv:unstable`](docker/jellyfin-unstable/README.md). It includes Docker CLI for WeatherStar and Playwright sidecar control, plus `yt-dlp` and `fpcalc` for CommercialBrainz and audio fingerprinting. Mount the Docker socket (`/var/run/docker.sock`) and add `group_add` for the socket GID.
 
-**Linux (stock Jellyfin, no FinTV image):** FinTV can start Chromium from Playwright's official Docker image (`mcr.microsoft.com/playwright:v1.49.0-jammy`) and connect over CDP. Requirements:
+**Linux (stock Jellyfin):** Mount the Docker socket and install Docker CLI (see below). FinTV starts Chromium from Playwright's official Docker image (`mcr.microsoft.com/playwright:v1.49.0-jammy`) and connects over CDP. Requirements:
 
 - Docker installed and running
 - The Jellyfin service user can run `docker` (for example, add the user to the `docker` group)
