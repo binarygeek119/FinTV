@@ -1,10 +1,19 @@
 using Jellyfin.Plugin.FinTV.Domain;
 using MediaBrowser.Controller.Entities;
+using MediaBrowser.Model.Configuration;
+using MediaBrowser.Controller.MediaEncoding;
 using System.Globalization;
 namespace Jellyfin.Plugin.FinTV.Streaming;
 
 public class FfmpegCommandBuilder
 {
+    private readonly JellyfinFfmpegEncodingService _encoding;
+
+    public FfmpegCommandBuilder(JellyfinFfmpegEncodingService encoding)
+    {
+        _encoding = encoding;
+    }
+
     public IReadOnlyList<string> BuildMediaCommand(
         Channel channel,
         string inputPath,
@@ -13,21 +22,27 @@ public class FfmpegCommandBuilder
         string? bugImagePath)
     {
         var (width, height) = GetResolution(channel);
-        var vf = BuildVideoFilterChain(channel, width, height, bugImagePath);
+        var context = CreateEncodingContext(width, height, inputPath);
+        var vf = _encoding.AdaptVideoFilterForEncoder(
+            BuildVideoFilterChain(channel, width, height, bugImagePath),
+            context.Encoder);
 
-        return new List<string>
+        var args = new List<string>
         {
             "-hide_banner",
-            "-loglevel", "warning",
+            "-loglevel", "warning"
+        };
+        args.AddRange(context.HardwareDeviceArgs);
+        args.AddRange(new[]
+        {
             "-ss", startSeconds.ToString("F3", CultureInfo.InvariantCulture),
             "-t", durationSeconds.ToString("F3", CultureInfo.InvariantCulture),
             "-i", inputPath,
-            "-vf", vf,
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-profile:v", "high",
-            "-level", "4.1",
-            "-pix_fmt", "yuv420p",
+            "-vf", vf
+        });
+        AppendVideoEncoderArgs(args, context);
+        args.AddRange(new[]
+        {
             "-c:a", "aac",
             "-b:a", "192k",
             "-ac", "2",
@@ -35,7 +50,9 @@ public class FfmpegCommandBuilder
             "-f", "mpegts",
             "-mpegts_flags", "+initial_discontinuity",
             "pipe:1"
-        };
+        });
+
+        return args;
     }
 
     public IReadOnlyList<string> BuildRemoteMediaCommand(
@@ -46,7 +63,10 @@ public class FfmpegCommandBuilder
         string? bugImagePath)
     {
         var (width, height) = GetResolution(channel);
-        var vf = BuildVideoFilterChain(channel, width, height, bugImagePath);
+        var context = CreateEncodingContext(width, height, inputPath);
+        var vf = _encoding.AdaptVideoFilterForEncoder(
+            BuildVideoFilterChain(channel, width, height, bugImagePath),
+            context.Encoder);
         var isRemoteInput = inputPath.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
             || inputPath.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
 
@@ -66,17 +86,17 @@ public class FfmpegCommandBuilder
             });
         }
 
+        args.AddRange(context.HardwareDeviceArgs);
         args.AddRange(new[]
         {
             "-ss", startSeconds.ToString("F3", CultureInfo.InvariantCulture),
             "-t", durationSeconds.ToString("F3", CultureInfo.InvariantCulture),
             "-i", inputPath,
-            "-vf", vf,
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-profile:v", "high",
-            "-level", "4.1",
-            "-pix_fmt", "yuv420p",
+            "-vf", vf
+        });
+        AppendVideoEncoderArgs(args, context);
+        args.AddRange(new[]
+        {
             "-c:a", "aac",
             "-b:a", "192k",
             "-ac", "2",
@@ -95,15 +115,19 @@ public class FfmpegCommandBuilder
         string? albumArtPath)
     {
         var (width, height) = GetResolution(channel);
+        var context = CreateEncodingContext(width, height, audioPath);
         var logo = channel.BugPlacement == BugPlacementMode.None ? null : ResolveBugPath(channel);
-        var filter = BuildMusicFilter(width, height, logo, albumArtPath, channel.ScanlinesEnabled && channel.AspectRatio == AspectRatioMode.FourThree);
+        var filter = _encoding.AdaptFilterComplexForEncoder(
+            BuildMusicFilter(width, height, logo, albumArtPath, channel.ScanlinesEnabled && channel.AspectRatio == AspectRatioMode.FourThree),
+            context.Encoder);
 
         var args = new List<string>
         {
             "-hide_banner",
-            "-loglevel", "warning",
-            "-i", audioPath
+            "-loglevel", "warning"
         };
+        args.AddRange(context.HardwareDeviceArgs);
+        args.AddRange(new[] { "-i", audioPath });
 
         if (!string.IsNullOrWhiteSpace(albumArtPath) && File.Exists(albumArtPath))
         {
@@ -119,10 +143,11 @@ public class FfmpegCommandBuilder
         {
             "-filter_complex", filter,
             "-map", "[vout]",
-            "-map", "0:a",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-tune", "stillimage",
+            "-map", "0:a"
+        });
+        AppendVideoEncoderArgs(args, context, stillImage: true);
+        args.AddRange(new[]
+        {
             "-c:a", "aac",
             "-b:a", "192k",
             "-shortest",
@@ -171,7 +196,7 @@ public class FfmpegCommandBuilder
         });
     }
 
-    private static IReadOnlyList<string> BuildSlateImageCommand(
+    private IReadOnlyList<string> BuildSlateImageCommand(
         int width,
         int height,
         string duration,
@@ -184,53 +209,63 @@ public class FfmpegCommandBuilder
             return BuildColorBarsCommand(width, height, duration, audioMode, musicPath);
         }
 
-        var filter =
+        var context = CreateEncodingContext(width, height, slateImagePath);
+        var filter = _encoding.AdaptFilterComplexForEncoder(
             $"[1:v]scale={width}:{height}:force_original_aspect_ratio=decrease," +
-            $"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,format=yuv420p[vout]";
+            $"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,format=yuv420p[vout]",
+            context.Encoder);
 
         if (audioMode == EbsAudioMode.BackgroundMusic
             && !string.IsNullOrWhiteSpace(musicPath)
             && File.Exists(musicPath))
         {
-            return new List<string>
+            var args = new List<string>
             {
                 "-hide_banner",
-                "-loglevel", "warning",
+                "-loglevel", "warning"
+            };
+            args.AddRange(context.HardwareDeviceArgs);
+            args.AddRange(new[]
+            {
                 "-stream_loop", "-1",
                 "-i", musicPath,
                 "-loop", "1",
                 "-i", slateImagePath,
                 "-filter_complex", filter,
                 "-map", "[vout]",
-                "-map", "0:a",
-                "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-tune", "stillimage",
+                "-map", "0:a"
+            });
+            AppendVideoEncoderArgs(args, context, stillImage: true);
+            args.AddRange(new[]
+            {
                 "-c:a", "aac",
                 "-b:a", "192k",
                 "-t", duration,
                 "-shortest",
                 "-f", "mpegts",
                 "pipe:1"
-            };
+            });
+            return args;
         }
 
-        var args = new List<string>
+        var silentArgs = new List<string>
         {
             "-hide_banner",
             "-loglevel", "warning"
         };
-        args.AddRange(BuildLavfiAudioInput(audioMode));
-        args.AddRange(new[]
+        silentArgs.AddRange(context.HardwareDeviceArgs);
+        silentArgs.AddRange(BuildLavfiAudioInput(audioMode));
+        silentArgs.AddRange(new[]
         {
             "-loop", "1",
             "-i", slateImagePath,
             "-filter_complex", filter,
             "-map", "[vout]",
-            "-map", "0:a",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-tune", "stillimage",
+            "-map", "0:a"
+        });
+        AppendVideoEncoderArgs(silentArgs, context, stillImage: true);
+        silentArgs.AddRange(new[]
+        {
             "-c:a", "aac",
             "-b:a", "192k",
             "-t", duration,
@@ -238,59 +273,67 @@ public class FfmpegCommandBuilder
             "-f", "mpegts",
             "pipe:1"
         });
-        return args;
+        return silentArgs;
     }
 
-    private static IReadOnlyList<string> BuildColorBarsCommand(
+    private IReadOnlyList<string> BuildColorBarsCommand(
         int width,
         int height,
         string duration,
         EbsAudioMode audioMode,
         string? musicPath)
     {
+        var context = CreateEncodingContext(width, height);
+
         if (audioMode == EbsAudioMode.BackgroundMusic
             && !string.IsNullOrWhiteSpace(musicPath)
             && File.Exists(musicPath))
         {
-            return new List<string>
+            var args = new List<string>
             {
                 "-hide_banner",
-                "-loglevel", "warning",
+                "-loglevel", "warning"
+            };
+            args.AddRange(context.HardwareDeviceArgs);
+            args.AddRange(new[]
+            {
                 "-stream_loop", "-1",
                 "-i", musicPath,
                 "-f", "lavfi",
                 "-i", $"smptebars=size={width}x{height}:rate=30",
                 "-map", "1:v",
-                "-map", "0:a",
-                "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-tune", "stillimage",
-                "-pix_fmt", "yuv420p",
+                "-map", "0:a"
+            });
+            AppendVideoEncoderArgs(args, context, stillImage: true);
+            args.AddRange(new[]
+            {
                 "-c:a", "aac",
                 "-b:a", "192k",
                 "-t", duration,
                 "-shortest",
                 "-f", "mpegts",
                 "pipe:1"
-            };
+            });
+            return args;
         }
 
-        var args = new List<string>
+        var silentArgs = new List<string>
         {
             "-hide_banner",
             "-loglevel", "warning"
         };
-        args.AddRange(BuildLavfiAudioInput(audioMode));
-        args.AddRange(new[]
+        silentArgs.AddRange(context.HardwareDeviceArgs);
+        silentArgs.AddRange(BuildLavfiAudioInput(audioMode));
+        silentArgs.AddRange(new[]
         {
             "-f", "lavfi",
             "-i", $"smptebars=size={width}x{height}:rate=30",
             "-map", "1:v",
-            "-map", "0:a",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-tune", "stillimage",
-            "-pix_fmt", "yuv420p",
+            "-map", "0:a"
+        });
+        AppendVideoEncoderArgs(silentArgs, context, stillImage: true);
+        silentArgs.AddRange(new[]
+        {
             "-c:a", "aac",
             "-b:a", "192k",
             "-t", duration,
@@ -298,57 +341,67 @@ public class FfmpegCommandBuilder
             "-f", "mpegts",
             "pipe:1"
         });
-        return args;
+        return silentArgs;
     }
 
-    private static IReadOnlyList<string> BuildStaticCommand(
+    private IReadOnlyList<string> BuildStaticCommand(
         int width,
         int height,
         string duration,
         EbsAudioMode audioMode,
         string? musicPath)
     {
+        var context = CreateEncodingContext(width, height);
+
         if (audioMode == EbsAudioMode.BackgroundMusic
             && !string.IsNullOrWhiteSpace(musicPath)
             && File.Exists(musicPath))
         {
-            return new List<string>
+            var args = new List<string>
             {
                 "-hide_banner",
-                "-loglevel", "warning",
+                "-loglevel", "warning"
+            };
+            args.AddRange(context.HardwareDeviceArgs);
+            args.AddRange(new[]
+            {
                 "-stream_loop", "-1",
                 "-i", musicPath,
                 "-f", "lavfi",
                 "-i", $"color=c=808080:s={width}x{height}:r=30,format=gray,geq=lum='255*random(0)'",
                 "-map", "1:v",
-                "-map", "0:a",
-                "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-pix_fmt", "yuv420p",
+                "-map", "0:a"
+            });
+            AppendVideoEncoderArgs(args, context);
+            args.AddRange(new[]
+            {
                 "-c:a", "aac",
                 "-b:a", "192k",
                 "-t", duration,
                 "-shortest",
                 "-f", "mpegts",
                 "pipe:1"
-            };
+            });
+            return args;
         }
 
-        var args = new List<string>
+        var silentArgs = new List<string>
         {
             "-hide_banner",
             "-loglevel", "warning"
         };
-        args.AddRange(BuildLavfiAudioInput(audioMode));
-        args.AddRange(new[]
+        silentArgs.AddRange(context.HardwareDeviceArgs);
+        silentArgs.AddRange(BuildLavfiAudioInput(audioMode));
+        silentArgs.AddRange(new[]
         {
             "-f", "lavfi",
             "-i", $"color=c=808080:s={width}x{height}:r=30,format=gray,geq=lum='255*random(0)'",
             "-map", "1:v",
-            "-map", "0:a",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-pix_fmt", "yuv420p",
+            "-map", "0:a"
+        });
+        AppendVideoEncoderArgs(silentArgs, context);
+        silentArgs.AddRange(new[]
+        {
             "-c:a", "aac",
             "-b:a", "192k",
             "-t", duration,
@@ -356,7 +409,7 @@ public class FfmpegCommandBuilder
             "-f", "mpegts",
             "pipe:1"
         });
-        return args;
+        return silentArgs;
     }
 
     private static IReadOnlyList<string> BuildLavfiAudioInput(EbsAudioMode audioMode)
@@ -388,69 +441,90 @@ public class FfmpegCommandBuilder
         string? audioPath)
     {
         var fps = captureFps.ToString(CultureInfo.InvariantCulture);
+        var context = CreateEncodingContext(width, height);
+        var vf = _encoding.AdaptVideoFilterForEncoder($"scale={width}:{height}", context.Encoder);
 
         if (!string.IsNullOrWhiteSpace(audioPath) && File.Exists(audioPath))
         {
-            return new List<string>
+            var args = new List<string>
             {
                 "-hide_banner",
-                "-loglevel", "warning",
+                "-loglevel", "warning"
+            };
+            args.AddRange(context.HardwareDeviceArgs);
+            args.AddRange(new[]
+            {
                 "-f", "image2pipe",
                 "-framerate", fps,
                 "-i", "pipe:0",
                 "-stream_loop", "-1",
                 "-i", audioPath,
-                "-vf", $"scale={width}:{height}",
+                "-vf", vf,
                 "-map", "0:v",
-                "-map", "1:a",
-                "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-tune", "stillimage",
-                "-pix_fmt", "yuv420p",
+                "-map", "1:a"
+            });
+            AppendVideoEncoderArgs(args, context, stillImage: true);
+            args.AddRange(new[]
+            {
                 "-c:a", "aac",
                 "-b:a", "192k",
                 "-f", "mpegts",
                 "pipe:1"
-            };
+            });
+            return args;
         }
 
-        return new List<string>
+        var silentArgs = new List<string>
         {
             "-hide_banner",
-            "-loglevel", "warning",
+            "-loglevel", "warning"
+        };
+        silentArgs.AddRange(context.HardwareDeviceArgs);
+        silentArgs.AddRange(new[]
+        {
             "-f", "image2pipe",
             "-framerate", fps,
             "-i", "pipe:0",
             "-f", "lavfi",
             "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
-            "-vf", $"scale={width}:{height}",
+            "-vf", vf,
             "-map", "0:v",
-            "-map", "1:a",
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-tune", "stillimage",
-            "-pix_fmt", "yuv420p",
+            "-map", "1:a"
+        });
+        AppendVideoEncoderArgs(silentArgs, context, stillImage: true);
+        silentArgs.AddRange(new[]
+        {
             "-c:a", "aac",
             "-b:a", "192k",
             "-f", "mpegts",
             "pipe:1"
-        };
+        });
+        return silentArgs;
     }
 
     public IReadOnlyList<string> BuildOfflineSlateCommand(Channel channel)
     {
         var (width, height) = GetResolution(channel);
-        return new List<string>
+        var context = CreateEncodingContext(width, height);
+        var args = new List<string>
         {
-            "-hide_banner",
+            "-hide_banner"
+        };
+        args.AddRange(context.HardwareDeviceArgs);
+        args.AddRange(new[]
+        {
             "-f", "lavfi",
             "-i", $"color=c=black:s={width}x{height}:r=30",
-            "-vf", $"drawtext=text='{EscapeDrawText(channel.Name)} - Off Air':fontcolor=white:fontsize=36:x=(w-text_w)/2:y=(h-text_h)/2",
-            "-c:v", "libx264",
+            "-vf", $"drawtext=text='{EscapeDrawText(channel.Name)} - Off Air':fontcolor=white:fontsize=36:x=(w-text_w)/2:y=(h-text_h)/2"
+        });
+        AppendVideoEncoderArgs(args, context);
+        args.AddRange(new[]
+        {
             "-t", "30",
             "-f", "mpegts",
             "pipe:1"
-        };
+        });
+        return args;
     }
 
     public IReadOnlyList<string> BuildBlackdetectCommand(string inputPath)
@@ -464,6 +538,28 @@ public class FfmpegCommandBuilder
             "-f", "null",
             "-"
         };
+    }
+
+    private readonly record struct EncodingContext(
+        EncodingJobInfo State,
+        EncodingOptions Options,
+        string Encoder,
+        IReadOnlyList<string> HardwareDeviceArgs);
+
+    private EncodingContext CreateEncodingContext(int width, int height, string? mediaPath = null)
+    {
+        var options = _encoding.GetEncodingOptions();
+        var state = _encoding.CreateVideoEncodingState(width, height, mediaPath);
+        var encoder = _encoding.GetH264VideoEncoder(state, options);
+        var hardwareDeviceArgs = _encoding.GetHardwareDeviceArguments(state, options);
+        return new EncodingContext(state, options, encoder, hardwareDeviceArgs);
+    }
+
+    private void AppendVideoEncoderArgs(List<string> args, EncodingContext context, bool stillImage = false)
+    {
+        args.Add("-c:v");
+        args.Add(context.Encoder);
+        args.AddRange(_encoding.GetVideoEncoderArguments(context.State, context.Options, context.Encoder, stillImage));
     }
 
     private static string BuildVideoFilterChain(Channel channel, int width, int height, string? bugImagePath)

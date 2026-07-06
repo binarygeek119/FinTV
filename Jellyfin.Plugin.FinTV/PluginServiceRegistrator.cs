@@ -61,6 +61,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<WeatherStarDockerService>();
         serviceCollection.AddSingleton<PlaywrightRuntimeService>();
         serviceCollection.AddScoped<WeatherStarChannelService>();
+        serviceCollection.AddSingleton<Streaming.JellyfinFfmpegEncodingService>();
         serviceCollection.AddSingleton<StreamService>();
         serviceCollection.AddSingleton<Streaming.FfmpegCommandBuilder>();
         serviceCollection.AddSingleton<PlayoutBuilderService>();

@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.74"
+version: "0.0.2.75"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -78,6 +78,7 @@ artifacts:
   - "logos/binarygeek119/Weather/WeatherStar4000.png"
   - "scripts/install-docker-cli-jellyfin.sh"
 changelog: |-
+  - FinTV IPTV streaming uses Jellyfin hardware transcoding settings (VAAPI, QSV, NVENC, encoder preset, and device path) when enabled in Dashboard playback settings
   - AI lineups keep movies in release chronological order (year and premiere date) with marathon channels repacking movies back-to-back earliest first
   - Extend AI playout by one day when the horizon drops to 13 days instead of rebuilding all 14
   - Run FinTV AI lineup scheduled task daily to append the next day for eligible channels
