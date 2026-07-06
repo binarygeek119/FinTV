@@ -97,6 +97,7 @@ public class ChannelPresetService
         }
 
         var result = new ApplyChannelPresetsResult();
+        var updatedForAiAutoApply = new List<Guid>();
         foreach (var preset in presets)
         {
             var number = preset.GetNumber(numberingMode);
@@ -136,6 +137,10 @@ public class ChannelPresetService
                 if (channel.ContentType == ChannelContentType.Weather)
                 {
                     await BuildWeatherPlayoutAsync(channel, cancellationToken);
+                }
+                else
+                {
+                    updatedForAiAutoApply.Add(channel.Id);
                 }
 
                 result.Updated.Add(new ChannelPresetActionResult
@@ -185,6 +190,10 @@ public class ChannelPresetService
         if (result.Updated.Count > 0)
         {
             await _db.SaveChangesAsync(cancellationToken);
+            foreach (var channelId in updatedForAiAutoApply)
+            {
+                _aiAutoApply.QueueAutoApplyForChannel(channelId);
+            }
         }
 
         if (logoSet is not null)

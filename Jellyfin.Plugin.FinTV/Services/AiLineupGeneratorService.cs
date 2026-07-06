@@ -90,7 +90,9 @@ public class AiLineupGeneratorService
             validIds,
             catalogById,
             channel.FilterJson,
-            yearConstraints);
+            yearConstraints,
+            playoutTemplate,
+            catalogMode);
 
         return BuildPreview(channel, slots, manifest, provider, playoutTemplate);
     }
@@ -244,13 +246,16 @@ public class AiLineupGeneratorService
         HashSet<Guid> validIds,
         Dictionary<Guid, AiCatalogEntry> catalogById,
         string? channelFilterJson,
-        ChannelCatalogYearConstraints? yearConstraints)
+        ChannelCatalogYearConstraints? yearConstraints,
+        AiPlayoutTemplate? playoutTemplate = null,
+        ChannelCatalogMode catalogMode = ChannelCatalogMode.TvOnly)
     {
         var occupied = new bool[48];
         var result = ChannelService.CreateEmptySlots()
             .Select(s => new LineupSlotDto { SlotIndex = s.SlotIndex, SpanSlots = 1 })
             .ToDictionary(s => s.SlotIndex);
 
+        var aiPickOrder = new List<Guid>();
         foreach (var aiSlot in aiSlots ?? new List<AiGeneratedSlot>())
         {
             if (aiSlot.SlotIndex < 0 || aiSlot.SlotIndex >= 48)
@@ -284,8 +289,8 @@ public class AiLineupGeneratorService
                 }
 
                 span = entry.RuntimeMinutes > 0
-                    ? ComputeSpanFromRuntime(entry.RuntimeMinutes)
-                    : Math.Clamp(aiSlot.SpanSlots ?? 1, 1, 8);
+                    ? ComputeSpanFromRuntime(entry.RuntimeMinutes, GetMaxSpanSlots(playoutTemplate))
+                    : Math.Clamp(aiSlot.SpanSlots ?? 1, 1, GetMaxSpanSlots(playoutTemplate));
                 if (aiSlot.SlotIndex + span > 48)
                 {
                     span = 48 - aiSlot.SlotIndex;
@@ -295,6 +300,11 @@ public class AiLineupGeneratorService
                 {
                     continue;
                 }
+            }
+
+            if (!aiPickOrder.Contains(candidateId.Value))
+            {
+                aiPickOrder.Add(candidateId.Value);
             }
 
             MarkOccupied(occupied, aiSlot.SlotIndex, span);
@@ -320,6 +330,127 @@ public class AiLineupGeneratorService
             }
         }
 
+        if (ShouldPackMarathon(playoutTemplate, catalogMode))
+        {
+            return PackMarathonSlots(catalogById, channelFilterJson, yearConstraints, playoutTemplate);
+        }
+
+        return FillEmptySlotsWithFilterFallback(result, occupied, channelFilterJson);
+    }
+
+    private static bool ShouldPackMarathon(AiPlayoutTemplate? template, ChannelCatalogMode catalogMode)
+        => template?.Id is "movie-marathon" or "holiday-channel"
+            || catalogMode == ChannelCatalogMode.MovieOnly;
+
+    private static int GetMaxSpanSlots(AiPlayoutTemplate? template)
+    {
+        if (template?.Dayparts is not { Count: > 0 } dayparts)
+        {
+            return 8;
+        }
+
+        return dayparts.Max(d => d.MaxSpanSlots ?? 8);
+    }
+
+    private static List<LineupSlotDto> PackMarathonSlots(
+        Dictionary<Guid, AiCatalogEntry> catalogById,
+        string? channelFilterJson,
+        ChannelCatalogYearConstraints? yearConstraints,
+        AiPlayoutTemplate? playoutTemplate)
+    {
+        var maxSpan = GetMaxSpanSlots(playoutTemplate);
+        var moviesFirst = playoutTemplate?.Id is "movie-marathon" or "holiday-channel";
+        var fillQueue = BuildAiredOrderFillQueue(catalogById, yearConstraints, moviesFirst);
+        var occupied = new bool[48];
+        var result = new Dictionary<int, LineupSlotDto>();
+        var cursor = 0;
+
+        foreach (var itemId in fillQueue)
+        {
+            if (cursor >= 48)
+            {
+                break;
+            }
+
+            if (!catalogById.TryGetValue(itemId, out var entry))
+            {
+                continue;
+            }
+
+            if (yearConstraints is not null
+                && (!entry.Year.HasValue || !yearConstraints.ContainsYear(entry.Year)))
+            {
+                continue;
+            }
+
+            var span = ComputeSpanFromRuntime(entry.RuntimeMinutes, maxSpan);
+            if (cursor + span > 48)
+            {
+                span = 48 - cursor;
+            }
+
+            if (span <= 0)
+            {
+                break;
+            }
+
+            MarkOccupied(occupied, cursor, span);
+            result[cursor] = new LineupSlotDto
+            {
+                SlotIndex = cursor,
+                SpanSlots = span,
+                Candidates =
+                [
+                    new SlotCandidateDto
+                    {
+                        Kind = SlotCandidateKind.JellyfinItem,
+                        JellyfinItemId = itemId,
+                        Weight = 1,
+                        SortOrder = 0
+                    }
+                ]
+            };
+            cursor += span;
+        }
+
+        return FillEmptySlotsWithFilterFallback(result, occupied, channelFilterJson);
+    }
+
+    private static List<Guid> BuildAiredOrderFillQueue(
+        Dictionary<Guid, AiCatalogEntry> catalogById,
+        ChannelCatalogYearConstraints? yearConstraints,
+        bool moviesFirst = false)
+        => OrderChronologically(
+                catalogById.Values.Where(e => yearConstraints is null
+                    || (!e.Year.HasValue || yearConstraints.ContainsYear(e.Year))),
+                moviesFirst)
+            .Select(e => e.Id)
+            .ToList();
+
+    private static IEnumerable<AiCatalogEntry> OrderChronologically(
+        IEnumerable<AiCatalogEntry> entries,
+        bool moviesFirst)
+    {
+        if (moviesFirst)
+        {
+            return entries
+                .OrderBy(e => e.Type == "Movie" ? 0 : 1)
+                .ThenBy(e => e.Year ?? int.MaxValue)
+                .ThenBy(e => e.PremiereDate ?? DateTime.MaxValue)
+                .ThenBy(e => e.Title, StringComparer.OrdinalIgnoreCase);
+        }
+
+        return entries
+            .OrderBy(e => e.Year ?? int.MaxValue)
+            .ThenBy(e => e.PremiereDate ?? DateTime.MaxValue)
+            .ThenBy(e => e.Title, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static List<LineupSlotDto> FillEmptySlotsWithFilterFallback(
+        Dictionary<int, LineupSlotDto> result,
+        bool[] occupied,
+        string? channelFilterJson)
+    {
         var fallbackFilter = string.IsNullOrWhiteSpace(channelFilterJson)
             ? "{}"
             : channelFilterJson;
@@ -352,8 +483,8 @@ public class AiLineupGeneratorService
         return result.Values.OrderBy(s => s.SlotIndex).ToList();
     }
 
-    private static int ComputeSpanFromRuntime(int runtimeMinutes)
-        => Math.Clamp((int)Math.Ceiling(runtimeMinutes / 30.0), 1, 8);
+    private static int ComputeSpanFromRuntime(int runtimeMinutes, int maxSpan = 8)
+        => Math.Clamp((int)Math.Ceiling(runtimeMinutes / 30.0), 1, maxSpan);
 
     private static bool IsRangeOccupied(bool[] occupied, int start, int span)
     {
@@ -431,6 +562,7 @@ public class AiLineupGeneratorService
             - Assign enough spanSlots to cover the item runtime; under-sized spans truncate content during playout.
             - Do not overlap spans. slotIndex + spanSlots must be <= 48.
             - Vary content across dayparts; avoid repeating the same title in adjacent blocks.
+            - Schedule movies in release chronological order using catalog year and premiere date (earliest first).
             - Catalog modes: TvOnly (series), MovieOnly, Mixed (TV+movies), MusicVideoOnly (music videos).
             """ + $"\nCatalog mode: {catalogMode}." + templateBlock;
     }

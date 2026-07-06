@@ -32,6 +32,9 @@ public class AiCatalogManifestBuilder
             .Select(item => MapEntry(item, catalogMode, yearConstraints, genreConstraints))
             .Where(e => e is not null)
             .Cast<AiCatalogEntry>()
+            .OrderBy(e => e.Year ?? int.MaxValue)
+            .ThenBy(e => e.PremiereDate ?? DateTime.MaxValue)
+            .ThenBy(e => e.Title, StringComparer.OrdinalIgnoreCase)
             .ToList();
 
         return new AiCatalogManifest
@@ -73,6 +76,7 @@ public class AiCatalogManifestBuilder
                 Title = series.Name,
                 Type = "Series",
                 Year = _catalog.GetCatalogReleaseYear(series, yearConstraints),
+                PremiereDate = series.PremiereDate,
                 RuntimeMinutes = EstimateSeriesRuntimeMinutes(series),
                 Genres = series.Genres?.ToList() ?? new List<string>(),
                 Tags = series.Tags?.ToList() ?? new List<string>(),
@@ -103,6 +107,7 @@ public class AiCatalogManifestBuilder
                 Title = movie.Name,
                 Type = "Movie",
                 Year = JellyfinCatalogService.GetReleaseYear(movie),
+                PremiereDate = movie.PremiereDate,
                 RuntimeMinutes = _catalog.GetRuntimeMinutes(movie),
                 Genres = movie.Genres?.ToList() ?? new List<string>(),
                 Tags = movie.Tags?.ToList() ?? new List<string>(),
@@ -175,6 +180,8 @@ public class AiCatalogEntry
     public string Type { get; set; } = string.Empty;
 
     public int? Year { get; set; }
+
+    public DateTime? PremiereDate { get; set; }
 
     public int RuntimeMinutes { get; set; }
 

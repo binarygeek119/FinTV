@@ -4,6 +4,7 @@ using Jellyfin.Plugin.FinTV.Domain;
 using Jellyfin.Plugin.FinTV.Services;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Plugins;
+using MediaBrowser.Model.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -53,6 +54,8 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddScoped<LlmClientService>();
         serviceCollection.AddScoped<AiLineupGeneratorService>();
         serviceCollection.AddScoped<AiChannelAutoApplyService>();
+        serviceCollection.AddSingleton<AiLineupAutoApplyTask>();
+        serviceCollection.AddSingleton<IScheduledTask>(sp => sp.GetRequiredService<AiLineupAutoApplyTask>());
         serviceCollection.AddScoped<EbsService>();
         serviceCollection.AddSingleton<PlaywrightDockerBrowserService>();
         serviceCollection.AddSingleton<WeatherStarDockerService>();

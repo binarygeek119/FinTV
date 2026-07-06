@@ -2078,8 +2078,83 @@
             aiPlayoutTemplates = await api('/ai/playout-templates');
             renderAiChannels();
             updateAiUiState();
+            const job = await api('/ai/generate-all/status');
+            renderGenerateAllStatus(job);
+            if (job.isRunning) {
+                startGenerateAllPolling();
+            }
         } catch (err) {
             reportApiError(err, 'Could not load AI settings.');
+        }
+    }
+
+    let aiGenerateAllPollTimer = null;
+
+    function renderGenerateAllStatus(job) {
+        const el = $('ai-generate-all-status');
+        if (!el || !job) {
+            el?.classList.add('hidden');
+            return;
+        }
+
+        if (!job.isRunning && !job.completedAt) {
+            el.classList.add('hidden');
+            return;
+        }
+
+        el.classList.remove('hidden');
+        if (job.isRunning) {
+            const totalSteps = job.totalSteps || 0;
+            const pct = totalSteps ? Math.round((job.completedSteps / totalSteps) * 100) : 0;
+            el.textContent =
+                `Generate all running: day ${job.currentDay}/${job.totalDays || 14} · ${job.currentChannelName || '…'} · ` +
+                `${job.completedSteps}/${totalSteps || '?'} steps (${pct}%)`;
+            if ($('btn-ai-generate-all')) {
+                $('btn-ai-generate-all').disabled = true;
+                $('btn-ai-generate-all').textContent = 'Generating…';
+            }
+            return;
+        }
+
+        let message = `Generate all finished: ${job.lineupsGenerated} lineups, ${job.playoutDaysBuilt} playout days built across ${job.totalChannels} channel(s) and ${job.totalDays} day(s).`;
+        if (job.lineupsFailed || job.playoutDaysFailed) {
+            message += ` Failures: ${job.lineupsFailed} lineup, ${job.playoutDaysFailed} day.`;
+        }
+        if (job.lastError) {
+            message += ` Last error: ${job.lastError}`;
+        }
+        el.textContent = message;
+        if ($('btn-ai-generate-all')) {
+            $('btn-ai-generate-all').disabled = !($('ai-enabled')?.checked);
+            $('btn-ai-generate-all').textContent = 'Generate All Channels';
+        }
+    }
+
+    function startGenerateAllPolling() {
+        if (aiGenerateAllPollTimer) {
+            clearTimeout(aiGenerateAllPollTimer);
+        }
+        aiGenerateAllPollTimer = setTimeout(pollGenerateAllStatus, 3000);
+    }
+
+    async function pollGenerateAllStatus() {
+        try {
+            const job = await api('/ai/generate-all/status');
+            renderGenerateAllStatus(job);
+            if (job.isRunning) {
+                startGenerateAllPolling();
+                return;
+            }
+
+            if (job.completedAt) {
+                toast(
+                    `Generate all finished: ${job.lineupsGenerated} lineups and ${job.playoutDaysBuilt} playout days built.`,
+                    job.lineupsFailed || job.playoutDaysFailed ? 'info' : 'success'
+                );
+                await loadAi();
+            }
+        } catch (_) {
+            startGenerateAllPolling();
         }
     }
 
@@ -2325,9 +2400,27 @@
     }
 
     async function generateAllAiLineups() {
-        if (!confirm('Generate AI lineups for all channels? This may take several minutes.')) return;
+        if (!confirm('Generate AI lineups for all channels? Each channel gets an AI lineup, then playout is built one day at a time (14 days total). This runs in the background.')) return;
+        const btn = $('btn-ai-generate-all');
+        const originalLabel = btn ? btn.textContent : '';
         try {
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = 'Queueing…';
+            }
             const data = await api('/ai/generate-all', { method: 'POST', body: '{}' });
+            if (data.alreadyRunning) {
+                toast('Generate all is already running.', 'info');
+                renderGenerateAllStatus(data.job);
+                startGenerateAllPolling();
+                return;
+            }
+            if (data.queued) {
+                toast('Generate all queued. Building one channel and one day at a time.', 'success');
+                renderGenerateAllStatus(data.job);
+                startGenerateAllPolling();
+                return;
+            }
             const failed = (data.results || []).filter((r) => !r.ok && !r.skipped);
             const ok = (data.results || []).filter((r) => r.ok).length;
             const fail = failed.length;
@@ -2341,6 +2434,11 @@
             await loadAi();
         } catch (err) {
             toast(err.message, 'error');
+        } finally {
+            if (btn && !$('ai-generate-all-status')?.textContent?.includes('running')) {
+                btn.disabled = !($('ai-enabled')?.checked);
+                btn.textContent = originalLabel || 'Generate All Channels';
+            }
         }
     }
 

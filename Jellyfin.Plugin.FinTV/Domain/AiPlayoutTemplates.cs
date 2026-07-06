@@ -61,7 +61,7 @@ public static class AiPlayoutTemplates
             Dayparts =
             [
                 new AiPlayoutDaypart(0, 47, "All Day Movies",
-                    "Schedule movies from the catalog; use spanSlots based on runtime (long features get multi-slot blocks).", maxSpanSlots: 8)
+                    "Schedule movies back-to-back from slot 0 with no gaps. Each movie starts immediately after the previous ends. Use spanSlots from runtime.", maxSpanSlots: 8)
             ]
         },
         new AiPlayoutTemplate
@@ -255,6 +255,16 @@ public static class AiPlayoutTemplates
         {
             lines.Add("- Do not place kids content in Late Night or adult-only dayparts.");
             lines.Add("- Do not place adult-only titles in Morning Cartoons or After School blocks.");
+        }
+
+        if (template.Id is "movie-marathon" or "holiday-channel")
+        {
+            lines.Add("- Pack titles back-to-back from slot 0 with zero empty slots between features.");
+            lines.Add("- FinTV repacks movies first in release chronological order (earliest year/date first), then other catalog items.");
+        }
+        else if (template.Id is not "past-tense-news")
+        {
+            lines.Add("- Within each daypart, schedule movies in release chronological order (earliest catalog year first).");
         }
 
         return string.Join('\n', lines);

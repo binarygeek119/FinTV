@@ -384,14 +384,15 @@
                         <input id="ai-venice-model" type="text" class="emby-input" placeholder="gpt-4o-mini">
                     </label>
                     <p id="ai-key-status" class="hint"></p>
-                    <p class="hint">AI lineups build up to <strong>14 days</strong> of playout. FinTV auto-extends the schedule as each day ends. Auto-apply sets content mix and playout template from channel rules, generates the lineup, and rebuilds playout.</p>
+                    <p class="hint">AI lineups build up to <strong>14 days</strong> of playout. FinTV auto-extends the schedule as each day ends. Auto-apply sets content mix and playout template from channel rules, generates the lineup, and rebuilds playout. The scheduled task adds <strong>one day</strong> when the horizon drops to 13 days instead of rebuilding all 14. Queued new channels can also be processed from <strong>Dashboard → Scheduled Tasks → FinTV AI Lineup Auto-Apply (Channel Add)</strong>.</p>
                 </div>
                 <div class="card section-card">
                     <div class="section-header-row">
                         <h3>Channel lineups</h3>
                         <button type="button" id="btn-ai-generate-all" class="emby-button">Generate All Channels</button>
                     </div>
-                    <p class="hint">Pick a <strong>playout template</strong> to structure dayparts (morning cartoons, primetime, etc.). Channel rules define content scope; fine-tune adds extra instructions.</p>
+                    <p id="ai-generate-all-status" class="hint hidden"></p>
+                    <p class="hint">Pick a <strong>playout template</strong> to structure dayparts (morning cartoons, primetime, etc.). Channel rules define content scope; fine-tune adds extra instructions. <strong>Generate All</strong> runs in the background, one channel and one day at a time, until each channel has 14 days of playout.</p>
                     <div id="ai-channels-list" class="ai-channels-list"></div>
                 </div>
                 <div id="ai-preview-panel" class="card section-card hidden">

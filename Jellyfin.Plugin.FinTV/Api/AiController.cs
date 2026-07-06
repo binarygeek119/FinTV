@@ -6,7 +6,6 @@ using MediaBrowser.Common.Api;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace Jellyfin.Plugin.FinTV.Api;
 
@@ -23,22 +22,19 @@ public class AiController : ControllerBase
     private readonly LlmClientService _llm;
     private readonly FinTvDbContext _db;
     private readonly LineupGeneratorService _playoutGenerator;
-    private readonly IServiceScopeFactory _scopeFactory;
 
     public AiController(
         AiLineupGeneratorService generator,
         AiChannelAutoApplyService autoApply,
         LlmClientService llm,
         FinTvDbContext db,
-        LineupGeneratorService playoutGenerator,
-        IServiceScopeFactory scopeFactory)
+        LineupGeneratorService playoutGenerator)
     {
         _generator = generator;
         _autoApply = autoApply;
         _llm = llm;
         _db = db;
         _playoutGenerator = playoutGenerator;
-        _scopeFactory = scopeFactory;
     }
 
     [HttpGet("settings")]
@@ -310,27 +306,46 @@ public class AiController : ControllerBase
     }
 
     [HttpPost("generate-all")]
-    public async Task<ActionResult<object>> GenerateAll(CancellationToken cancellationToken)
+    public ActionResult<object> GenerateAll()
     {
         if (Plugin.Instance?.Configuration.Ai.Enabled != true)
         {
             return BadRequest(new { message = "AI lineup generation is disabled." });
         }
 
-        using var scope = _scopeFactory.CreateScope();
-        var autoApply = scope.ServiceProvider.GetRequiredService<AiChannelAutoApplyService>();
-        var results = await autoApply.ApplyToAllEligibleChannelsAsync(cancellationToken);
-        return Ok(new
+        if (_autoApply.IsGenerateAllJobRunning)
         {
-            results = results.Select(r => new
-            {
-                channelId = r.ChannelId,
-                name = r.ChannelName,
-                ok = r.Ok,
-                skipped = r.WasSkipped,
-                error = r.Error
-            })
-        });
+            return Ok(new { queued = false, alreadyRunning = true, job = BuildGenerateAllStatusResponse() });
+        }
+
+        _autoApply.QueueManualGenerateAllEligibleChannels();
+        return Ok(new { queued = true, job = BuildGenerateAllStatusResponse() });
+    }
+
+    [HttpGet("generate-all/status")]
+    public ActionResult<object> GetGenerateAllStatus()
+        => Ok(BuildGenerateAllStatusResponse());
+
+    private static object BuildGenerateAllStatusResponse()
+    {
+        var job = Plugin.Instance?.Configuration.AiGenerateAllJob ?? new AiGenerateAllJobState();
+        return new
+        {
+            isRunning = job.IsRunning,
+            totalDays = job.TotalDays,
+            totalChannels = job.TotalChannels,
+            totalSteps = job.TotalSteps,
+            completedSteps = job.CompletedSteps,
+            currentDay = job.CurrentDay,
+            currentChannelName = job.CurrentChannelName,
+            lineupsGenerated = job.LineupsGenerated,
+            lineupsFailed = job.LineupsFailed,
+            playoutDaysBuilt = job.PlayoutDaysBuilt,
+            playoutDaysFailed = job.PlayoutDaysFailed,
+            lastError = job.LastError,
+            startedAt = job.StartedAt,
+            completedAt = job.CompletedAt
+        };
     }
 
     private static string MaskKey(string? key)

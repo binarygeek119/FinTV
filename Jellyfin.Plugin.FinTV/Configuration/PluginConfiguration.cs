@@ -86,6 +86,16 @@ public class PluginConfiguration : BasePluginConfiguration
 
     public AiSettings Ai { get; set; } = new();
 
+    /// <summary>
+    /// Channel IDs waiting for AI auto-apply (lineup + 14-day playout rebuild).
+    /// </summary>
+    public List<Guid> AiPendingAutoApplyChannelIds { get; set; } = new();
+
+    /// <summary>
+    /// Progress for background staggered AI generate-all jobs.
+    /// </summary>
+    public AiGenerateAllJobState AiGenerateAllJob { get; set; } = new();
+
     public Ws4kpDockerSettings Ws4kp { get; set; } = new();
 
     public Ws3kpDockerSettings Ws3kp { get; set; } = new();
@@ -153,4 +163,39 @@ public class BlackframeTaskState
     public string? LastError { get; set; }
 
     public DateTime? LastCompletedAt { get; set; }
+}
+
+/// <summary>
+/// Progress for staggered AI generate-all (one channel, one day at a time).
+/// </summary>
+public class AiGenerateAllJobState
+{
+    public bool IsRunning { get; set; }
+
+    public int TotalDays { get; set; }
+
+    public int TotalChannels { get; set; }
+
+    public int TotalSteps { get; set; }
+
+    public int CompletedSteps { get; set; }
+
+    /// <summary>Current day being built (1-based for display).</summary>
+    public int CurrentDay { get; set; }
+
+    public string? CurrentChannelName { get; set; }
+
+    public int LineupsGenerated { get; set; }
+
+    public int LineupsFailed { get; set; }
+
+    public int PlayoutDaysBuilt { get; set; }
+
+    public int PlayoutDaysFailed { get; set; }
+
+    public string? LastError { get; set; }
+
+    public DateTime? StartedAt { get; set; }
+
+    public DateTime? CompletedAt { get; set; }
 }
