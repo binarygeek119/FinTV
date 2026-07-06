@@ -187,7 +187,8 @@ public class JellyfinCatalogService
             ApplyChannelFilterMetadata(
                 ApplyCatalogConstraints(items, channel, scheduleDate),
                 channel),
-            filter);
+            filter,
+            ChannelAiRules.GetYearConstraints(channel));
     }
 
     public IReadOnlyList<BaseItem> BrowseForAiManifest(Channel channel, ChannelCatalogMode catalogMode, int limit)
@@ -562,7 +563,7 @@ public class JellyfinCatalogService
         return query;
     }
 
-    private static IReadOnlyList<BaseItem> ApplyChannelFilterMetadata(
+    private IReadOnlyList<BaseItem> ApplyChannelFilterMetadata(
         IReadOnlyList<BaseItem> items,
         Channel channel)
     {
@@ -572,19 +573,22 @@ public class JellyfinCatalogService
             return items;
         }
 
+        var yearConstraints = ChannelAiRules.GetYearConstraints(channel);
         if (string.IsNullOrWhiteSpace(filter.TitleContains)
             && string.IsNullOrWhiteSpace(filter.MinRating)
-            && string.IsNullOrWhiteSpace(filter.MaxRating))
+            && string.IsNullOrWhiteSpace(filter.MaxRating)
+            && (yearConstraints is not null || (!filter.MinYear.HasValue && !filter.MaxYear.HasValue)))
         {
             return items;
         }
 
-        return ApplyFilterDefinitionConstraints(items, filter);
+        return ApplyFilterDefinitionConstraints(items, filter, yearConstraints);
     }
 
-    private static IReadOnlyList<BaseItem> ApplyFilterDefinitionConstraints(
+    private IReadOnlyList<BaseItem> ApplyFilterDefinitionConstraints(
         IReadOnlyList<BaseItem> items,
-        FilterDefinition? filter)
+        FilterDefinition? filter,
+        ChannelCatalogYearConstraints? yearConstraints = null)
     {
         if (filter is null)
         {
@@ -599,15 +603,18 @@ public class JellyfinCatalogService
                 return false;
             }
 
-            var year = GetReleaseYear(item);
-            if (filter.MinYear.HasValue && (!year.HasValue || year.Value < filter.MinYear.Value))
+            if (yearConstraints is null)
             {
-                return false;
-            }
+                var year = GetReleaseYear(item);
+                if (filter.MinYear.HasValue && (!year.HasValue || year.Value < filter.MinYear.Value))
+                {
+                    return false;
+                }
 
-            if (filter.MaxYear.HasValue && (!year.HasValue || year.Value > filter.MaxYear.Value))
-            {
-                return false;
+                if (filter.MaxYear.HasValue && (!year.HasValue || year.Value > filter.MaxYear.Value))
+                {
+                    return false;
+                }
             }
 
             if (!string.IsNullOrWhiteSpace(filter.MinRating)

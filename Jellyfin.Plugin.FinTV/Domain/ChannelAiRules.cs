@@ -18,7 +18,7 @@ public static class ChannelAiRules
             ChannelCatalogMode.Mixed),
         ["fintv-open-swim"] = new("Kids and teen shows and movies only.", ChannelCatalogMode.Mixed),
         ["fintv-reality"] = new(
-            "Reality TV themed shows and movies only. Items must have a Reality genre. Exclude crime, cops, and game shows.",
+            "Reality TV themed shows and movies. Match Reality genre or reality/competition keywords in title, plot, or tags. Exclude crime, cops, and game shows.",
             ChannelCatalogMode.Mixed),
         ["fintv-news"] = new("News programming only (News genre preferred).", ChannelCatalogMode.TvOnly),
         ["fintv-past-tense-news"] = new(
@@ -28,9 +28,9 @@ public static class ChannelAiRules
             "Crime and cop themed TV shows and movies. Match Crime/Cop/Police/Detective genres or crime-related plot/overview text. No game shows.",
             ChannelCatalogMode.Mixed),
         ["fintv-comedy"] = new(
-            "Comedy themed TV shows and movies only. Items must have a Comedy genre. Build a Fox-style Animation Domination block at 6pm (slots 36-41).",
+            "Comedy themed TV shows and movies. Match Comedy genre or comedy keywords in title, plot, or tags. Build a Fox-style Animation Domination block at 6pm (slots 36-41).",
             ChannelCatalogMode.Mixed),
-        ["fintv-game-shows"] = new("Game shows only.", ChannelCatalogMode.TvOnly),
+        ["fintv-game-shows"] = new("Game shows only.", ChannelCatalogMode.Mixed),
         ["fintv-education"] = new("Educational TV and documentaries (History, Discovery, science, nature).", ChannelCatalogMode.Mixed),
         ["fintv-youtube"] = new("YouTube-style or web video content.", ChannelCatalogMode.TvOnly),
         ["fintv-creature"] = new(
@@ -81,6 +81,15 @@ public static class ChannelAiRules
         ["fintv-reality"] = new ChannelCatalogGenreConstraints
         {
             RequiredGenreKeywords = new[] { "Reality" },
+            RequiredPlotKeywords = new[]
+            {
+                "reality tv", "reality show", "reality competition", "competition series",
+                "survivor", "big brother", "bachelor", "bachelorette", "real housewives",
+                "real world", "top chef", "project runway", "american idol", "the voice",
+                "dance moms", "love island", "storage wars", "pawn stars", "duck dynasty",
+                "keeping up with", "married at first sight", "90 day", "house hunters",
+                "naked and afraid", "alone", "gold rush", "deadliest catch", "survivorman"
+            },
             ExcludedGenreKeywords = new[] { "Crime", "Cop", "Police", "Game Show", "Game-Show", "GameShow" }
         },
         ["fintv-crime"] = new ChannelCatalogGenreConstraints
@@ -97,19 +106,44 @@ public static class ChannelAiRules
         },
         ["fintv-comedy"] = new ChannelCatalogGenreConstraints
         {
-            RequiredGenreKeywords = new[] { "Comedy" }
+            RequiredGenreKeywords = new[] { "Comedy" },
+            RequiredPlotKeywords = new[]
+            {
+                "comedy", "comedic", "comedian", "stand-up", "standup", "sitcom",
+                "sketch comedy", "late night", "funny", "humor", "humour", "parody",
+                "satire", "slapstick", "rom-com", "romcom"
+            }
         },
         ["fintv-funny"] = new ChannelCatalogGenreConstraints
         {
-            RequiredGenreKeywords = new[] { "Comedy" }
+            RequiredGenreKeywords = new[] { "Comedy" },
+            RequiredPlotKeywords = new[]
+            {
+                "comedy", "comedic", "comedian", "stand-up", "standup", "sitcom",
+                "sketch comedy", "late night", "funny", "humor", "humour"
+            }
         },
         ["fintv-game-shows"] = new ChannelCatalogGenreConstraints
         {
-            RequiredGenreKeywords = new[] { "Game Show", "Game-Show", "GameShow", "Quiz", "Trivia" }
+            RequiredGenreKeywords = new[] { "Game Show", "Game-Show", "GameShow", "Quiz", "Trivia" },
+            RequiredPlotKeywords = new[]
+            {
+                "game show", "quiz show", "trivia", "contestant", "prize money",
+                "wheel of fortune", "jeopardy", "family feud", "price is right",
+                "match game", "password", "millionaire", "deal or no deal",
+                "who wants to be", "are you smarter", "press your luck", "hollywood squares"
+            }
         },
         ["fintv-education"] = new ChannelCatalogGenreConstraints
         {
-            RequiredGenreKeywords = new[] { "Documentary", "Educational", "Education", "History", "Science", "Nature" }
+            RequiredGenreKeywords = new[] { "Documentary", "Educational", "Education", "History", "Science", "Nature" },
+            RequiredPlotKeywords = new[]
+            {
+                "documentary", "educational", "history", "science", "nature", "wildlife",
+                "planet earth", "cosmos", "universe", "archaeology", "biology", "physics",
+                "geography", "anthropology", "exploration", "discovery", "learn", "lecture",
+                "how it works", "engineering", "technology", "invention", "ancient"
+            }
         },
         ["fintv-creature"] = new ChannelCatalogGenreConstraints
         {
@@ -434,20 +468,14 @@ public class ChannelCatalogGenreConstraints
             return true;
         }
 
-        if (RequiredPlotKeywords.Count > 0)
+        if (RequiredGenreKeywords.Count > 0
+            && genres.Any(genre => RequiredGenreKeywords.Any(keyword =>
+                genre.Contains(keyword, StringComparison.OrdinalIgnoreCase))))
         {
-            return RequiredGenreKeywords.Count > 0
-                && genres.Any(genre => RequiredGenreKeywords.Any(keyword =>
-                    genre.Contains(keyword, StringComparison.OrdinalIgnoreCase)));
+            return true;
         }
 
-        if (genres.Count == 0)
-        {
-            return false;
-        }
-
-        return genres.Any(genre => RequiredGenreKeywords.Any(keyword =>
-            genre.Contains(keyword, StringComparison.OrdinalIgnoreCase)));
+        return RequiredGenreKeywords.Count == 0;
     }
 
     public bool MatchesItem(BaseItem item)

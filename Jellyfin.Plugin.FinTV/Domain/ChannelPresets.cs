@@ -37,7 +37,7 @@ public static class ChannelPresets
         Preset(125, 124.1m, "Past Tense News", ChannelContentType.TvShow, "TV Shows", "Content from Jellyfin library Past Tense News only", "fintv-past-tense-news", logoPath: null),
         Preset(128, 124.2m, "Cops And Robbers", ChannelContentType.TvShow, "TV Shows", "Crime and cop themed TV shows and movies (genre or plot)", "fintv-crime", "Shows/cops_and_robbers.png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(129, 124.3m, "Slappy", ChannelContentType.TvShow, "TV Shows", "Comedy TV and movies with 6pm Animation Domination block", "fintv-comedy", "Shows/Slappy.png", catalogMode: ChannelCatalogMode.Mixed),
-        Preset(130, 126.1m, "Winning", ChannelContentType.TvShow, "TV Shows", "Game shows channel", "fintv-game-shows", "Shows/winning.png"),
+        Preset(130, 126.1m, "Winning", ChannelContentType.TvShow, "TV Shows", "Game shows channel", "fintv-game-shows", "Shows/winning.png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(133, 126.2m, "GET LEARNEDED", ChannelContentType.TvShow, "TV Shows", "Educational tv shows and movies", "fintv-education", "Shows/GET_LEARNEDED.png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(134, 126.3m, "YouTube TV", ChannelContentType.TvShow, "TV Shows", "Youtube channels", "fintv-youtube", logoPath: null),
         Preset(203, 203.1m, "Creature Double Feature", ChannelContentType.Movie, "Movies", "Creature and monster movies and TV (genre, plot, or tags)", "fintv-creature", "Movies/Creature_Double_Feature.png", catalogMode: ChannelCatalogMode.Mixed),
