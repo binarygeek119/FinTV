@@ -283,7 +283,8 @@ public class AiLineupGeneratorService
             if (catalogById.TryGetValue(candidateId.Value, out var entry))
             {
                 if (yearConstraints is not null
-                    && (!entry.Year.HasValue || !yearConstraints.ContainsYear(entry.Year)))
+                    && entry.Year.HasValue
+                    && !yearConstraints.ContainsYear(entry.Year))
                 {
                     continue;
                 }
@@ -335,6 +336,7 @@ public class AiLineupGeneratorService
             return PackMarathonSlots(catalogById, channelFilterJson, yearConstraints, playoutTemplate);
         }
 
+        FillEmptySlotsFromCatalog(result, occupied, catalogById);
         return FillEmptySlotsWithFilterFallback(result, occupied, channelFilterJson);
     }
 
@@ -378,7 +380,8 @@ public class AiLineupGeneratorService
             }
 
             if (yearConstraints is not null
-                && (!entry.Year.HasValue || !yearConstraints.ContainsYear(entry.Year)))
+                && entry.Year.HasValue
+                && !yearConstraints.ContainsYear(entry.Year))
             {
                 continue;
             }
@@ -413,6 +416,7 @@ public class AiLineupGeneratorService
             cursor += span;
         }
 
+        FillEmptySlotsFromCatalog(result, occupied, catalogById);
         return FillEmptySlotsWithFilterFallback(result, occupied, channelFilterJson);
     }
 
@@ -444,6 +448,54 @@ public class AiLineupGeneratorService
             .OrderBy(e => e.Year ?? int.MaxValue)
             .ThenBy(e => e.PremiereDate ?? DateTime.MaxValue)
             .ThenBy(e => e.Title, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static List<LineupSlotDto> FillEmptySlotsFromCatalog(
+        Dictionary<int, LineupSlotDto> result,
+        bool[] occupied,
+        Dictionary<Guid, AiCatalogEntry> catalogById)
+    {
+        if (catalogById.Count == 0)
+        {
+            return result.Values.OrderBy(s => s.SlotIndex).ToList();
+        }
+
+        var fillQueue = catalogById.Values
+            .OrderBy(e => e.Year ?? int.MaxValue)
+            .ThenBy(e => e.PremiereDate ?? DateTime.MaxValue)
+            .ThenBy(e => e.Title, StringComparer.OrdinalIgnoreCase)
+            .Select(e => e.Id)
+            .ToList();
+
+        var queueIndex = 0;
+        for (var slotIndex = 0; slotIndex < 48; slotIndex++)
+        {
+            if (occupied[slotIndex])
+            {
+                continue;
+            }
+
+            var itemId = fillQueue[queueIndex % fillQueue.Count];
+            queueIndex++;
+            occupied[slotIndex] = true;
+            result[slotIndex] = new LineupSlotDto
+            {
+                SlotIndex = slotIndex,
+                SpanSlots = 1,
+                Candidates =
+                [
+                    new SlotCandidateDto
+                    {
+                        Kind = SlotCandidateKind.JellyfinItem,
+                        JellyfinItemId = itemId,
+                        Weight = 1,
+                        SortOrder = 0
+                    }
+                ]
+            };
+        }
+
+        return result.Values.OrderBy(s => s.SlotIndex).ToList();
     }
 
     private static List<LineupSlotDto> FillEmptySlotsWithFilterFallback(

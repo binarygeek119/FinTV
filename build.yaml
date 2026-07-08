@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.84"
+version: "0.0.2.85"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -81,7 +81,8 @@ artifacts:
   - "logos/binarygeek119/Weather/WeatherStar4000.png"
   - "scripts/install-docker-cli-jellyfin.sh"
 changelog: |-
-  - Fix Rebuild All skipping channels that already had future playout; it now replaces the full schedule window for every enabled channel
+  - Fix AI lineup generation dropping FlashBack and Retro picks when catalog items lack a release year in Jellyfin metadata
+  - Fill empty AI lineup slots from the channel catalog instead of only generic filter-query placeholders
   - Fix Retro TV, FlashBack, and other series lineups not building playout: episodes now inherit parent series year and genre rules instead of being rejected
   - Fix empty Live TV guide and EBS playback when future playout exists but nothing is scheduled for right now; hourly builder rebuilds from today instead of skipping
   - Remove Playwright .NET driver from the plugin zip on Windows and Linux; FinTV Jellyfin Docker image provides the driver via PLAYWRIGHT_DRIVER_SEARCH_PATH
