@@ -273,9 +273,26 @@ public class JellyfinCatalogService
 
     public bool MatchesYearConstraints(BaseItem item, ChannelCatalogYearConstraints constraints)
     {
-        if (item is Episode)
+        if (item is Episode episode)
         {
-            return false;
+            if (!constraints.UseFirstEpisodeYearForSeries)
+            {
+                return false;
+            }
+
+            var series = ResolveSeriesForEpisode(episode);
+            if (series is null)
+            {
+                return false;
+            }
+
+            var seriesYear = GetCatalogReleaseYear(series, constraints);
+            if (!seriesYear.HasValue)
+            {
+                return true;
+            }
+
+            return constraints.ContainsYear(seriesYear);
         }
 
         var year = GetCatalogReleaseYear(item, constraints);
@@ -289,12 +306,23 @@ public class JellyfinCatalogService
 
     public bool MatchesGenreConstraints(BaseItem item, ChannelCatalogGenreConstraints constraints)
     {
-        if (item is Episode)
+        if (item is Episode episode)
         {
-            return false;
+            var series = ResolveSeriesForEpisode(episode);
+            return series is not null && constraints.MatchesItem(series);
         }
 
         return constraints.MatchesItem(item);
+    }
+
+    private BaseItem? ResolveSeriesForEpisode(Episode episode)
+    {
+        if (episode.SeriesId == Guid.Empty)
+        {
+            return null;
+        }
+
+        return _libraryManager.GetItemById(episode.SeriesId);
     }
 
     private IReadOnlyList<BaseItem> ApplyCatalogConstraints(

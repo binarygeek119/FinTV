@@ -114,9 +114,31 @@ public class PlayoutBuilderService : BackgroundService
                 .Select(p => (DateTime?)p.Finish)
                 .MaxAsync(cancellationToken);
 
-            if (latestFinish.HasValue && latestFinish.Value >= horizonEnd)
+            var hasCoverageNow = await db.PlayoutItems
+                .AnyAsync(p => p.ChannelId == channel.Id && p.Start <= now && p.Finish > now, cancellationToken);
+
+            if (latestFinish.HasValue && latestFinish.Value >= horizonEnd && hasCoverageNow)
             {
                 await db.SaveChangesAsync(cancellationToken);
+                continue;
+            }
+
+            if (!hasCoverageNow)
+            {
+                var rebuildStart = now.Date;
+                await generator.BuildPlayoutAsync(
+                    channel,
+                    rebuildStart,
+                    horizonEnd,
+                    PlayoutBuildMode.ReplaceWindow,
+                    cancellationToken);
+                await db.SaveChangesAsync(cancellationToken);
+
+                _logger.LogInformation(
+                    "Rebuilt playout for channel {Channel} from {Start} to {End} (no current coverage)",
+                    channel.Name,
+                    rebuildStart,
+                    horizonEnd);
                 continue;
             }
 
