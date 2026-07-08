@@ -10,6 +10,7 @@ on:
     paths:
       - 'docker/jellyfin-unstable/**'
       - 'scripts/yt-dlp-version.txt'
+      - 'scripts/playwright-version.txt'
       - '.github/workflows/jellyfin-unstable-docker.yaml'
 
 permissions:
@@ -94,8 +95,10 @@ jobs:
           labels: |
             org.opencontainers.image.base.digest=${{ steps.upstream.outputs.digest }}
             fintv.docker-cli.version=29.5.2
+            fintv.playwright.version=1.49.0
           build-args: |
             DOCKER_CLI_VERSION=29.5.2
+            PLAYWRIGHT_VERSION=1.49.0
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

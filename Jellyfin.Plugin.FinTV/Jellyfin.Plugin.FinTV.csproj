@@ -92,84 +92,22 @@
     <Copy SourceFiles="@(BundledScriptPublish)" DestinationFiles="@(BundledScriptPublish->'$(PublishDir)scripts\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
 
-  <PropertyGroup>
-    <PlaywrightPackageVersion>1.49.0</PlaywrightPackageVersion>
-    <PlaywrightPackageRoot>$([System.IO.Path]::Combine('$(NuGetPackageRoot)', 'microsoft.playwright', '$(PlaywrightPackageVersion)'))</PlaywrightPackageRoot>
-    <PlaywrightBrowsersRoot>$([System.IO.Path]::Combine('$(PlaywrightPackageRoot)', '.playwright'))</PlaywrightBrowsersRoot>
-  </PropertyGroup>
-
-  <Target Name="CopyAllPlaywrightDrivers" AfterTargets="CopyPlaywrightFilesToOutput">
-    <PropertyGroup Condition="Exists('$(PlaywrightBrowsersRoot)')">
-      <PlaywrightNodeLicense>$([System.IO.Path]::Combine('$(PlaywrightBrowsersRoot)', 'node', 'LICENSE'))</PlaywrightNodeLicense>
-      <PlaywrightPs1Script>$([System.IO.Path]::Combine('$(PlaywrightPackageRoot)', 'buildTransitive', 'playwright.ps1'))</PlaywrightPs1Script>
-    </PropertyGroup>
-    <ItemGroup Condition="Exists('$(PlaywrightBrowsersRoot)')">
-      <PlaywrightWin64DriverFiles Include="$(PlaywrightBrowsersRoot)/node/win32_x64/**/*.*" />
-      <PlaywrightLinuxX64DriverFiles Include="$(PlaywrightBrowsersRoot)/node/linux-x64/**/*.*" />
-      <PlaywrightLinuxArm64DriverFiles Include="$(PlaywrightBrowsersRoot)/node/linux-arm64/**/*.*" />
-      <AllPlaywrightPackageFiles Include="$(PlaywrightBrowsersRoot)/package/**/*.*" />
-    </ItemGroup>
-    <Copy SourceFiles="@(PlaywrightWin64DriverFiles)"
-          DestinationFolder="$(OutputPath).playwright/node/win32_x64/%(RecursiveDir)"
-          SkipUnchangedFiles="true"
-          Condition="'@(PlaywrightWin64DriverFiles)' != ''" />
-    <Copy SourceFiles="@(PlaywrightLinuxX64DriverFiles)"
-          DestinationFolder="$(OutputPath).playwright/node/linux-x64/%(RecursiveDir)"
-          SkipUnchangedFiles="true"
-          Condition="'@(PlaywrightLinuxX64DriverFiles)' != ''" />
-    <Copy SourceFiles="@(PlaywrightLinuxArm64DriverFiles)"
-          DestinationFolder="$(OutputPath).playwright/node/linux-arm64/%(RecursiveDir)"
-          SkipUnchangedFiles="true"
-          Condition="'@(PlaywrightLinuxArm64DriverFiles)' != ''" />
-    <Copy SourceFiles="$(PlaywrightNodeLicense)"
-          DestinationFiles="$(OutputPath).playwright/node/LICENSE"
-          SkipUnchangedFiles="true"
-          Condition="Exists('$(PlaywrightNodeLicense)')" />
-    <Copy SourceFiles="@(AllPlaywrightPackageFiles)"
-          DestinationFolder="$(OutputPath).playwright/package/%(RecursiveDir)"
-          SkipUnchangedFiles="true"
-          Condition="'@(AllPlaywrightPackageFiles)' != ''" />
-    <Copy SourceFiles="$(PlaywrightPs1Script)"
-          DestinationFiles="$(OutputPath)playwright.ps1"
-          SkipUnchangedFiles="true"
-          Condition="Exists('$(PlaywrightPs1Script)')" />
+  <!-- Playwright .NET driver is not bundled in the plugin zip (FinTV Jellyfin Docker image on Linux; playwright install on Windows). -->
+  <Target Name="RemovePlaywrightDriverFromOutput" AfterTargets="Build">
+    <RemoveDir Directories="$(OutputPath).playwright" Condition="Exists('$(OutputPath).playwright')" />
+    <Delete Files="$(OutputPath)playwright.ps1" Condition="Exists('$(OutputPath)playwright.ps1')" />
   </Target>
 
-  <Target Name="CopyAllPlaywrightDriversToPublish" AfterTargets="Publish">
-    <PropertyGroup Condition="Exists('$(PlaywrightBrowsersRoot)')">
-      <PlaywrightNodeLicense>$([System.IO.Path]::Combine('$(PlaywrightBrowsersRoot)', 'node', 'LICENSE'))</PlaywrightNodeLicense>
-      <PlaywrightPs1Script>$([System.IO.Path]::Combine('$(PlaywrightPackageRoot)', 'buildTransitive', 'playwright.ps1'))</PlaywrightPs1Script>
-    </PropertyGroup>
-    <ItemGroup Condition="Exists('$(PlaywrightBrowsersRoot)')">
-      <PlaywrightWin64DriverPublishFiles Include="$(PlaywrightBrowsersRoot)/node/win32_x64/**/*.*" />
-      <PlaywrightLinuxX64DriverPublishFiles Include="$(PlaywrightBrowsersRoot)/node/linux-x64/**/*.*" />
-      <PlaywrightLinuxArm64DriverPublishFiles Include="$(PlaywrightBrowsersRoot)/node/linux-arm64/**/*.*" />
-      <AllPlaywrightPackagePublishFiles Include="$(PlaywrightBrowsersRoot)/package/**/*.*" />
+  <Target Name="ExcludePlaywrightDriverFromPublish" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="$([System.String]::Copy('%(RelativePath)').StartsWith('.playwright'))" />
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(RelativePath)' == 'playwright.ps1'" />
     </ItemGroup>
-    <Copy SourceFiles="@(PlaywrightWin64DriverPublishFiles)"
-          DestinationFolder="$(PublishDir).playwright/node/win32_x64/%(RecursiveDir)"
-          SkipUnchangedFiles="true"
-          Condition="'$(PublishDir)' != '' AND '@(PlaywrightWin64DriverPublishFiles)' != ''" />
-    <Copy SourceFiles="@(PlaywrightLinuxX64DriverPublishFiles)"
-          DestinationFolder="$(PublishDir).playwright/node/linux-x64/%(RecursiveDir)"
-          SkipUnchangedFiles="true"
-          Condition="'$(PublishDir)' != '' AND '@(PlaywrightLinuxX64DriverPublishFiles)' != ''" />
-    <Copy SourceFiles="@(PlaywrightLinuxArm64DriverPublishFiles)"
-          DestinationFolder="$(PublishDir).playwright/node/linux-arm64/%(RecursiveDir)"
-          SkipUnchangedFiles="true"
-          Condition="'$(PublishDir)' != '' AND '@(PlaywrightLinuxArm64DriverPublishFiles)' != ''" />
-    <Copy SourceFiles="$(PlaywrightNodeLicense)"
-          DestinationFiles="$(PublishDir).playwright/node/LICENSE"
-          SkipUnchangedFiles="true"
-          Condition="'$(PublishDir)' != '' AND Exists('$(PlaywrightNodeLicense)')" />
-    <Copy SourceFiles="@(AllPlaywrightPackagePublishFiles)"
-          DestinationFolder="$(PublishDir).playwright/package/%(RecursiveDir)"
-          SkipUnchangedFiles="true"
-          Condition="'$(PublishDir)' != '' AND '@(AllPlaywrightPackagePublishFiles)' != ''" />
-    <Copy SourceFiles="$(PlaywrightPs1Script)"
-          DestinationFiles="$(PublishDir)playwright.ps1"
-          SkipUnchangedFiles="true"
-          Condition="'$(PublishDir)' != '' AND Exists('$(PlaywrightPs1Script)')" />
+  </Target>
+
+  <Target Name="RemovePlaywrightDriverFromPublishDir" AfterTargets="Publish">
+    <RemoveDir Directories="$(PublishDir).playwright" Condition="Exists('$(PublishDir).playwright')" />
+    <Delete Files="$(PublishDir)playwright.ps1" Condition="Exists('$(PublishDir)playwright.ps1')" />
   </Target>
 
 </Project>

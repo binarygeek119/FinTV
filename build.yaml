@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.81"
+version: "0.0.2.82"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -81,6 +81,7 @@ artifacts:
   - "logos/binarygeek119/Weather/WeatherStar4000.png"
   - "scripts/install-docker-cli-jellyfin.sh"
 changelog: |-
+  - Remove Playwright .NET driver from the plugin zip on Windows and Linux; FinTV Jellyfin Docker image provides the driver via PLAYWRIGHT_DRIVER_SEARCH_PATH
   - Bundle Linux Playwright driver in the plugin zip so weather capture can call Playwright.CreateAsync() while Chromium runs in the Docker sidecar
   - Fix Special Presentation fixed-items editor crashing with bindCandidateRowActions is not defined
   - Fix missing channel logos after plugin updates by always merging newly bundled logos and refreshing the logo index on Apply Logos to Channels
