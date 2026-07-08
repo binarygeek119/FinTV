@@ -72,14 +72,18 @@ public class LogoSetService
             await _db.SaveChangesAsync(cancellationToken);
         }
 
+        var seeded = SeedBundledLogos(storagePath);
+        if (seeded > 0)
+        {
+            _logger.LogInformation(
+                "Merged {Count} bundled Binarygeek119 logos from the plugin install into {Path}",
+                seeded,
+                storagePath);
+        }
+
         var localCount = Directory.Exists(storagePath)
             ? Directory.EnumerateFiles(storagePath, "*.*", SearchOption.AllDirectories).Count(IsImageFile)
             : 0;
-
-        if (localCount == 0)
-        {
-            localCount = SeedBundledLogos(storagePath);
-        }
 
         if (localCount == 0)
         {
@@ -139,6 +143,7 @@ public class LogoSetService
             return 0;
         }
 
+        var copied = 0;
         foreach (var source in Directory.EnumerateFiles(bundledPath, "*.*", SearchOption.AllDirectories).Where(IsImageFile))
         {
             var relative = Path.GetRelativePath(bundledPath, source);
@@ -151,11 +156,10 @@ public class LogoSetService
             }
 
             File.Copy(source, destination);
+            copied++;
         }
 
-        return Directory.Exists(storagePath)
-            ? Directory.EnumerateFiles(storagePath, "*.*", SearchOption.AllDirectories).Count(IsImageFile)
-            : 0;
+        return copied;
     }
 
     public async Task ScanLocalLogoFolderAsync(LogoSet set, string folder, CancellationToken cancellationToken = default)
@@ -290,7 +294,7 @@ public class LogoSetService
         LogoSet? logoSet = null,
         CancellationToken cancellationToken = default)
     {
-        logoSet ??= await GetBinarygeek119SetForRepairAsync(cancellationToken);
+        logoSet = await RefreshBinarygeek119SetAsync(cancellationToken);
 
         var logoSets = await _db.LogoSets
             .Include(s => s.Entries)
@@ -360,25 +364,24 @@ public class LogoSetService
         return result;
     }
 
-    private async Task<LogoSet> GetBinarygeek119SetForRepairAsync(CancellationToken cancellationToken)
+    public async Task<LogoSet> RefreshBinarygeek119SetAsync(CancellationToken cancellationToken = default)
     {
-        const string setName = ChannelPresets.Binarygeek119LogoSetName;
-        var existing = await _db.LogoSets
-            .Include(s => s.Entries)
-            .FirstOrDefaultAsync(s => s.Name == setName, cancellationToken);
-
-        if (existing is not null && existing.Entries.Count > 0)
-        {
-            return existing;
-        }
-
-        return await EnsureBinarygeek119SetAsync(cancellationToken);
+        var set = await EnsureBinarygeek119SetAsync(cancellationToken);
+        await DownloadBinarygeek119SetFromGitHubAsync(set.StoragePath, cancellationToken);
+        await ScanLocalLogoFolderAsync(set, set.StoragePath, cancellationToken);
+        set.LastSyncedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(cancellationToken);
+        return set;
     }
+
+    private async Task<LogoSet> GetBinarygeek119SetForRepairAsync(CancellationToken cancellationToken)
+        => await RefreshBinarygeek119SetAsync(cancellationToken);
 
     private static bool HasResolvedLogo(Channel channel)
         => channel.LogoSetId.HasValue
             && !string.IsNullOrWhiteSpace(channel.LogoFileName)
-            && !string.IsNullOrWhiteSpace(channel.ChannelLogoPath);
+            && !string.IsNullOrWhiteSpace(channel.ChannelLogoPath)
+            && File.Exists(channel.ChannelLogoPath);
 
     private static void SanitizeChannelLogoReference(Channel channel, IReadOnlySet<Guid> validLogoSetIds)
     {
