@@ -59,19 +59,17 @@ public class LineupsController : ControllerBase
         var overrides = await _lineups.GetOverridesAsync(channelId, cancellationToken);
         if (channel.ContentType == ChannelContentType.Weather)
         {
+            var slots = WeatherLineupHelper.CreateDailySlots();
             return Ok(new
             {
                 lineup = new
                 {
-                    slots = new[]
+                    slots = slots.Select(s => new
                     {
-                        new
-                        {
-                            slotIndex = 0,
-                            spanSlots = 48,
-                            candidates = Array.Empty<object>()
-                        }
-                    }
+                        s.SlotIndex,
+                        s.SpanSlots,
+                        candidates = Array.Empty<object>()
+                    })
                 },
                 overrides = Array.Empty<object>(),
                 contentType = channel.ContentType,
@@ -185,29 +183,27 @@ public class LineupsController : ControllerBase
         var date = request.Date ?? DateOnly.FromDateTime(DateTime.Now);
         if (channel.ContentType == ChannelContentType.Weather)
         {
+            var weatherSlots = await _lineups.ResolveSlotsForDateAsync(channelId, date, cancellationToken);
             return Ok(new
             {
                 date,
                 isWeather = true,
                 title = "Local Weather",
-                description = "Live WeatherStar feed streaming 24/7 as one continuous programme.",
-                slots = new[]
+                description = "Live WeatherStar feed with 24 one-hour programme blocks per day.",
+                slots = weatherSlots.Select(s => new
                 {
-                    new
+                    s.SlotIndex,
+                    spanSlots = s.SpanSlots,
+                    candidateCount = 1,
+                    candidates = new[]
                     {
-                        slotIndex = 0,
-                        spanSlots = 48,
-                        candidateCount = 1,
-                        candidates = new[]
+                        new
                         {
-                            new
-                            {
-                                title = "Local Weather (live 24/7)",
-                                kind = "weather"
-                            }
+                            title = "Local Weather (live)",
+                            kind = "weather"
                         }
                     }
-                }
+                })
             });
         }
 

@@ -32,7 +32,7 @@ public static class ChannelAiRules
             ChannelCatalogMode.Mixed),
         ["fintv-game-shows"] = new("Game shows only.", ChannelCatalogMode.Mixed),
         ["fintv-education"] = new("Educational TV and documentaries (History, Discovery, science, nature).", ChannelCatalogMode.Mixed),
-        ["fintv-youtube"] = new("YouTube-style or web video content.", ChannelCatalogMode.TvOnly),
+        ["fintv-youtube"] = new("Only content from the Jellyfin TV library named YouTube.", ChannelCatalogMode.TvOnly),
         ["fintv-creature"] = new(
             "Creature and monster movies and TV. Match Horror/Sci-Fi/Monster genres or creature/monster keywords in title, plot, and tags.",
             ChannelCatalogMode.Mixed),
@@ -190,6 +190,10 @@ public static class ChannelAiRules
         ["fintv-past-tense-news"] = new ChannelCatalogLibraryConstraints
         {
             LibraryName = "Past Tense News"
+        },
+        ["fintv-youtube"] = new ChannelCatalogLibraryConstraints
+        {
+            LibraryName = "YouTube"
         }
     };
 

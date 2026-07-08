@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.77"
+version: "0.0.2.78"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -55,16 +55,19 @@ artifacts:
   - "logos/binarygeek119/EBS/offlineusa.jpg"
   - "logos/binarygeek119/Movies/Creature_Double_Feature.png"
   - "logos/binarygeek119/Movies/Hero_TV.png"
+  - "logos/binarygeek119/Movies/That's_Funny.png"
   - "logos/binarygeek119/Music Videos Channels/HeadPhone_Jack.png"
   - "logos/binarygeek119/Music Videos Channels/Rap-On-Tap.png"
   - "logos/binarygeek119/Music Videos Channels/The-Parody-Channel.png"
   - "logos/binarygeek119/Shows/cops_and_robbers.png"
   - "logos/binarygeek119/Shows/FlashBack_TV.png"
   - "logos/binarygeek119/Shows/Flip_Television.png"
+  - "logos/binarygeek119/News/Past_Tense_News.png"
   - "logos/binarygeek119/Shows/GET_LEARNEDED.png"
   - "logos/binarygeek119/Shows/Retro_TV.png"
   - "logos/binarygeek119/Shows/Slappy.png"
   - "logos/binarygeek119/Shows/winning.png"
+  - "logos/binarygeek119/Shows/YouTube_TV.png"
   - "logos/binarygeek119/Shows/[open_swim].png"
   - "logos/binarygeek119/The Holiday Channel/christmas-marry.png"
   - "logos/binarygeek119/The Holiday Channel/easter.png"
@@ -78,6 +81,11 @@ artifacts:
   - "logos/binarygeek119/Weather/WeatherStar4000.png"
   - "scripts/install-docker-cli-jellyfin.sh"
 changelog: |-
+  - Share WeatherStar Docker network namespace with Jellyfin (container:Jellyfin) like the Playwright sidecar; auto-recreate on stale attachment and show network status on the Weather tab
+  - Skip host.docker.internal rewrite for WeatherStar when both Playwright and WeatherStar share Jellyfin loopback
+  - Bundle official Past Tense News, YouTube TV, and That's Funny logos from open-channel-logos fintv2
+  - Weather channel lineup and EPG use 24 one-hour blocks instead of one continuous guide cell
+  - YouTube TV AI catalog restricted to the Jellyfin TV library named YouTube
   - Fix Playwright CDP not reachable after Jellyfin container recreate by detecting stale network-namespace attachment and auto-recreating the sidecar on Start
   - Improve Playwright tab status with stale-network diagnostics, container refs, and clearer Unraid recovery guidance
   - AI Apply Lineup rebuilds Live TV guide playout by default with a single Apply Lineup + Rebuild Guide button

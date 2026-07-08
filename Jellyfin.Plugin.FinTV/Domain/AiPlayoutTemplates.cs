@@ -87,7 +87,7 @@ public static class AiPlayoutTemplates
         {
             Id = "youtube-pbs",
             Name = "YouTube TV · PBS Style",
-            Description = "Public television pacing for YouTube-sourced libraries: morning how-to, daytime docs, evening prestige.",
+            Description = "YouTube TV library only: public-television pacing with morning how-to, daytime docs, and evening prestige.",
             Dayparts =
             [
                 new AiPlayoutDaypart(0, 5, "Overnight Encore",

@@ -16,6 +16,7 @@ RAW_BASE = f"https://raw.githubusercontent.com/{REPO}/{GIT_REF}/"
 LOGO_PREFIXES = (
     "EBS/",
     "Movies/",
+    "News/",
     "Shows/",
     "Music Videos Channels/",
     "The Holiday Channel/",

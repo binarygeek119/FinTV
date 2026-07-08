@@ -22,6 +22,7 @@ public class LogoSetService
     [
         "EBS/",
         "Movies/",
+        "News/",
         "Shows/",
         "Music Videos Channels/",
         "The Holiday Channel/",

@@ -210,47 +210,38 @@ public class LineupGeneratorService
                 .ToListAsync(cancellationToken);
 
             _db.PlayoutItems.RemoveRange(existing);
-
-            _db.PlayoutItems.Add(new PlayoutItem
-            {
-                ChannelId = channel.Id,
-                Start = startUtc,
-                Finish = endUtc,
-                Title = "Local Weather",
-                IsVirtual = true,
-                VirtualSource = VirtualContentSource.WeatherStar
-            });
         }
-        else
+
+        var appendStart = startUtc;
+        if (mode == PlayoutBuildMode.ExtendHorizon)
         {
-            var existing = await _db.PlayoutItems
+            var latestFinish = await _db.PlayoutItems
                 .Where(p =>
                     p.ChannelId == channel.Id
                     && p.IsVirtual
                     && p.VirtualSource == VirtualContentSource.WeatherStar
                     && p.Finish > startUtc)
-                .OrderByDescending(p => p.Finish)
-                .FirstOrDefaultAsync(cancellationToken);
+                .Select(p => (DateTime?)p.Finish)
+                .MaxAsync(cancellationToken);
 
-            if (existing is not null)
+            if (latestFinish.HasValue && latestFinish.Value > appendStart)
             {
-                if (existing.Finish < endUtc)
-                {
-                    existing.Finish = endUtc;
-                }
+                appendStart = latestFinish.Value;
             }
-            else
+        }
+
+        var tz = WeatherLineupHelper.GetScheduleTimeZone();
+        foreach (var (blockStart, blockEnd) in WeatherLineupHelper.BuildHourBlocksUtc(appendStart, endUtc, tz))
+        {
+            _db.PlayoutItems.Add(new PlayoutItem
             {
-                _db.PlayoutItems.Add(new PlayoutItem
-                {
-                    ChannelId = channel.Id,
-                    Start = startUtc,
-                    Finish = endUtc,
-                    Title = "Local Weather",
-                    IsVirtual = true,
-                    VirtualSource = VirtualContentSource.WeatherStar
-                });
-            }
+                ChannelId = channel.Id,
+                Start = blockStart,
+                Finish = blockEnd,
+                Title = WeatherLineupHelper.FormatHourTitle(blockStart, tz),
+                IsVirtual = true,
+                VirtualSource = VirtualContentSource.WeatherStar
+            });
         }
 
         channel.LastPlayoutBuiltAt = DateTime.UtcNow;

@@ -1085,7 +1085,7 @@
                 : '50317, Des Moines, IA, USA';
 
             if (hint) {
-                hint.textContent = 'Weather channels stream live local weather 24/7 as one continuous programme block.';
+                hint.textContent = 'Weather channels use 24 one-hour Local Weather blocks that play back-to-back all day.';
             }
 
             if (weatherBanner) {
@@ -1111,14 +1111,20 @@
 
     function renderWeatherLineupGrid() {
         const grid = $('lineup-grid');
-        grid.innerHTML = `<div class="slot-card has-items weather-slot weather-single-slot">
-                <div class="time">All day</div>
-                <div class="summary">Local Weather — Live 24/7</div>
-                <div class="count">Continuous WeatherStar feed</div>
+        grid.innerHTML = Array.from({ length: 24 }, (_, hour) => {
+            const start = slotTime(hour * 2);
+            const end = hour < 23 ? slotTime((hour + 1) * 2) : '12:00 AM';
+            return `<div class="slot-card has-items weather-slot" data-hour="${hour}" style="--slot-span:2;grid-column:span 2">
+                <div class="time">${start} – ${end}</div>
+                <div class="summary">Local Weather</div>
+                <div class="count">Live WeatherStar · 1 hour</div>
             </div>`;
+        }).join('');
 
-        grid.querySelector('.weather-single-slot').onclick = () =>
-            toast('Weather channels use a live 24/7 feed. Edit coordinates on the Channels tab.', 'info');
+        grid.querySelectorAll('.weather-slot').forEach((card) => {
+            card.onclick = () =>
+                toast('Weather channels use 24 hourly live blocks. Edit coordinates on the Channels tab.', 'info');
+        });
     }
 
     function renderLineupGrid() {
@@ -1353,7 +1359,7 @@
 
             if (data.isWeather) {
                 $('lineup-preview-banner').classList.remove('hidden');
-                $('lineup-preview-banner').textContent = `Preview for ${data.date}: 1/1 block — ${data.title || 'Local Weather'} (live 24/7).`;
+                $('lineup-preview-banner').textContent = `Preview for ${data.date}: 24/24 hourly blocks — ${data.title || 'Local Weather'} (live).`;
                 return;
             }
 
@@ -2557,10 +2563,31 @@
         const renderPanel = (elId, info, usingLocal) => {
             const el = $(elId);
             if (!el || !info) return;
-            const dockerLine = info.dockerAvailable
-                ? (info.running ? `Running · ${info.baseUrl}` : 'Stopped')
-                : 'Docker not available — install Docker and ensure Jellyfin can run docker';
-            el.innerHTML = `<div>${dockerLine}</div><div class="meta">${escapeHtml(info.containerName)} · ${escapeHtml(info.image)} · port ${info.hostPort}${usingLocal ? ' · active URL' : ''}</div>`;
+
+            let stateLine;
+            if (!info.dockerAvailable) {
+                stateLine = 'Docker not available — install Docker and ensure Jellyfin can run docker';
+            } else if (!info.running) {
+                stateLine = 'Stopped';
+            } else if (info.httpReachable) {
+                stateLine = `Running · HTTP reachable at ${info.baseUrl}`;
+            } else if (info.statusMessage) {
+                stateLine = info.statusMessage;
+            } else {
+                stateLine = 'Running but HTTP not reachable from Jellyfin — click Stop, then Start';
+            }
+
+            const networkLine = info.jellyfinInDocker
+                ? (info.sharesJellyfinNetwork
+                    ? `Jellyfin in Docker · sharing network namespace${info.jellyfinContainerRef ? ' · ' + info.jellyfinContainerRef : ''}${info.sidecarNetworkParent ? ' · parent ' + info.sidecarNetworkParent : ''}`
+                    : 'Jellyfin in Docker · host-published port')
+                : 'Jellyfin on host';
+
+            const detailLine = info.running && !info.httpReachable && info.httpListeningInsideSidecar
+                ? '<div class="meta">WeatherStar responds inside the container but not from Jellyfin — stale network attachment is likely.</div>'
+                : '';
+
+            el.innerHTML = `<div>${escapeHtml(stateLine)}</div><div class="meta">${escapeHtml(info.containerName)} · ${escapeHtml(info.image)} · port ${info.hostPort} · ${escapeHtml(networkLine)}${usingLocal ? ' · active URL' : ''}</div>${detailLine}`;
         };
         renderPanel('ws4kp-docker-status', status?.ws4kp, status?.usingLocalWs4kp);
         renderPanel('ws3kp-docker-status', status?.ws3kp, status?.usingLocalWs3kp);

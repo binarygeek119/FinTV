@@ -32,7 +32,9 @@ public class PlaywrightDockerBrowserService
         return $"http://127.0.0.1:{port}";
     }
 
-    public static bool RunsInsideDocker() => File.Exists("/.dockerenv");
+    public static bool RunsInsideDocker() => DockerSidecarNetworkHelper.RunsInsideDocker();
+
+    public bool SharesJellyfinNetwork => _jellyfinSharesSidecarLoopback;
 
     public async Task<bool> IsDockerAvailableAsync(CancellationToken cancellationToken = default)
     {
@@ -48,12 +50,15 @@ public class PlaywrightDockerBrowserService
     {
         var dockerAvailable = await IsDockerAvailableAsync(cancellationToken);
         var running = dockerAvailable && await IsContainerRunningAsync(cancellationToken);
-        var jellyfinContainerRef = await ResolveJellyfinContainerRefAsync(cancellationToken);
+        var jellyfinContainerRef = await DockerSidecarNetworkHelper.ResolveJellyfinContainerRefAsync(cancellationToken);
         var sidecarNetworkParent = running
-            ? await GetSidecarNetworkParentRefAsync(cancellationToken)
+            ? await DockerSidecarNetworkHelper.GetSidecarNetworkParentRefAsync(ContainerName, cancellationToken)
             : null;
         var staleNetworkAttachment = running
-            && await IsStaleNetworkAttachmentAsync(jellyfinContainerRef, sidecarNetworkParent, cancellationToken);
+            && await DockerSidecarNetworkHelper.IsStaleNetworkAttachmentAsync(
+                jellyfinContainerRef,
+                sidecarNetworkParent,
+                cancellationToken);
         var cdpReachable = false;
         var chromeListeningInsideSidecar = false;
 
@@ -115,9 +120,14 @@ public class PlaywrightDockerBrowserService
 
             if (await IsContainerRunningAsync(cancellationToken))
             {
-                var sidecarNetworkParent = await GetSidecarNetworkParentRefAsync(cancellationToken);
-                var jellyfinContainerRef = await ResolveJellyfinContainerRefAsync(cancellationToken);
-                if (await IsStaleNetworkAttachmentAsync(jellyfinContainerRef, sidecarNetworkParent, cancellationToken))
+                var sidecarNetworkParent = await DockerSidecarNetworkHelper.GetSidecarNetworkParentRefAsync(
+                    ContainerName,
+                    cancellationToken);
+                var jellyfinContainerRef = await DockerSidecarNetworkHelper.ResolveJellyfinContainerRefAsync(cancellationToken);
+                if (await DockerSidecarNetworkHelper.IsStaleNetworkAttachmentAsync(
+                        jellyfinContainerRef,
+                        sidecarNetworkParent,
+                        cancellationToken))
                 {
                     _logger.LogWarning(
                         "Playwright sidecar {ContainerName} is attached to stale network parent {NetworkParent}; expected {JellyfinContainer}. Recreating it.",
@@ -315,70 +325,17 @@ public class PlaywrightDockerBrowserService
 
     private async Task<string?> ResolveSidecarNetworkAsync(CancellationToken cancellationToken)
     {
-        var overrideNetwork = Environment.GetEnvironmentVariable("FINTV_DOCKER_NETWORK");
-        if (!string.IsNullOrWhiteSpace(overrideNetwork))
+        var resolution = await DockerSidecarNetworkHelper.ResolveSidecarNetworkAsync(_logger, cancellationToken);
+        _jellyfinSharesSidecarLoopback = resolution.SharesJellyfinNetwork;
+
+        if (resolution.SharesJellyfinNetwork)
         {
-            _jellyfinSharesSidecarLoopback = false;
-            return overrideNetwork.Trim();
+            _logger.LogInformation(
+                "Playwright sidecar CDP will be reachable at http://127.0.0.1:{Port}",
+                DefaultCdpPort);
         }
 
-        if (!RunsInsideDocker())
-        {
-            _jellyfinSharesSidecarLoopback = false;
-            return null;
-        }
-
-        var containerRef = await ResolveJellyfinContainerRefAsync(cancellationToken);
-        if (string.IsNullOrWhiteSpace(containerRef))
-        {
-            _jellyfinSharesSidecarLoopback = false;
-            return null;
-        }
-
-        // Chrome CDP accepts loopback only; sharing Jellyfin's network namespace avoids broken
-        // Docker port forwards (connection reset) on bridge/host/Unraid setups.
-        _jellyfinSharesSidecarLoopback = true;
-        _logger.LogInformation(
-            "Jellyfin container {ContainerRef} will share network namespace with Playwright sidecar; CDP at http://127.0.0.1:{Port}",
-            containerRef,
-            DefaultCdpPort);
-        return $"container:{containerRef}";
-    }
-
-    private static async Task<string?> ResolveJellyfinContainerRefAsync(CancellationToken cancellationToken)
-    {
-        var containerRef = Environment.GetEnvironmentVariable("FINTV_JELLYFIN_CONTAINER");
-        if (!string.IsNullOrWhiteSpace(containerRef))
-        {
-            return containerRef.Trim();
-        }
-
-        if (!File.Exists("/etc/hostname"))
-        {
-            return null;
-        }
-
-        var hostname = (await File.ReadAllTextAsync("/etc/hostname", cancellationToken)).Trim();
-        if (string.IsNullOrWhiteSpace(hostname))
-        {
-            return null;
-        }
-
-        var nameResult = await Cli.Wrap("docker")
-            .WithArguments(["inspect", "-f", "{{.Name}}", hostname])
-            .WithValidation(CommandResultValidation.None)
-            .ExecuteBufferedAsync(cancellationToken);
-
-        if (nameResult.ExitCode == 0)
-        {
-            var name = nameResult.StandardOutput.Trim().TrimStart('/');
-            if (!string.IsNullOrWhiteSpace(name))
-            {
-                return name;
-            }
-        }
-
-        return hostname;
+        return resolution.Network;
     }
 
     private static IEnumerable<string> BuildCdpProbeUrls(bool jellyfinSharesSidecarLoopback)
@@ -506,71 +463,6 @@ public class PlaywrightDockerBrowserService
         {
             Timeout = TimeSpan.FromSeconds(2)
         };
-    }
-
-    private async Task<string?> GetSidecarNetworkParentRefAsync(CancellationToken cancellationToken)
-    {
-        var result = await Cli.Wrap("docker")
-            .WithArguments(["inspect", "-f", "{{.HostConfig.NetworkMode}}", ContainerName])
-            .WithValidation(CommandResultValidation.None)
-            .ExecuteBufferedAsync(cancellationToken);
-
-        if (result.ExitCode != 0)
-        {
-            return null;
-        }
-
-        var mode = result.StandardOutput.Trim();
-        const string prefix = "container:";
-        if (!mode.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-
-        var parent = mode[prefix.Length..].Trim();
-        return string.IsNullOrWhiteSpace(parent) ? null : parent;
-    }
-
-    private async Task<bool> IsStaleNetworkAttachmentAsync(
-        string? jellyfinContainerRef,
-        string? sidecarNetworkParent,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(jellyfinContainerRef)
-            || string.IsNullOrWhiteSpace(sidecarNetworkParent))
-        {
-            return false;
-        }
-
-        var expectedId = await ResolveContainerIdAsync(jellyfinContainerRef, cancellationToken);
-        var parentId = await ResolveContainerIdAsync(sidecarNetworkParent, cancellationToken);
-        if (string.IsNullOrWhiteSpace(expectedId))
-        {
-            return false;
-        }
-
-        if (string.IsNullOrWhiteSpace(parentId))
-        {
-            return true;
-        }
-
-        return !string.Equals(expectedId, parentId, StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static async Task<string?> ResolveContainerIdAsync(string containerRef, CancellationToken cancellationToken)
-    {
-        var result = await Cli.Wrap("docker")
-            .WithArguments(["inspect", "-f", "{{.Id}}", containerRef])
-            .WithValidation(CommandResultValidation.None)
-            .ExecuteBufferedAsync(cancellationToken);
-
-        if (result.ExitCode != 0)
-        {
-            return null;
-        }
-
-        var id = result.StandardOutput.Trim();
-        return string.IsNullOrWhiteSpace(id) ? null : id;
     }
 
     private static string? BuildStatusMessage(

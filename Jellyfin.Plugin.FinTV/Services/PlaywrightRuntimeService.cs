@@ -16,13 +16,16 @@ public class PlaywrightRuntimeService
 
     private readonly ILogger<PlaywrightRuntimeService> _logger;
     private readonly PlaywrightDockerBrowserService _dockerBrowser;
+    private readonly WeatherStarDockerService _weatherDocker;
 
     public PlaywrightRuntimeService(
         ILogger<PlaywrightRuntimeService> logger,
-        PlaywrightDockerBrowserService dockerBrowser)
+        PlaywrightDockerBrowserService dockerBrowser,
+        WeatherStarDockerService weatherDocker)
     {
         _logger = logger;
         _dockerBrowser = dockerBrowser;
+        _weatherDocker = weatherDocker;
     }
 
     /// <summary>
@@ -118,6 +121,11 @@ public class PlaywrightRuntimeService
     /// <returns>Adjusted URL when Docker mode is active.</returns>
     public string AdjustWeatherPageUrlForRuntime(string url)
     {
+        if (_dockerBrowser.SharesJellyfinNetwork && _weatherDocker.SharesJellyfinNetwork)
+        {
+            return url;
+        }
+
         if (ShouldRewriteLocalhostForDocker(url))
         {
             return PlaywrightDockerBrowserService.AdjustWeatherPageUrlForDocker(url);

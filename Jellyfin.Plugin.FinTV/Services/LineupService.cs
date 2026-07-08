@@ -241,15 +241,7 @@ public class LineupService
         var channel = await _db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
         if (channel?.ContentType == ChannelContentType.Weather)
         {
-            return new List<LineupSlot>
-            {
-                new()
-                {
-                    SlotIndex = 0,
-                    SpanSlots = 48,
-                    Candidates = new List<SlotCandidate>()
-                }
-            };
+            return WeatherLineupHelper.CreateDailySlots();
         }
 
         var overrides = await GetOverridesAsync(channelId, cancellationToken);
