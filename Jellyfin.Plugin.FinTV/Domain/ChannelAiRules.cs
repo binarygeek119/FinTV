@@ -1,5 +1,6 @@
 namespace Jellyfin.Plugin.FinTV.Domain;
 
+using System.Text.RegularExpressions;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.TV;
 
@@ -16,7 +17,9 @@ public static class ChannelAiRules
         ["fintv-retro"] = new(
             "TV series and movies released from 1910 through 1969 only. For TV series, eligibility uses the first episode premiere year in that range. Exclude crime, cops, and game shows.",
             ChannelCatalogMode.Mixed),
-        ["fintv-open-swim"] = new("Kids and teen shows and movies only.", ChannelCatalogMode.Mixed),
+        ["fintv-open-swim"] = new(
+            "Kids and teen TV and movies from any release year (no year cap). Only kid-rated content up to TV-PG. Prioritize Nickelodeon, Disney Channel, Fox Kids, and Cartoon Network style cartoons and live-action kids shows from any era. Exclude horror, crime, war, and adult thriller genres.",
+            ChannelCatalogMode.Mixed),
         ["fintv-reality"] = new(
             "Reality TV themed shows and movies. Match Reality genre or reality/competition keywords in title, plot, or tags. Exclude crime, cops, and game shows.",
             ChannelCatalogMode.Mixed),
@@ -25,10 +28,10 @@ public static class ChannelAiRules
             "Only content from the Jellyfin library named Past Tense News. Schedule clips in chronological order of the events they cover and treat each story as breaking live news.",
             ChannelCatalogMode.TvOnly),
         ["fintv-crime"] = new(
-            "Crime and cop themed TV shows and movies. Match Crime/Cop/Police/Detective genres or crime-related plot/overview text. No game shows.",
+            "Crime and cop themed TV shows and movies. Match Crime/Cop/Police/Detective genres or crime-related plot/overview text. Exclude animated comedies, game shows, and spy-comedy series that only mention CIA/FBI without crime themes.",
             ChannelCatalogMode.Mixed),
         ["fintv-comedy"] = new(
-            "Comedy themed TV shows and movies. Match Comedy genre or comedy keywords in title, plot, or tags. Build a Fox-style Animation Domination block at 6pm (slots 36-41).",
+            "Comedy themed TV shows and movies. Match Comedy genre or comedy keywords in title, plot, or tags. Build Slappy's Toon Takeover at 6pm (slots 36-41).",
             ChannelCatalogMode.Mixed),
         ["fintv-game-shows"] = new("Game shows only.", ChannelCatalogMode.Mixed),
         ["fintv-education"] = new("Educational TV and documentaries (History, Discovery, science, nature).", ChannelCatalogMode.Mixed),
@@ -76,7 +79,22 @@ public static class ChannelAiRules
         },
         ["fintv-open-swim"] = new ChannelCatalogGenreConstraints
         {
-            ExcludedGenreKeywords = new[] { "Horror", "Thriller", "Crime", "War", "Mystery" }
+            RequiredGenreKeywords = new[] { "Kids", "Family", "Children", "Animation", "Animated", "Cartoon", "Preschool" },
+            RequiredPlotKeywords = new[]
+            {
+                "nickelodeon", "nicktoons", "nick jr", "disney", "disney channel", "disney junior", "playhouse disney",
+                "cartoon network", "fox kids", "fox box", "kids wb", "wb kids", "saturday morning", "after school",
+                "spongebob", "rugrats", "doug", "hey arnold", "catdog", "rocko's modern life", "fairly oddparents",
+                "avatar", "legend of korra", "invader zim", "drake and josh", "icarly", "victorious", "blue's clues",
+                "dora the explorer", "paw patrol", "kim possible", "phineas and ferb", "gravity falls", "ducktales",
+                "darkwing duck", "goof troop", "recess", "lizzie mcguire", "suite life", "mickey mouse", "winnie the pooh",
+                "dexter's laboratory", "powerpuff girls", "cow and chicken", "ed edd n eddy", "johnny bravo",
+                "courage the cowardly dog", "adventure time", "steven universe", "amazing world of gumball",
+                "teen titans", "samurai jack", "codename kids next door", "foster's home", "ben 10", "animaniacs",
+                "tiny toon", "scooby-doo", "looney tunes", "sesame street", "mister rogers", "mr. rogers", "peppa pig",
+                "clarissa", "all that", "kenan and kel", "goosebumps", "mighty morphin", "ninja turtles"
+            },
+            ExcludedGenreKeywords = new[] { "Horror", "Thriller", "Crime", "War" }
         },
         ["fintv-reality"] = new ChannelCatalogGenreConstraints
         {
@@ -102,7 +120,16 @@ public static class ChannelAiRules
                 "gangster", "mob", "mafia", "prison", "prosecutor", "law enforcement", "sheriff",
                 "arson", "kidnapping", "larceny", "felony", "swat", "forensic"
             },
-            ExcludedGenreKeywords = new[] { "Game Show", "Game-Show", "GameShow" }
+            RestrictedPlotKeywords = new[] { "cia", "fbi", "undercover", "investigation" },
+            PlotMatchSupportingGenreKeywords = new[]
+            {
+                "Crime", "Cop", "Police", "Detective", "Thriller", "Mystery", "Suspense", "Drama", "Action"
+            },
+            ExcludedGenreKeywords = new[]
+            {
+                "Game Show", "Game-Show", "GameShow",
+                "Animation", "Animated", "Cartoon", "Anime"
+            }
         },
         ["fintv-comedy"] = new ChannelCatalogGenreConstraints
         {
@@ -456,6 +483,16 @@ public class ChannelCatalogGenreConstraints
 
     public IReadOnlyList<string> ExcludedGenreKeywords { get; set; } = Array.Empty<string>();
 
+    /// <summary>
+    /// Plot keywords that require a supporting genre when the item does not match <see cref="RequiredGenreKeywords"/>.
+    /// </summary>
+    public IReadOnlyList<string> RestrictedPlotKeywords { get; set; } = Array.Empty<string>();
+
+    /// <summary>
+    /// Genres that satisfy a restricted plot-only match (for example CIA mentions on thrillers).
+    /// </summary>
+    public IReadOnlyList<string> PlotMatchSupportingGenreKeywords { get; set; } = Array.Empty<string>();
+
     public bool Matches(IReadOnlyList<string>? genres)
     {
         genres ??= Array.Empty<string>();
@@ -510,16 +547,36 @@ public class ChannelCatalogGenreConstraints
             return true;
         }
 
-        if (RequiredPlotKeywords.Count > 0 && MatchesPlotOrTitle(item))
+        if (RequiredPlotKeywords.Count > 0 && TryMatchPlotOrTitle(item, out var matchedKeyword))
         {
+            var matchedRequiredGenre = RequiredGenreKeywords.Count > 0
+                && genres.Any(genre => RequiredGenreKeywords.Any(keyword =>
+                    genre.Contains(keyword, StringComparison.OrdinalIgnoreCase)));
+
+            if (matchedRequiredGenre)
+            {
+                return true;
+            }
+
+            if (RestrictedPlotKeywords.Count > 0
+                && matchedKeyword is not null
+                && RestrictedPlotKeywords.Any(keyword =>
+                    string.Equals(keyword, matchedKeyword, StringComparison.OrdinalIgnoreCase)))
+            {
+                return PlotMatchSupportingGenreKeywords.Count > 0
+                    && genres.Any(genre => PlotMatchSupportingGenreKeywords.Any(keyword =>
+                        genre.Contains(keyword, StringComparison.OrdinalIgnoreCase)));
+            }
+
             return true;
         }
 
         return false;
     }
 
-    private bool MatchesPlotOrTitle(BaseItem item)
+    private bool TryMatchPlotOrTitle(BaseItem item, out string? matchedKeyword)
     {
+        matchedKeyword = null;
         var searchable = new List<string>();
         if (!string.IsNullOrWhiteSpace(item.Name))
         {
@@ -543,8 +600,24 @@ public class ChannelCatalogGenreConstraints
         }
 
         var blob = string.Join(' ', searchable);
-        return RequiredPlotKeywords.Any(keyword =>
-            blob.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+        matchedKeyword = RequiredPlotKeywords.FirstOrDefault(keyword => ContainsPlotKeyword(blob, keyword));
+        return matchedKeyword is not null;
+    }
+
+    private static bool ContainsPlotKeyword(string blob, string keyword)
+    {
+        if (string.IsNullOrWhiteSpace(keyword))
+        {
+            return false;
+        }
+
+        if (keyword.Contains(' ', StringComparison.Ordinal))
+        {
+            return blob.Contains(keyword, StringComparison.OrdinalIgnoreCase);
+        }
+
+        var pattern = $@"(?<![\p{{L}}\p{{N}}]){Regex.Escape(keyword)}(?![\p{{L}}\p{{N}}])";
+        return Regex.IsMatch(blob, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     }
 }
 

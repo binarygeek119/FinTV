@@ -3,6 +3,13 @@
 
     const CONTENT_TYPES = ['TV Show', 'Movie', 'Music Video', 'Music', 'Weather'];
     const CANDIDATE_KINDS = ['Jellyfin Item', 'Collection', 'Filter Query', 'Playlist / List'];
+    const SLOT_CANDIDATE_KIND_VALUES = {
+        0: 0, 1: 1, 2: 2, 3: 3,
+        jellyfinItem: 0, JellyfinItem: 0,
+        collection: 1, Collection: 1,
+        filterQuery: 2, FilterQuery: 2,
+        playlist: 3, Playlist: 3
+    };
     const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     const CONTENT_TYPE_VALUES = {
         0: 0, 1: 1, 2: 2, 3: 3, 4: 4,
@@ -560,12 +567,23 @@
         return itemTitleCache[id] || id;
     }
 
+    function candidateKind(candidate) {
+        return resolveEnumValue(SLOT_CANDIDATE_KIND_VALUES, candidate?.kind ?? candidate?.Kind, 0);
+    }
+
     function candidateSummary(candidate) {
-        if (candidate.kind === 1 && candidate.collectionName) return `Collection: ${candidate.collectionName}`;
-        if (candidate.kind === 2 && candidate.filterJson) return 'Filter query';
-        if (candidate.kind === 3 && candidate.finTvListId) return `List: ${listNameCache[candidate.finTvListId] || candidate.finTvListId}`;
-        if (candidate.jellyfinItemId) return itemLabel(candidate.jellyfinItemId);
-        return CANDIDATE_KINDS[candidate.kind] || 'Candidate';
+        if (!candidate) return 'Empty slot';
+        const kind = candidateKind(candidate);
+        const itemId = candidate.jellyfinItemId || candidate.JellyfinItemId;
+        const collectionName = candidate.collectionName || candidate.CollectionName;
+        const filterJson = candidate.filterJson || candidate.FilterJson;
+        const finTvListId = candidate.finTvListId || candidate.FinTvListId;
+
+        if (kind === 1 && collectionName) return `Collection: ${collectionName}`;
+        if (kind === 2 && filterJson) return 'Filter query';
+        if (kind === 3 && finTvListId) return `List: ${listNameCache[finTvListId] || finTvListId}`;
+        if (itemId) return itemLabel(itemId);
+        return CANDIDATE_KINDS[kind] || 'Candidate';
     }
 
     function slotIndexFromTime(value) {
@@ -1302,7 +1320,7 @@
         if (!candidates.length) return '<div class="hint">No candidates yet.</div>';
         return candidates.map((c, i) => `<div class="candidate-row">
             <div><div class="title">${escapeHtml(candidateSummary(c))}</div>
-            <div class="sub">${CANDIDATE_KINDS[c.kind] || 'Item'} · weight ${c.weight || 1}</div></div>
+            <div class="sub">${CANDIDATE_KINDS[candidateKind(c)] || 'Item'} · weight ${c.weight || 1}</div></div>
             <input type="number" min="1" value="${c.weight || 1}" data-weight="${i}" style="width:70px">
             <button type="button" data-remove-candidate="${i}">Remove</button>
         </div>`).join('');
@@ -2052,12 +2070,6 @@
     }
 
     const AI_CATALOG_MODES = ['TV only', 'Movies only', 'Both', 'Music videos only'];
-    const SLOT_CANDIDATE_KIND = {
-        jellyfinItem: 0, JellyfinItem: 0,
-        collection: 1, Collection: 1,
-        filterQuery: 2, FilterQuery: 2
-    };
-
     function buildAiApplyPayload() {
         const source = aiPreview?.lineupSlots || aiPreview?.LineupSlots;
         if (!Array.isArray(source) || source.length === 0) {
@@ -2068,7 +2080,7 @@
             SlotIndex: slot.slotIndex ?? slot.SlotIndex,
             SpanSlots: Math.max(1, Math.min(8, Number(slot.spanSlots ?? slot.SpanSlots ?? 1))),
             Candidates: (slot.candidates || slot.Candidates || []).map((c, index) => ({
-                Kind: resolveEnumValue(SLOT_CANDIDATE_KIND, c.kind ?? c.Kind, 0),
+                Kind: resolveEnumValue(SLOT_CANDIDATE_KIND_VALUES, c.kind ?? c.Kind, 0),
                 JellyfinItemId: c.jellyfinItemId ?? c.JellyfinItemId ?? null,
                 CollectionName: c.collectionName ?? c.CollectionName ?? null,
                 FilterJson: c.filterJson ?? c.FilterJson ?? null,

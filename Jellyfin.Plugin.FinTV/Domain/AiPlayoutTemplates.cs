@@ -40,17 +40,17 @@ public static class AiPlayoutTemplates
         {
             Id = "kids-all-day",
             Name = "Kids All Day",
-            Description = "Youth-focused programming across most of the day with lighter primetime.",
+            Description = "OpenSwim: Nickelodeon, Disney, Fox Kids, and Cartoon Network style kids programming all day.",
             Dayparts =
             [
                 new AiPlayoutDaypart(0, 11, "Overnight",
-                    "Gentle reruns or preschool-safe content only; no adult themes."),
+                    "Gentle Nick/Disney preschool and cartoon reruns; no adult themes."),
                 new AiPlayoutDaypart(12, 33, "Kids Block",
-                    "Kids and family shows and movies appropriate for children."),
+                    "Nickelodeon, Disney Channel, Fox Kids, and Cartoon Network style cartoons and live-action kids shows."),
                 new AiPlayoutDaypart(34, 37, "Tween Hour",
-                    "Tween and teen-friendly shows; still no adult content."),
+                    "Tween-friendly Nick and Disney live-action and animated series."),
                 new AiPlayoutDaypart(38, 47, "Family Primetime",
-                    "Family-friendly primetime movies and shows; avoid adult-only titles.")
+                    "Family-friendly kids movies and flagship cartoon blocks; avoid adult-only titles.")
             ]
         },
         new AiPlayoutTemplate
@@ -166,8 +166,8 @@ public static class AiPlayoutTemplates
         new AiPlayoutTemplate
         {
             Id = "slappy-comedy",
-            Name = "Slappy · Comedy + Animation Domination",
-            Description = "124.3 Slappy: comedy all day with a Fox-style adult animation block at 6pm.",
+            Name = "Slappy · Comedy + Slappy's Toon Takeover",
+            Description = "124.3 Slappy: comedy all day with Slappy's Toon Takeover adult animation block at 6pm.",
             Dayparts =
             [
                 new AiPlayoutDaypart(0, 11, "Overnight Comedy",
@@ -178,8 +178,8 @@ public static class AiPlayoutTemplates
                     "Comedy talk, sketch, and sitcom blocks grouped by show."),
                 new AiPlayoutDaypart(30, 35, "Afternoon Comedy",
                     "Comedy movies or multi-episode sitcom marathons before primetime.", maxSpanSlots: 4),
-                new AiPlayoutDaypart(36, 41, "Animation Domination",
-                    "Fox-style 6pm-9pm block (slots 36-41): stack adult animated comedy back-to-back (e.g. Family Guy, American Dad, Bob's Burgers, The Simpsons, Futurama). Run 2-3 episodes of the same series consecutively; use spanSlots=2 for hour-long episodes.", maxSpanSlots: 4),
+                new AiPlayoutDaypart(36, 41, "Slappy's Toon Takeover",
+                    "6pm-9pm block (slots 36-41): stack adult animated comedy back-to-back (e.g. Family Guy, American Dad, Bob's Burgers, The Simpsons, Futurama). Run 2-3 episodes of the same series consecutively; use spanSlots=2 for hour-long episodes.", maxSpanSlots: 4),
                 new AiPlayoutDaypart(42, 47, "Late Night Comedy",
                     "Edgier animated or live-action comedy; adult sitcoms and late-night style comedy.")
             ]
@@ -234,7 +234,9 @@ public static class AiPlayoutTemplates
     {
         if (template.Dayparts.Count == 0)
         {
-            return string.Empty;
+            return UsesSeriesEpisodeBlocking(template)
+                ? BuildSeriesEpisodeBlockingSection(template)
+                : string.Empty;
         }
 
         var lines = new List<string>
@@ -257,6 +259,12 @@ public static class AiPlayoutTemplates
             lines.Add("- Do not place adult-only titles in Morning Cartoons or After School blocks.");
         }
 
+        if (template.Id is "kids-all-day")
+        {
+            lines.Add("- No release year cap; classic and modern kid-rated titles are equally eligible.");
+            lines.Add("- Prefer Nickelodeon, Disney Channel, Fox Kids, and Cartoon Network style cartoons and live-action kids shows.");
+        }
+
         if (template.Id is "movie-marathon" or "holiday-channel")
         {
             lines.Add("- Pack titles back-to-back from slot 0 with zero empty slots between features.");
@@ -267,7 +275,47 @@ public static class AiPlayoutTemplates
             lines.Add("- Within each daypart, schedule movies in release chronological order (earliest catalog year first).");
         }
 
+        if (UsesSeriesEpisodeBlocking(template))
+        {
+            lines.Add(string.Empty);
+            lines.Add(BuildSeriesEpisodeBlockingSection(template));
+        }
+
         return string.Join('\n', lines);
+    }
+
+    private static bool UsesSeriesEpisodeBlocking(AiPlayoutTemplate template)
+        => template.Id is not ("movie-marathon" or "holiday-channel" or "music-videos" or "past-tense-news");
+
+    private static string BuildSeriesEpisodeBlockingSection(AiPlayoutTemplate template)
+    {
+        var marathonSlots = GetMarathonDaypartHint(template);
+        return string.Join('\n', new[]
+        {
+            "Series episode blocking:",
+            "- For TV series, use consecutive slots with the same jellyfinItemId; FinTV plays the next episode in order for each consecutive slot.",
+            "- Typical blocks: 1-4 consecutive episodes of the same series (1-4 back-to-back slots with the same jellyfinItemId). Use spanSlots=1 per slot for ~30-minute episodes, or spanSlots=2 for hour-long episodes.",
+            "- Mini-marathon: include exactly ONE mini-marathon per lineup — 5-6 consecutive slots (max 6 episodes) of the same series. " + marathonSlots,
+            "- Keep mini-marathons rare and special (about 1-2 per week channel-wide). On this daily template include one; use lineup overrides on other weekdays if you want a second weekly marathon or none.",
+            "- Between blocks, switch to a different series or movie; do not repeat the same series later the same day unless it is a different block separated by other shows.",
+            "- Movies are single entries: one jellyfinItemId with spanSlots from runtime, not multi-slot episode blocks."
+        });
+    }
+
+    private static string GetMarathonDaypartHint(AiPlayoutTemplate template)
+    {
+        var premium = template.Dayparts.FirstOrDefault(d =>
+            d.Name.Contains("primetime", StringComparison.OrdinalIgnoreCase)
+            || d.Name.Contains("prime", StringComparison.OrdinalIgnoreCase)
+            || d.Name.Contains("toon takeover", StringComparison.OrdinalIgnoreCase)
+            || d.Name.Contains("family primetime", StringComparison.OrdinalIgnoreCase)
+            || d.Name.Contains("after school", StringComparison.OrdinalIgnoreCase)
+            || d.Name.Contains("tween", StringComparison.OrdinalIgnoreCase)
+            || d.Name.Contains("kids block", StringComparison.OrdinalIgnoreCase));
+
+        return premium is null
+            ? "Place it in the channel's best flagship daypart (late afternoon or primetime)."
+            : $"Place it in {premium.Name} (slots {premium.FormatSlotRange()}) or another flagship daypart.";
     }
 }
 

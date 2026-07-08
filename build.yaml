@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.85"
+version: "0.0.2.91"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -81,6 +81,12 @@ artifacts:
   - "logos/binarygeek119/Weather/WeatherStar4000.png"
   - "scripts/install-docker-cli-jellyfin.sh"
 changelog: |-
+  - AI lineups group TV series into 1-4 episode blocks with occasional 5-6 episode mini-marathons in flagship dayparts (about 1-2 per week)
+  - OpenSwim catalog and AI lineups prioritize Nickelodeon, Disney Channel, Fox Kids, and Cartoon Network style kid-rated shows from any year
+  - Rename Slappy channel 6pm block from Animation Domination to Slappy's Toon Takeover
+  - Clarify OpenSwim has no release year cap; catalog and AI lineups include any-year kid-rated TV-PG shows and movies
+  - Fix Cops And Robbers catalog matching animated spy comedies like American Dad via loose CIA/FBI plot keywords; exclude animation and require crime/thriller genres for restricted plot matches
+  - Fix lineup grid showing "Candidate" instead of show titles or "Filter query" when Jellyfin 12 returns camelCase slot candidate kind strings
   - Fix AI lineup generation dropping FlashBack and Retro picks when catalog items lack a release year in Jellyfin metadata
   - Fill empty AI lineup slots from the channel catalog instead of only generic filter-query placeholders
   - Fix Retro TV, FlashBack, and other series lineups not building playout: episodes now inherit parent series year and genre rules instead of being rejected

@@ -613,7 +613,8 @@ public class AiLineupGeneratorService
             - spanSlots = number of consecutive 30-minute blocks (1-8). Use ceil(runtimeMinutes / 30) for movies and long episodes.
             - Assign enough spanSlots to cover the item runtime; under-sized spans truncate content during playout.
             - Do not overlap spans. slotIndex + spanSlots must be <= 48.
-            - Vary content across dayparts; avoid repeating the same title in adjacent blocks.
+            - Group TV series into consecutive episode blocks (same jellyfinItemId in back-to-back slots); typical blocks are 1-4 episodes, with one 5-6 episode mini-marathon in a flagship daypart.
+            - Vary series across the day; switch shows between blocks instead of isolating single random episodes.
             - Schedule movies in release chronological order using catalog year and premiere date (earliest first).
             - Catalog modes: TvOnly (series), MovieOnly, Mixed (TV+movies), MusicVideoOnly (music videos).
             """ + $"\nCatalog mode: {catalogMode}." + templateBlock;
@@ -629,6 +630,7 @@ public class AiLineupGeneratorService
         var yearConstraints = ChannelAiRules.GetYearConstraints(channel);
         var genreConstraints = ChannelAiRules.GetGenreConstraints(channel);
         var libraryConstraints = ChannelAiRules.GetLibraryConstraints(channel);
+        var channelFilter = FilterDefinition.Parse(channel.FilterJson);
         HolidayDefinition? activeHoliday = null;
         if (_holidays.IsHolidayChannel(channel))
         {
@@ -667,6 +669,14 @@ public class AiLineupGeneratorService
                 {
                     requiredKeywords = genreConstraints.RequiredGenreKeywords,
                     excludedKeywords = genreConstraints.ExcludedGenreKeywords
+                },
+            ratingFilter = string.IsNullOrWhiteSpace(channelFilter?.MinRating)
+                && string.IsNullOrWhiteSpace(channelFilter?.MaxRating)
+                ? null
+                : new
+                {
+                    minRating = channelFilter?.MinRating,
+                    maxRating = channelFilter?.MaxRating
                 },
             libraryFilter = libraryConstraints is null
                 ? null
