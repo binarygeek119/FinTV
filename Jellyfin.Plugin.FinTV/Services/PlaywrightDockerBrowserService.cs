@@ -48,12 +48,23 @@ public class PlaywrightDockerBrowserService
     {
         var dockerAvailable = await IsDockerAvailableAsync(cancellationToken);
         var running = dockerAvailable && await IsContainerRunningAsync(cancellationToken);
+        var jellyfinContainerRef = await ResolveJellyfinContainerRefAsync(cancellationToken);
+        var sidecarNetworkParent = running
+            ? await GetSidecarNetworkParentRefAsync(cancellationToken)
+            : null;
+        var staleNetworkAttachment = running
+            && await IsStaleNetworkAttachmentAsync(jellyfinContainerRef, sidecarNetworkParent, cancellationToken);
         var cdpReachable = false;
+        var chromeListeningInsideSidecar = false;
 
         if (running)
         {
             await ResolveSidecarNetworkAsync(cancellationToken);
-            cdpReachable = await ProbeCdpReadyAsync(cancellationToken);
+            chromeListeningInsideSidecar = await IsChromeRespondingInsideSidecarAsync(cancellationToken);
+            if (!staleNetworkAttachment)
+            {
+                cdpReachable = await ProbeCdpReadyAsync(cancellationToken);
+            }
         }
 
         return new PlaywrightDockerStatus
@@ -61,12 +72,24 @@ public class PlaywrightDockerBrowserService
             DockerAvailable = dockerAvailable,
             Running = running,
             CdpReachable = cdpReachable,
+            ChromeListeningInsideSidecar = chromeListeningInsideSidecar,
+            StaleNetworkAttachment = staleNetworkAttachment,
+            JellyfinContainerRef = jellyfinContainerRef,
+            SidecarNetworkParent = sidecarNetworkParent,
             ContainerName = ContainerName,
             Image = DefaultImage,
             CdpPort = DefaultCdpPort,
             CdpEndpoint = CdpEndpoint,
             JellyfinInDocker = RunsInsideDocker(),
-            SharesJellyfinNetwork = _jellyfinSharesSidecarLoopback
+            SharesJellyfinNetwork = _jellyfinSharesSidecarLoopback,
+            StatusMessage = BuildStatusMessage(
+                dockerAvailable,
+                running,
+                cdpReachable,
+                chromeListeningInsideSidecar,
+                staleNetworkAttachment,
+                jellyfinContainerRef,
+                sidecarNetworkParent)
         };
     }
 
@@ -92,15 +115,28 @@ public class PlaywrightDockerBrowserService
 
             if (await IsContainerRunningAsync(cancellationToken))
             {
-                if (await TryWaitForCdpReadyAsync(cancellationToken))
+                var sidecarNetworkParent = await GetSidecarNetworkParentRefAsync(cancellationToken);
+                var jellyfinContainerRef = await ResolveJellyfinContainerRefAsync(cancellationToken);
+                if (await IsStaleNetworkAttachmentAsync(jellyfinContainerRef, sidecarNetworkParent, cancellationToken))
+                {
+                    _logger.LogWarning(
+                        "Playwright sidecar {ContainerName} is attached to stale network parent {NetworkParent}; expected {JellyfinContainer}. Recreating it.",
+                        ContainerName,
+                        sidecarNetworkParent ?? "(unknown)",
+                        jellyfinContainerRef ?? "(unknown)");
+                    await RemoveStaleContainerAsync(cancellationToken);
+                }
+                else if (await TryWaitForCdpReadyAsync(cancellationToken))
                 {
                     return;
                 }
-
-                _logger.LogWarning(
-                    "Playwright sidecar {ContainerName} is running but CDP is not reachable from Jellyfin; recreating it",
-                    ContainerName);
-                await RemoveStaleContainerAsync(cancellationToken);
+                else
+                {
+                    _logger.LogWarning(
+                        "Playwright sidecar {ContainerName} is running but CDP is not reachable from Jellyfin; recreating it",
+                        ContainerName);
+                    await RemoveStaleContainerAsync(cancellationToken);
+                }
             }
 
             await StartContainerAsync(sidecarNetwork, cancellationToken);
@@ -377,10 +413,7 @@ public class PlaywrightDockerBrowserService
 
     private async Task<bool> ProbeCdpReadyAsync(CancellationToken cancellationToken)
     {
-        using var http = new HttpClient
-        {
-            Timeout = TimeSpan.FromSeconds(2)
-        };
+        using var http = CreateCdpHttpClient();
 
         foreach (var url in BuildCdpProbeUrls(_jellyfinSharesSidecarLoopback))
         {
@@ -396,10 +429,7 @@ public class PlaywrightDockerBrowserService
 
     private async Task<bool> TryWaitForCdpReadyAsync(CancellationToken cancellationToken)
     {
-        using var http = new HttpClient
-        {
-            Timeout = TimeSpan.FromSeconds(2)
-        };
+        using var http = CreateCdpHttpClient();
 
         var probeUrls = BuildCdpProbeUrls(_jellyfinSharesSidecarLoopback).ToArray();
         for (var attempt = 0; attempt < 60; attempt++)
@@ -464,6 +494,124 @@ public class PlaywrightDockerBrowserService
 
         return wget.ExitCode == 0;
     }
+
+    private static HttpClient CreateCdpHttpClient()
+    {
+        return new HttpClient(new SocketsHttpHandler
+        {
+            Proxy = null,
+            UseProxy = false,
+            ConnectTimeout = TimeSpan.FromSeconds(2)
+        })
+        {
+            Timeout = TimeSpan.FromSeconds(2)
+        };
+    }
+
+    private async Task<string?> GetSidecarNetworkParentRefAsync(CancellationToken cancellationToken)
+    {
+        var result = await Cli.Wrap("docker")
+            .WithArguments(["inspect", "-f", "{{.HostConfig.NetworkMode}}", ContainerName])
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteBufferedAsync(cancellationToken);
+
+        if (result.ExitCode != 0)
+        {
+            return null;
+        }
+
+        var mode = result.StandardOutput.Trim();
+        const string prefix = "container:";
+        if (!mode.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var parent = mode[prefix.Length..].Trim();
+        return string.IsNullOrWhiteSpace(parent) ? null : parent;
+    }
+
+    private async Task<bool> IsStaleNetworkAttachmentAsync(
+        string? jellyfinContainerRef,
+        string? sidecarNetworkParent,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(jellyfinContainerRef)
+            || string.IsNullOrWhiteSpace(sidecarNetworkParent))
+        {
+            return false;
+        }
+
+        var expectedId = await ResolveContainerIdAsync(jellyfinContainerRef, cancellationToken);
+        var parentId = await ResolveContainerIdAsync(sidecarNetworkParent, cancellationToken);
+        if (string.IsNullOrWhiteSpace(expectedId))
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(parentId))
+        {
+            return true;
+        }
+
+        return !string.Equals(expectedId, parentId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task<string?> ResolveContainerIdAsync(string containerRef, CancellationToken cancellationToken)
+    {
+        var result = await Cli.Wrap("docker")
+            .WithArguments(["inspect", "-f", "{{.Id}}", containerRef])
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteBufferedAsync(cancellationToken);
+
+        if (result.ExitCode != 0)
+        {
+            return null;
+        }
+
+        var id = result.StandardOutput.Trim();
+        return string.IsNullOrWhiteSpace(id) ? null : id;
+    }
+
+    private static string? BuildStatusMessage(
+        bool dockerAvailable,
+        bool running,
+        bool cdpReachable,
+        bool chromeListeningInsideSidecar,
+        bool staleNetworkAttachment,
+        string? jellyfinContainerRef,
+        string? sidecarNetworkParent)
+    {
+        if (!dockerAvailable)
+        {
+            return "Docker is not available from Jellyfin. Mount /var/run/docker.sock and ensure the Jellyfin user can run docker.";
+        }
+
+        if (!running)
+        {
+            return "Sidecar is stopped. Click Start sidecar.";
+        }
+
+        if (cdpReachable)
+        {
+            return "CDP is reachable from Jellyfin.";
+        }
+
+        if (staleNetworkAttachment)
+        {
+            return "Sidecar is attached to an old Jellyfin container network. Click Stop, then Start. "
+                + "If this persists after a Jellyfin container recreate, set FINTV_JELLYFIN_CONTAINER=Jellyfin on the Jellyfin template.";
+        }
+
+        if (chromeListeningInsideSidecar)
+        {
+            return "Chrome is running inside the sidecar but Jellyfin cannot reach CDP on 127.0.0.1:9222. "
+                + "This usually means the sidecar is on a stale network namespace — click Stop, then Start.";
+        }
+
+        return "Sidecar container is running but Chromium CDP is not responding. Click Stop, then Start. "
+            + $"Check docker logs {ContainerName} if it keeps failing.";
+    }
 }
 
 /// <summary>
@@ -476,6 +624,16 @@ public class PlaywrightDockerStatus
     public bool Running { get; set; }
 
     public bool CdpReachable { get; set; }
+
+    public bool ChromeListeningInsideSidecar { get; set; }
+
+    public bool StaleNetworkAttachment { get; set; }
+
+    public string? JellyfinContainerRef { get; set; }
+
+    public string? SidecarNetworkParent { get; set; }
+
+    public string? StatusMessage { get; set; }
 
     public string ContainerName { get; set; } = PlaywrightDockerBrowserService.ContainerName;
 

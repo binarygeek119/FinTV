@@ -290,7 +290,7 @@ public class AiController : ControllerBase
             await _generator.ApplyAsync(
                 channelId,
                 request?.Slots ?? new List<LineupSlotDto>(),
-                request?.RebuildPlayout ?? false,
+                request?.RebuildPlayout ?? true,
                 _playoutGenerator,
                 cancellationToken);
             return Ok(new { ok = true });

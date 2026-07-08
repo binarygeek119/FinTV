@@ -402,8 +402,7 @@
                     <p id="ai-preview-summary" class="hint"></p>
                     <div id="ai-preview-grid" class="lineup-grid ai-preview-grid"></div>
                     <div class="actions">
-                        <button type="button" id="btn-ai-apply" class="raised button-submit emby-button">Apply Lineup</button>
-                        <button type="button" id="btn-ai-apply-rebuild" class="emby-button">Apply + Rebuild Playout</button>
+                        <button type="button" id="btn-ai-apply" class="raised button-submit emby-button">Apply Lineup + Rebuild Guide</button>
                         <button type="button" id="btn-ai-discard" class="emby-button">Discard</button>
                     </div>
                 </div>
@@ -495,7 +494,7 @@
                 <div class="card section-card">
                     <h3>Playwright Chromium sidecar (Docker)</h3>
                     <p class="hint">Weather channels capture live WeatherStar pages with headless Chromium. On Linux, FinTV runs Chromium in Docker (<code>fintv-playwright-chromium</code>) and connects over CDP. Docker must be installed and the Jellyfin user must be able to run <code>docker</code>.</p>
-                    <p class="hint">If Jellyfin runs in Docker, mount <code>/var/run/docker.sock</code>. FinTV shares Jellyfin&apos;s network namespace so CDP on <code>127.0.0.1:9222</code> is reachable. Set <code>FINTV_JELLYFIN_CONTAINER</code> if auto-detect fails (e.g. Unraid). After replacing the Jellyfin container, stop and restart the sidecar here.</p>
+                    <p class="hint">If Jellyfin runs in Docker, mount <code>/var/run/docker.sock</code>. FinTV shares Jellyfin&apos;s network namespace so CDP on <code>127.0.0.1:9222</code> is reachable. On Unraid, add <code>FINTV_JELLYFIN_CONTAINER=Jellyfin</code> to the Jellyfin container extra variables if auto-detect fails. After recreating the Jellyfin container, always Stop then Start the sidecar here (or run <code>docker rm -f fintv-playwright-chromium</code> on the host).</p>
                     <div id="playwright-docker-status" class="status-card"></div>
                     <div class="actions">
                         <button type="button" id="btn-playwright-start" class="raised button-submit emby-button">Start sidecar</button>

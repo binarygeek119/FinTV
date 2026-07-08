@@ -2047,7 +2047,7 @@
         filterQuery: 2, FilterQuery: 2
     };
 
-    function buildAiApplyPayload(rebuild) {
+    function buildAiApplyPayload() {
         const source = aiPreview?.lineupSlots || aiPreview?.LineupSlots;
         if (!Array.isArray(source) || source.length === 0) {
             throw new Error('No AI lineup to apply. Generate a lineup first.');
@@ -2066,7 +2066,7 @@
             }))
         }));
 
-        return { Slots: slots, RebuildPlayout: !!rebuild };
+        return { Slots: slots, RebuildPlayout: true };
     }
 
     function updateAiUiState() {
@@ -2416,14 +2416,14 @@
         updateAiUiState();
     }
 
-    async function applyAiLineup(rebuild) {
+    async function applyAiLineup() {
         if (!aiPreview) return;
         try {
             await api('/ai/channels/' + aiPreview.channelId + '/apply', {
                 method: 'POST',
-                body: JSON.stringify(buildAiApplyPayload(rebuild))
+                body: JSON.stringify(buildAiApplyPayload())
             });
-            toast(rebuild ? 'Lineup applied and playout rebuild started.' : 'Lineup applied.', 'success');
+            toast('Lineup applied and Live TV guide playout rebuilt.', 'success');
             discardAiPreview();
             await loadAi();
         } catch (err) {
@@ -2700,17 +2700,23 @@
             stateLine = 'Stopped';
         } else if (status.cdpReachable) {
             stateLine = `Running · CDP reachable at ${status.cdpEndpoint}`;
+        } else if (status.statusMessage) {
+            stateLine = status.statusMessage;
         } else {
-            stateLine = 'Running but CDP not reachable from Jellyfin — try Stop then Start';
+            stateLine = 'Running but CDP not reachable from Jellyfin — click Stop, then Start';
         }
 
         const networkLine = status.jellyfinInDocker
             ? (status.sharesJellyfinNetwork
-                ? 'Jellyfin in Docker · sharing network namespace'
+                ? `Jellyfin in Docker · sharing network namespace${status.jellyfinContainerRef ? ' · ' + status.jellyfinContainerRef : ''}${status.sidecarNetworkParent ? ' · parent ' + status.sidecarNetworkParent : ''}`
                 : 'Jellyfin in Docker · host-published CDP port')
             : 'Jellyfin on host';
 
-        el.innerHTML = `<div>${escapeHtml(stateLine)}</div><div class="meta">${escapeHtml(status.containerName)} · ${escapeHtml(status.image)} · port ${status.cdpPort} · ${escapeHtml(networkLine)}</div>`;
+        const detailLine = status.running && !status.cdpReachable && status.chromeListeningInsideSidecar
+            ? '<div class="meta">Chrome responds inside the sidecar but not from Jellyfin — stale network attachment is likely.</div>'
+            : '';
+
+        el.innerHTML = `<div>${escapeHtml(stateLine)}</div><div class="meta">${escapeHtml(status.containerName)} · ${escapeHtml(status.image)} · port ${status.cdpPort} · ${escapeHtml(networkLine)}</div>${detailLine}`;
 
         const dockerOk = !!status.dockerAvailable;
         ['btn-playwright-start', 'btn-playwright-stop'].forEach((id) => {
@@ -3333,8 +3339,7 @@
         click('btn-save-ai-settings', () => saveAiSettings().catch((e) => toast(e.message, 'error')));
         click('btn-test-ai', () => { void testAiConnection(); });
         click('btn-ai-generate-all', () => generateAllAiLineups().catch((e) => toast(e.message, 'error')));
-        click('btn-ai-apply', () => applyAiLineup(false).catch((e) => toast(e.message, 'error')));
-        click('btn-ai-apply-rebuild', () => applyAiLineup(true).catch((e) => toast(e.message, 'error')));
+        click('btn-ai-apply', () => applyAiLineup().catch((e) => toast(e.message, 'error')));
         click('btn-ai-discard', discardAiPreview);
         change('ai-enabled', updateAiUiState);
         click('btn-upload-ebs-usa', () => uploadEbsSlate('usa', 'ebs-usa-file'));

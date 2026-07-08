@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.76"
+version: "0.0.2.77"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -78,6 +78,10 @@ artifacts:
   - "logos/binarygeek119/Weather/WeatherStar4000.png"
   - "scripts/install-docker-cli-jellyfin.sh"
 changelog: |-
+  - Fix Playwright CDP not reachable after Jellyfin container recreate by detecting stale network-namespace attachment and auto-recreating the sidecar on Start
+  - Improve Playwright tab status with stale-network diagnostics, container refs, and clearer Unraid recovery guidance
+  - AI Apply Lineup rebuilds Live TV guide playout by default with a single Apply Lineup + Rebuild Guide button
+  - Disable HTTP proxy for Playwright CDP health probes inside Docker
   - Add Playwright admin tab with Start/Stop Docker sidecar controls and moved auto-start on Jellyfin startup setting
   - Fix Live TV guide empty for non-weather channels by rebuilding playout when lineups are saved
   - Show playout horizon warning on Lineups tab when the EPG has no schedule built yet
