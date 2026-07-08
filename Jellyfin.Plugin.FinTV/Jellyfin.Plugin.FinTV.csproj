@@ -104,13 +104,23 @@
       <PlaywrightPs1Script>$([System.IO.Path]::Combine('$(PlaywrightPackageRoot)', 'buildTransitive', 'playwright.ps1'))</PlaywrightPs1Script>
     </PropertyGroup>
     <ItemGroup Condition="Exists('$(PlaywrightBrowsersRoot)')">
-      <AllPlaywrightDriverFiles Include="$(PlaywrightBrowsersRoot)/node/win32_x64/**/*.*" />
+      <PlaywrightWin64DriverFiles Include="$(PlaywrightBrowsersRoot)/node/win32_x64/**/*.*" />
+      <PlaywrightLinuxX64DriverFiles Include="$(PlaywrightBrowsersRoot)/node/linux-x64/**/*.*" />
+      <PlaywrightLinuxArm64DriverFiles Include="$(PlaywrightBrowsersRoot)/node/linux-arm64/**/*.*" />
       <AllPlaywrightPackageFiles Include="$(PlaywrightBrowsersRoot)/package/**/*.*" />
     </ItemGroup>
-    <Copy SourceFiles="@(AllPlaywrightDriverFiles)"
+    <Copy SourceFiles="@(PlaywrightWin64DriverFiles)"
           DestinationFolder="$(OutputPath).playwright/node/win32_x64/%(RecursiveDir)"
           SkipUnchangedFiles="true"
-          Condition="'@(AllPlaywrightDriverFiles)' != ''" />
+          Condition="'@(PlaywrightWin64DriverFiles)' != ''" />
+    <Copy SourceFiles="@(PlaywrightLinuxX64DriverFiles)"
+          DestinationFolder="$(OutputPath).playwright/node/linux-x64/%(RecursiveDir)"
+          SkipUnchangedFiles="true"
+          Condition="'@(PlaywrightLinuxX64DriverFiles)' != ''" />
+    <Copy SourceFiles="@(PlaywrightLinuxArm64DriverFiles)"
+          DestinationFolder="$(OutputPath).playwright/node/linux-arm64/%(RecursiveDir)"
+          SkipUnchangedFiles="true"
+          Condition="'@(PlaywrightLinuxArm64DriverFiles)' != ''" />
     <Copy SourceFiles="$(PlaywrightNodeLicense)"
           DestinationFiles="$(OutputPath).playwright/node/LICENSE"
           SkipUnchangedFiles="true"
@@ -131,13 +141,23 @@
       <PlaywrightPs1Script>$([System.IO.Path]::Combine('$(PlaywrightPackageRoot)', 'buildTransitive', 'playwright.ps1'))</PlaywrightPs1Script>
     </PropertyGroup>
     <ItemGroup Condition="Exists('$(PlaywrightBrowsersRoot)')">
-      <AllPlaywrightDriverPublishFiles Include="$(PlaywrightBrowsersRoot)/node/win32_x64/**/*.*" />
+      <PlaywrightWin64DriverPublishFiles Include="$(PlaywrightBrowsersRoot)/node/win32_x64/**/*.*" />
+      <PlaywrightLinuxX64DriverPublishFiles Include="$(PlaywrightBrowsersRoot)/node/linux-x64/**/*.*" />
+      <PlaywrightLinuxArm64DriverPublishFiles Include="$(PlaywrightBrowsersRoot)/node/linux-arm64/**/*.*" />
       <AllPlaywrightPackagePublishFiles Include="$(PlaywrightBrowsersRoot)/package/**/*.*" />
     </ItemGroup>
-    <Copy SourceFiles="@(AllPlaywrightDriverPublishFiles)"
+    <Copy SourceFiles="@(PlaywrightWin64DriverPublishFiles)"
           DestinationFolder="$(PublishDir).playwright/node/win32_x64/%(RecursiveDir)"
           SkipUnchangedFiles="true"
-          Condition="'$(PublishDir)' != '' AND '@(AllPlaywrightDriverPublishFiles)' != ''" />
+          Condition="'$(PublishDir)' != '' AND '@(PlaywrightWin64DriverPublishFiles)' != ''" />
+    <Copy SourceFiles="@(PlaywrightLinuxX64DriverPublishFiles)"
+          DestinationFolder="$(PublishDir).playwright/node/linux-x64/%(RecursiveDir)"
+          SkipUnchangedFiles="true"
+          Condition="'$(PublishDir)' != '' AND '@(PlaywrightLinuxX64DriverPublishFiles)' != ''" />
+    <Copy SourceFiles="@(PlaywrightLinuxArm64DriverPublishFiles)"
+          DestinationFolder="$(PublishDir).playwright/node/linux-arm64/%(RecursiveDir)"
+          SkipUnchangedFiles="true"
+          Condition="'$(PublishDir)' != '' AND '@(PlaywrightLinuxArm64DriverPublishFiles)' != ''" />
     <Copy SourceFiles="$(PlaywrightNodeLicense)"
           DestinationFiles="$(PublishDir).playwright/node/LICENSE"
           SkipUnchangedFiles="true"

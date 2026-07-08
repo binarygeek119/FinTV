@@ -12,9 +12,8 @@ BUILD_YAML = ROOT / "build.yaml"
 LOGOS_DIR = ROOT / "Jellyfin.Plugin.FinTV" / "Assets" / "logos" / "binarygeek119"
 SCRIPTS_DIR = ROOT / "Jellyfin.Plugin.FinTV" / "Assets" / "scripts"
 CSPROJ = ROOT / "Jellyfin.Plugin.FinTV" / "Jellyfin.Plugin.FinTV.csproj"
-# Linux driver ships in ghcr.io/binarygeek119/jellyfin-unstable-fintv, not the plugin zip.
-# yt-dlp ships in the FinTV Jellyfin Docker image, not the plugin zip.
-PLAYWRIGHT_NODE_PLATFORMS = ("win32_x64",)
+# Linux driver is required in the plugin zip for Playwright.CreateAsync() even when Chromium runs in the Docker sidecar.
+PLAYWRIGHT_NODE_PLATFORMS = ("win32_x64", "linux-x64", "linux-arm64")
 
 
 def read_playwright_version() -> str:

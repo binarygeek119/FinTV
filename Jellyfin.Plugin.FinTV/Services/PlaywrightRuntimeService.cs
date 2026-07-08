@@ -226,17 +226,14 @@ public class PlaywrightRuntimeService
         var pluginDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)
             ?? plugin.DataFolder;
 
-        var presetDriverPath = Environment.GetEnvironmentVariable("PLAYWRIGHT_DRIVER_SEARCH_PATH");
-        if (string.IsNullOrWhiteSpace(presetDriverPath))
+        var driverDirectory = ResolvePlaywrightDriverDirectory(pluginDirectory);
+        Environment.SetEnvironmentVariable("PLAYWRIGHT_DRIVER_SEARCH_PATH", driverDirectory);
+        if (!string.Equals(driverDirectory, pluginDirectory, StringComparison.OrdinalIgnoreCase))
         {
-            Environment.SetEnvironmentVariable("PLAYWRIGHT_DRIVER_SEARCH_PATH", pluginDirectory);
-            presetDriverPath = pluginDirectory;
-        }
-        else
-        {
-            _logger.LogDebug(
-                "Using preset Playwright driver from PLAYWRIGHT_DRIVER_SEARCH_PATH: {DriverPath}",
-                presetDriverPath);
+            _logger.LogInformation(
+                "Using Playwright driver at {DriverPath} (plugin directory: {PluginDirectory})",
+                driverDirectory,
+                pluginDirectory);
         }
 
         if (!UsesDockerBrowser)
@@ -254,17 +251,73 @@ public class PlaywrightRuntimeService
             Environment.SetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH", browsersPath);
             _logger.LogDebug(
                 "Playwright configured for local browser. Driver path: {DriverPath}. Browser path: {BrowserPath}",
-                presetDriverPath,
+                driverDirectory,
                 browsersPath);
         }
         else
         {
             _logger.LogDebug(
                 "Playwright configured for Docker browser on Linux. Driver path: {DriverPath}",
-                presetDriverPath);
+                driverDirectory);
         }
 
         _environmentConfigured = true;
+    }
+
+    private static string ResolvePlaywrightDriverDirectory(string pluginDirectory)
+    {
+        var candidates = new List<string>();
+        var presetDriverPath = Environment.GetEnvironmentVariable("PLAYWRIGHT_DRIVER_SEARCH_PATH");
+        if (!string.IsNullOrWhiteSpace(presetDriverPath))
+        {
+            candidates.Add(presetDriverPath.Trim());
+        }
+
+        if (!string.IsNullOrWhiteSpace(pluginDirectory))
+        {
+            candidates.Add(pluginDirectory);
+        }
+
+        foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (HasPlaywrightDriver(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return pluginDirectory;
+    }
+
+    private static bool HasPlaywrightDriver(string directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        {
+            return false;
+        }
+
+        var playwrightDirectory = Path.Combine(directory, ".playwright");
+        if (!Directory.Exists(playwrightDirectory))
+        {
+            return false;
+        }
+
+        var nodeRoot = Path.Combine(playwrightDirectory, "node");
+        if (Directory.Exists(nodeRoot))
+        {
+            foreach (var platformDirectory in Directory.EnumerateDirectories(nodeRoot))
+            {
+                var nodeExecutable = OperatingSystem.IsWindows()
+                    ? Path.Combine(platformDirectory, "node.exe")
+                    : Path.Combine(platformDirectory, "node");
+                if (File.Exists(nodeExecutable))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return File.Exists(Path.Combine(playwrightDirectory, "package", "cli.js"));
     }
 
     private async Task EnsureChromiumInstalledAsync(CancellationToken cancellationToken)
