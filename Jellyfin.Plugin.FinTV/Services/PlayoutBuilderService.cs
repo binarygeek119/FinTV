@@ -165,4 +165,42 @@ public class PlayoutBuilderService : BackgroundService
 
         await db.SaveChangesAsync(cancellationToken);
     }
+
+    /// <summary>
+    /// Replaces the playout window for every enabled channel from today through the horizon.
+    /// Used by the admin Rebuild All action (not the hourly maintenance loop).
+    /// </summary>
+    public async Task ForceRebuildAllChannelsAsync(CancellationToken cancellationToken = default)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
+        var generator = scope.ServiceProvider.GetRequiredService<LineupGeneratorService>();
+        var commercialService = scope.ServiceProvider.GetRequiredService<CommercialService>();
+
+        await db.Database.EnsureCreatedAsync(cancellationToken);
+        await commercialService.SyncCommercialLibraryAsync(cancellationToken);
+
+        var now = DateTime.UtcNow;
+        var rebuildStart = now.Date;
+        var horizonEnd = PlayoutScheduleHelper.GetHorizonEndUtc(now);
+
+        var channels = await db.Channels.Where(c => c.Enabled).ToListAsync(cancellationToken);
+        foreach (var channel in channels)
+        {
+            await generator.BuildPlayoutAsync(
+                channel,
+                rebuildStart,
+                horizonEnd,
+                PlayoutBuildMode.ReplaceWindow,
+                cancellationToken);
+
+            _logger.LogInformation(
+                "Force rebuilt playout for channel {Channel} from {Start} to {End}",
+                channel.Name,
+                rebuildStart,
+                horizonEnd);
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+    }
 }

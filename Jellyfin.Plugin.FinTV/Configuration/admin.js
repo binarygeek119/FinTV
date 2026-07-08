@@ -3361,7 +3361,7 @@
         click('btn-repair-logos', () => repairChannelLogos());
         click('btn-create-logo-set', openCreateLogoSetModal);
         click('btn-rebuild-all', () => api('/tasks/rebuild-all', { method: 'POST' })
-            .then(() => { toast('Rebuild all playouts started.', 'success'); $('task-status').textContent = 'Rebuild queued for all channels.'; })
+            .then(() => { toast('Rebuild all playouts completed.', 'success'); $('task-status').textContent = 'All channel playouts rebuilt.'; })
             .catch((e) => toast(e.message, 'error')));
 
         qa('.btn-copy').forEach((btn) => btn.onclick = () => copyText(btn.dataset.copyTarget));
