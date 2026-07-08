@@ -1252,27 +1252,6 @@
             }
         }
 
-        function refreshCandidateList(currentSlot) {
-            document.getElementById('slot-candidates').innerHTML = renderCandidateRows(currentSlot.candidates);
-            bindCandidateRowActions(currentSlot);
-        }
-
-        function bindCandidateRowActions(currentSlot) {
-            document.querySelectorAll('[data-remove-candidate]').forEach((btn) => {
-                btn.onclick = () => {
-                    currentSlot.candidates.splice(parseInt(btn.dataset.removeCandidate, 10), 1);
-                    currentSlot.candidates.forEach((c, i) => { c.sortOrder = i; });
-                    refreshCandidateList(currentSlot);
-                };
-            });
-            document.querySelectorAll('[data-weight]').forEach((input) => {
-                input.onchange = () => {
-                    const idx = parseInt(input.dataset.weight, 10);
-                    currentSlot.candidates[idx].weight = Math.max(1, parseInt(input.value, 10) || 1);
-                };
-            });
-        }
-
         document.getElementById('slot-add-kind').onchange = renderAddPanel;
         renderAddPanel();
         bindCandidateRowActions(slot);
@@ -1327,6 +1306,32 @@
             <input type="number" min="1" value="${c.weight || 1}" data-weight="${i}" style="width:70px">
             <button type="button" data-remove-candidate="${i}">Remove</button>
         </div>`).join('');
+    }
+
+    function refreshCandidateList(currentSlot, containerId = 'slot-candidates') {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        container.innerHTML = renderCandidateRows(currentSlot.candidates);
+        bindCandidateRowActions(currentSlot, containerId);
+    }
+
+    function bindCandidateRowActions(currentSlot, containerId = 'slot-candidates') {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+
+        container.querySelectorAll('[data-remove-candidate]').forEach((btn) => {
+            btn.onclick = () => {
+                currentSlot.candidates.splice(parseInt(btn.dataset.removeCandidate, 10), 1);
+                currentSlot.candidates.forEach((c, i) => { c.sortOrder = i; });
+                refreshCandidateList(currentSlot, containerId);
+            };
+        });
+        container.querySelectorAll('[data-weight]').forEach((input) => {
+            input.onchange = () => {
+                const idx = parseInt(input.dataset.weight, 10);
+                currentSlot.candidates[idx].weight = Math.max(1, parseInt(input.value, 10) || 1);
+            };
+        });
     }
 
     async function saveLineup() {
@@ -3142,7 +3147,7 @@
                     <input id="sp-search" type="search" class="emby-input" placeholder="Type at least 2 characters…"></label>
                 <div id="sp-search-results" class="search-results"></div>`;
 
-            bindCandidateRowActions(draft);
+            bindCandidateRowActions(draft, 'sp-candidates');
             let timer;
             document.getElementById('sp-search').oninput = (ev) => {
                 clearTimeout(timer);
@@ -3165,8 +3170,7 @@
                         row.onclick = () => {
                             itemTitleCache[row.dataset.id] = row.querySelector('strong').textContent;
                             draft.candidates.push({ kind: 0, jellyfinItemId: row.dataset.id, weight: 1, sortOrder: draft.candidates.length });
-                            document.getElementById('sp-candidates').innerHTML = renderCandidateRows(draft.candidates);
-                            bindCandidateRowActions(draft);
+                            refreshCandidateList(draft, 'sp-candidates');
                         };
                     });
                 }, 250);
