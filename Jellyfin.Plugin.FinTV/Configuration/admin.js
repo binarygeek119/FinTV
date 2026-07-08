@@ -39,6 +39,7 @@
     let aiPlayoutTemplates = [];
     let aiPreview = null;
     let weatherDockerStatus = null;
+    let playwrightDockerStatus = null;
     let finTvLists = [];
     let listNameCache = {};
     let specialPresentations = [];
@@ -1025,8 +1026,43 @@
             renderLineupGrid();
             renderOverrideList();
             $('lineup-preview-banner').classList.add('hidden');
+            await loadLineupPlayoutStatus();
         } catch (err) {
             reportApiError(err, 'Could not load lineup.');
+        }
+    }
+
+    async function loadLineupPlayoutStatus() {
+        const banner = $('lineup-playout-banner');
+        if (!banner) {
+            return;
+        }
+
+        if (!selectedChannelId || lineupIsWeather) {
+            banner.classList.add('hidden');
+            return;
+        }
+
+        try {
+            const h = await api('/lineups/' + selectedChannelId + '/playout-horizon');
+            const daysBuilt = Number(h.daysBuilt || 0);
+            const targetDays = Number(h.playoutDaysToBuild || 14);
+
+            if (!h.latestScheduledFinishUtc || daysBuilt < 0.5) {
+                banner.classList.remove('hidden');
+                banner.textContent = 'Live TV guide has no playout for this channel yet. Click Rebuild Playout (or Save Lineup) to populate the EPG.';
+                return;
+            }
+
+            if (daysBuilt < 1) {
+                banner.classList.remove('hidden');
+                banner.textContent = `Guide playout ends in about ${Math.max(1, Math.round(daysBuilt * 24))} hours. Rebuild Playout to refresh the full ${targetDays}-day guide.`;
+                return;
+            }
+
+            banner.classList.add('hidden');
+        } catch (_) {
+            banner.classList.add('hidden');
         }
     }
 
@@ -1290,7 +1326,8 @@
     async function saveLineup() {
         try {
             await api('/lineups/' + selectedChannelId, { method: 'PUT', body: JSON.stringify(lineupSlots) });
-            toast('Lineup saved.', 'success');
+            toast('Lineup saved and Live TV guide playout rebuilt.', 'success');
+            await loadLineupPlayoutStatus();
         } catch (err) {
             toast(err.message, 'error');
         }
@@ -1299,7 +1336,8 @@
     async function rebuildLineup() {
         try {
             await api('/lineups/' + selectedChannelId + '/rebuild', { method: 'POST' });
-            toast('Playout rebuild started.', 'success');
+            toast('Playout rebuilt for the Live TV guide.', 'success');
+            await loadLineupPlayoutStatus();
         } catch (err) {
             toast(err.message, 'error');
         }
@@ -2546,9 +2584,6 @@
             if ($('ws4kp-image')) $('ws4kp-image').value = settings.ws4kpImage || 'ghcr.io/netbymatt/ws4kp';
             if ($('ws3kp-host-port')) $('ws3kp-host-port').value = settings.ws3kpHostPort ?? 8083;
             if ($('ws3kp-image')) $('ws3kp-image').value = settings.ws3kpImage || 'ghcr.io/netbymatt/ws3kp';
-            if ($('weather-auto-start-playwright')) {
-                $('weather-auto-start-playwright').checked = !!settings.autoStartPlaywrightDockerSidecar;
-            }
             if ($('weather-auto-start-ws4kp')) {
                 $('weather-auto-start-ws4kp').checked = !!settings.autoStartWeatherStarDocker;
             }
@@ -2602,7 +2637,6 @@
                     weatherStarBaseUrl: weatherStarBaseUrl || null,
                     weatherStarPermalinkQuery: weatherStarPermalinkQuery || null,
                     weatherStarFullPermalink: weatherStarFullPermalink || null,
-                    autoStartPlaywrightDockerSidecar: !!$('weather-auto-start-playwright')?.checked,
                     autoStartWeatherStarDocker: !!$('weather-auto-start-ws4kp')?.checked,
                     weatherStarAutoWideForSixteenNine: !!$('weather-auto-wide-169')?.checked
                 })
@@ -2650,6 +2684,88 @@
         qa('.weather-url-preset').forEach((btn) => {
             btn.onclick = () => applyWeatherBaseUrl(btn.dataset.url || '');
         });
+    }
+
+    function renderPlaywrightDockerStatus(status) {
+        playwrightDockerStatus = status;
+        const el = $('playwright-docker-status');
+        if (!el || !status) {
+            return;
+        }
+
+        let stateLine;
+        if (!status.dockerAvailable) {
+            stateLine = 'Docker not available — install Docker and ensure Jellyfin can run docker';
+        } else if (!status.running) {
+            stateLine = 'Stopped';
+        } else if (status.cdpReachable) {
+            stateLine = `Running · CDP reachable at ${status.cdpEndpoint}`;
+        } else {
+            stateLine = 'Running but CDP not reachable from Jellyfin — try Stop then Start';
+        }
+
+        const networkLine = status.jellyfinInDocker
+            ? (status.sharesJellyfinNetwork
+                ? 'Jellyfin in Docker · sharing network namespace'
+                : 'Jellyfin in Docker · host-published CDP port')
+            : 'Jellyfin on host';
+
+        el.innerHTML = `<div>${escapeHtml(stateLine)}</div><div class="meta">${escapeHtml(status.containerName)} · ${escapeHtml(status.image)} · port ${status.cdpPort} · ${escapeHtml(networkLine)}</div>`;
+
+        const dockerOk = !!status.dockerAvailable;
+        ['btn-playwright-start', 'btn-playwright-stop'].forEach((id) => {
+            const btn = $(id);
+            if (btn) {
+                btn.disabled = !dockerOk;
+            }
+        });
+    }
+
+    async function loadPlaywright() {
+        try {
+            const status = await api('/playwright/docker/status');
+            if ($('playwright-auto-start')) {
+                $('playwright-auto-start').checked = !!status.autoStartOnJellyfinStartup;
+            }
+            renderPlaywrightDockerStatus(status);
+        } catch (err) {
+            reportApiError(err, 'Could not load Playwright settings.');
+        }
+    }
+
+    async function startPlaywrightDocker() {
+        try {
+            const data = await api('/playwright/docker/start', { method: 'POST', body: '{}' });
+            renderPlaywrightDockerStatus(data);
+            toast('Playwright sidecar started.', 'success');
+        } catch (err) {
+            reportApiError(err, 'Could not start Playwright sidecar.');
+        }
+    }
+
+    async function stopPlaywrightDocker() {
+        try {
+            const data = await api('/playwright/docker/stop', { method: 'POST', body: '{}' });
+            renderPlaywrightDockerStatus(data);
+            toast('Playwright sidecar stopped.', 'success');
+        } catch (err) {
+            reportApiError(err, 'Could not stop Playwright sidecar.');
+        }
+    }
+
+    async function savePlaywrightSettings() {
+        try {
+            await api('/setup/settings', {
+                method: 'PUT',
+                body: JSON.stringify({
+                    autoStartPlaywrightDockerSidecar: !!$('playwright-auto-start')?.checked
+                })
+            });
+            toast('Playwright settings saved.', 'success');
+            await loadPlaywright();
+        } catch (err) {
+            toast(err.message, 'error');
+        }
     }
 
     async function loadSetup() {
@@ -3113,6 +3229,7 @@
         if (name === 'ebs') loadEbs();
         if (name === 'ai') loadAi();
         if (name === 'weather') loadWeather();
+        if (name === 'playwright') loadPlaywright();
         if (name === 'presets') loadPresets();
         if (name === 'lineups') loadLineups();
         if (name === 'list') loadLists();
@@ -3233,6 +3350,9 @@
         click('btn-ws3kp-start', () => startWeatherDocker('ws3kp', true).catch((e) => toast(e.message, 'error')));
         click('btn-ws3kp-stop', () => stopWeatherDocker('ws3kp').catch((e) => toast(e.message, 'error')));
         click('btn-ws3kp-use-url', () => startWeatherDocker('ws3kp', true).catch((e) => toast(e.message, 'error')));
+        click('btn-playwright-start', () => startPlaywrightDocker().catch((e) => toast(e.message, 'error')));
+        click('btn-playwright-stop', () => stopPlaywrightDocker().catch((e) => toast(e.message, 'error')));
+        click('btn-save-playwright', savePlaywrightSettings);
         bindWeatherUrlPresets();
         change('ebs-display-mode', updateEbsFieldVisibility);
         change('ebs-audio-mode', updateEbsFieldVisibility);

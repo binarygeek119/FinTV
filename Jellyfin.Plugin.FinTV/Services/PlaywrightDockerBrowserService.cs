@@ -44,6 +44,45 @@ public class PlaywrightDockerBrowserService
         return result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.StandardOutput);
     }
 
+    public async Task<PlaywrightDockerStatus> GetStatusAsync(CancellationToken cancellationToken = default)
+    {
+        var dockerAvailable = await IsDockerAvailableAsync(cancellationToken);
+        var running = dockerAvailable && await IsContainerRunningAsync(cancellationToken);
+        var cdpReachable = false;
+
+        if (running)
+        {
+            await ResolveSidecarNetworkAsync(cancellationToken);
+            cdpReachable = await ProbeCdpReadyAsync(cancellationToken);
+        }
+
+        return new PlaywrightDockerStatus
+        {
+            DockerAvailable = dockerAvailable,
+            Running = running,
+            CdpReachable = cdpReachable,
+            ContainerName = ContainerName,
+            Image = DefaultImage,
+            CdpPort = DefaultCdpPort,
+            CdpEndpoint = CdpEndpoint,
+            JellyfinInDocker = RunsInsideDocker(),
+            SharesJellyfinNetwork = _jellyfinSharesSidecarLoopback
+        };
+    }
+
+    public async Task StopAsync(CancellationToken cancellationToken = default)
+    {
+        await ContainerLock.WaitAsync(cancellationToken);
+        try
+        {
+            await RemoveStaleContainerAsync(cancellationToken);
+        }
+        finally
+        {
+            ContainerLock.Release();
+        }
+    }
+
     public async Task EnsureBrowserReadyAsync(CancellationToken cancellationToken = default)
     {
         await ContainerLock.WaitAsync(cancellationToken);
@@ -336,6 +375,25 @@ public class PlaywrightDockerBrowserService
             + $"Recreate the sidecar after replacing the Jellyfin container (`docker rm -f {ContainerName}`).";
     }
 
+    private async Task<bool> ProbeCdpReadyAsync(CancellationToken cancellationToken)
+    {
+        using var http = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(2)
+        };
+
+        foreach (var url in BuildCdpProbeUrls(_jellyfinSharesSidecarLoopback))
+        {
+            if (await TryHttpProbeAsync(http, $"{url}/json/version", cancellationToken))
+            {
+                _activeCdpEndpoint = url;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private async Task<bool> TryWaitForCdpReadyAsync(CancellationToken cancellationToken)
     {
         using var http = new HttpClient
@@ -406,4 +464,28 @@ public class PlaywrightDockerBrowserService
 
         return wget.ExitCode == 0;
     }
+}
+
+/// <summary>
+/// Runtime status for the Playwright Chromium Docker CDP sidecar.
+/// </summary>
+public class PlaywrightDockerStatus
+{
+    public bool DockerAvailable { get; set; }
+
+    public bool Running { get; set; }
+
+    public bool CdpReachable { get; set; }
+
+    public string ContainerName { get; set; } = PlaywrightDockerBrowserService.ContainerName;
+
+    public string Image { get; set; } = PlaywrightDockerBrowserService.DefaultImage;
+
+    public int CdpPort { get; set; } = PlaywrightDockerBrowserService.DefaultCdpPort;
+
+    public string CdpEndpoint { get; set; } = PlaywrightDockerBrowserService.BuildDefaultCdpEndpoint();
+
+    public bool JellyfinInDocker { get; set; }
+
+    public bool SharesJellyfinNetwork { get; set; }
 }

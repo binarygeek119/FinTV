@@ -110,6 +110,12 @@ public class LineupsController : ControllerBase
         }
 
         await _lineups.UpdateDefaultSlotsAsync(channelId, slots, cancellationToken);
+
+        if (channel.ContentType != ChannelContentType.Weather)
+        {
+            await RebuildPlayoutAsync(channel, cancellationToken);
+        }
+
         return NoContent();
     }
 
@@ -233,10 +239,16 @@ public class LineupsController : ControllerBase
             return NotFound();
         }
 
+        await RebuildPlayoutAsync(channel, cancellationToken);
+        return Accepted();
+    }
+
+    private async Task RebuildPlayoutAsync(Channel channel, CancellationToken cancellationToken)
+    {
         var start = DateTime.UtcNow.Date;
         var end = PlayoutScheduleHelper.GetHorizonEndUtc(start);
         await _generator.BuildPlayoutAsync(channel, start, end, PlayoutBuildMode.ReplaceWindow, cancellationToken);
-        return Accepted();
+        await _db.SaveChangesAsync(cancellationToken);
     }
 
     [HttpGet("{channelId:guid}/playout-horizon")]

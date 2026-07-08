@@ -153,6 +153,7 @@ public class LineupGeneratorService
             .ExecuteUpdateAsync(
                 setters => setters.SetProperty(c => c.LastPlayoutBuiltAt, DateTime.UtcNow),
                 cancellationToken);
+        await _db.SaveChangesAsync(cancellationToken);
     }
 
     private static bool IsSlotConsumedByEarlierSpan(IReadOnlyList<LineupSlot> slots, int slotIndex)

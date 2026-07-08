@@ -132,6 +132,7 @@ public class PlayoutBuilderService : BackgroundService
                 horizonEnd,
                 PlayoutBuildMode.ExtendHorizon,
                 cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation(
                 "Extended playout for channel {Channel} from {Start} to {End}",
@@ -139,5 +140,7 @@ public class PlayoutBuilderService : BackgroundService
                 appendStart,
                 horizonEnd);
         }
+
+        await db.SaveChangesAsync(cancellationToken);
     }
 }

@@ -20,6 +20,7 @@
                 <button type="button" class="tab" data-tab="ebs" role="tab">EBS</button>
                 <button type="button" class="tab" data-tab="ai" role="tab">AI</button>
                 <button type="button" class="tab" data-tab="weather" role="tab">Weather</button>
+                <button type="button" class="tab" data-tab="playwright" role="tab">Playwright</button>
                 <button type="button" class="tab" data-tab="setup" role="tab">Live TV Setup</button>
                 <button type="button" class="tab" data-tab="tasks" role="tab">Tasks</button>
             </nav>
@@ -155,7 +156,8 @@
                     <button id="btn-save-lineup" class="raised button-submit emby-button">Save Lineup</button>
                     <button id="btn-rebuild-lineup" class="emby-button">Rebuild Playout</button>
                 </div>
-                <p id="lineup-hint" class="hint">Click a 30-minute slot to edit candidates. Slots with overrides show a badge on preview.</p>
+                <p id="lineup-hint" class="hint">Click a 30-minute slot to edit candidates. The Jellyfin Live TV <strong>guide</strong> comes from <strong>playout</strong> (built from this lineup). Saving a lineup rebuilds playout for this channel. Weather channels update the guide automatically.</p>
+                <div id="lineup-playout-banner" class="preview-banner hidden"></div>
                 <div id="lineup-weather-banner" class="preview-banner hidden"></div>
                 <div id="lineup-preview-banner" class="preview-banner hidden"></div>
                 <div id="lineup-grid" class="lineup-grid"></div>
@@ -453,11 +455,7 @@
                 </div>
                 <div class="card section-card">
                     <h3>Docker startup</h3>
-                    <p class="hint">Pre-start containers when Jellyfin boots so the first weather tune does not wait on image pulls. Runs in the background a few seconds after startup.</p>
-                    <label class="field checkbox-field">
-                        <input type="checkbox" id="weather-auto-start-playwright">
-                        <span>Auto-start Playwright Chromium sidecar (<code>fintv-playwright-chromium</code>) on Jellyfin startup</span>
-                    </label>
+                    <p class="hint">Pre-start WeatherStar when Jellyfin boots so the first weather tune does not wait on image pulls. Runs in the background a few seconds after startup.</p>
                     <label class="field checkbox-field">
                         <input type="checkbox" id="weather-auto-start-ws4kp">
                         <span>Auto-start WeatherStar Docker on Jellyfin startup (ws4kp or ws3kp matching your base URL; ws4kp if URL is not local)</span>
@@ -489,6 +487,30 @@
                     <div class="actions">
                         <button type="button" id="btn-save-weather" class="raised button-submit emby-button">Save Weather Settings</button>
                         <button type="button" id="btn-use-test-weather-url" class="emby-button">Use jmthornton test URL</button>
+                    </div>
+                </div>
+            </section>
+
+            <section id="tab-playwright" class="tab-panel">
+                <div class="card section-card">
+                    <h3>Playwright Chromium sidecar (Docker)</h3>
+                    <p class="hint">Weather channels capture live WeatherStar pages with headless Chromium. On Linux, FinTV runs Chromium in Docker (<code>fintv-playwright-chromium</code>) and connects over CDP. Docker must be installed and the Jellyfin user must be able to run <code>docker</code>.</p>
+                    <p class="hint">If Jellyfin runs in Docker, mount <code>/var/run/docker.sock</code>. FinTV shares Jellyfin&apos;s network namespace so CDP on <code>127.0.0.1:9222</code> is reachable. Set <code>FINTV_JELLYFIN_CONTAINER</code> if auto-detect fails (e.g. Unraid). After replacing the Jellyfin container, stop and restart the sidecar here.</p>
+                    <div id="playwright-docker-status" class="status-card"></div>
+                    <div class="actions">
+                        <button type="button" id="btn-playwright-start" class="raised button-submit emby-button">Start sidecar</button>
+                        <button type="button" id="btn-playwright-stop" class="emby-button">Stop</button>
+                    </div>
+                </div>
+                <div class="card section-card">
+                    <h3>Startup</h3>
+                    <p class="hint">Pre-start the Playwright sidecar when Jellyfin boots so the first weather tune does not wait on image pulls. Runs in the background a few seconds after startup.</p>
+                    <label class="field checkbox-field">
+                        <input type="checkbox" id="playwright-auto-start">
+                        <span>Auto-start Playwright Chromium sidecar (<code>fintv-playwright-chromium</code>) on Jellyfin startup</span>
+                    </label>
+                    <div class="actions">
+                        <button type="button" id="btn-save-playwright" class="raised button-submit emby-button">Save Playwright Settings</button>
                     </div>
                 </div>
             </section>
