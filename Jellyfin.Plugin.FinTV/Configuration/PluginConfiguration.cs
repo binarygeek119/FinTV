@@ -200,4 +200,10 @@ public class AiGenerateAllJobState
     public DateTime? CompletedAt { get; set; }
 
     public bool WasCancelled { get; set; }
+
+    /// <summary>UTC timestamp of the last step saved while generate-all was running.</summary>
+    public DateTime? LastProgressAt { get; set; }
+
+    /// <summary>True when the job flag was cleared because no background worker was active.</summary>
+    public bool WasStale { get; set; }
 }

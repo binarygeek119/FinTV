@@ -315,45 +315,22 @@ public class AiController : ControllerBase
 
         if (_autoApply.IsGenerateAllJobRunning)
         {
-            return Ok(new { queued = false, alreadyRunning = true, job = BuildGenerateAllStatusResponse() });
+            return Ok(new { queued = false, alreadyRunning = true, job = _autoApply.BuildGenerateAllStatus() });
         }
 
         _autoApply.QueueManualGenerateAllEligibleChannels();
-        return Ok(new { queued = true, job = BuildGenerateAllStatusResponse() });
+        return Ok(new { queued = true, job = _autoApply.BuildGenerateAllStatus() });
     }
 
     [HttpGet("generate-all/status")]
     public ActionResult<object> GetGenerateAllStatus()
-        => Ok(BuildGenerateAllStatusResponse());
+        => Ok(_autoApply.BuildGenerateAllStatus());
 
     [HttpPost("generate-all/cancel")]
     public ActionResult<object> CancelGenerateAll()
     {
         var cancelled = _autoApply.CancelGenerateAll();
-        return Ok(new { cancelled, job = BuildGenerateAllStatusResponse() });
-    }
-
-    private static object BuildGenerateAllStatusResponse()
-    {
-        var job = Plugin.Instance?.Configuration.AiGenerateAllJob ?? new AiGenerateAllJobState();
-        return new
-        {
-            isRunning = job.IsRunning,
-            totalDays = job.TotalDays,
-            totalChannels = job.TotalChannels,
-            totalSteps = job.TotalSteps,
-            completedSteps = job.CompletedSteps,
-            currentDay = job.CurrentDay,
-            currentChannelName = job.CurrentChannelName,
-            lineupsGenerated = job.LineupsGenerated,
-            lineupsFailed = job.LineupsFailed,
-            playoutDaysBuilt = job.PlayoutDaysBuilt,
-            playoutDaysFailed = job.PlayoutDaysFailed,
-            lastError = job.LastError,
-            startedAt = job.StartedAt,
-            completedAt = job.CompletedAt,
-            wasCancelled = job.WasCancelled
-        };
+        return Ok(new { cancelled, job = _autoApply.BuildGenerateAllStatus() });
     }
 
     private static string MaskKey(string? key)

@@ -16,6 +16,7 @@ public class AiChannelAutoApplyService
     private static readonly object PendingQueueLock = new();
     private static readonly object GenerateAllCancelLock = new();
     private static CancellationTokenSource? _generateAllCts;
+    private static int _generateAllWorkerActive;
 
     private readonly FinTvDbContext _db;
     private readonly AiLineupGeneratorService _generator;
@@ -140,8 +141,84 @@ public class AiChannelAutoApplyService
         }
     }
 
-    public bool IsGenerateAllJobRunning =>
-        Plugin.Instance?.Configuration.AiGenerateAllJob.IsRunning == true;
+    public bool IsGenerateAllJobRunning
+    {
+        get
+        {
+            RefreshGenerateAllJobState();
+            return Plugin.Instance?.Configuration.AiGenerateAllJob.IsRunning == true;
+        }
+    }
+
+    private static bool IsGenerateAllWorkerActive => Volatile.Read(ref _generateAllWorkerActive) > 0;
+
+    /// <summary>
+    /// Clears a persisted running flag when the background worker is no longer active.
+    /// </summary>
+    public void RefreshGenerateAllJobState()
+    {
+        var plugin = Plugin.Instance;
+        if (plugin is null)
+        {
+            return;
+        }
+
+        var job = plugin.Configuration.AiGenerateAllJob;
+        if (!job.IsRunning)
+        {
+            return;
+        }
+
+        if (!IsGenerateAllWorkerActive)
+        {
+            job.IsRunning = false;
+            job.WasStale = true;
+            job.CompletedAt = DateTime.UtcNow;
+            if (string.IsNullOrWhiteSpace(job.LastError))
+            {
+                job.LastError = "Generate all stopped unexpectedly (server restart or background task ended).";
+            }
+
+            plugin.SaveConfiguration();
+            return;
+        }
+
+        if (job.LastProgressAt.HasValue
+            && DateTime.UtcNow - job.LastProgressAt.Value > TimeSpan.FromMinutes(20))
+        {
+            lock (GenerateAllCancelLock)
+            {
+                _generateAllCts?.Cancel();
+            }
+        }
+    }
+
+    public object BuildGenerateAllStatus()
+    {
+        RefreshGenerateAllJobState();
+        var job = Plugin.Instance?.Configuration.AiGenerateAllJob ?? new AiGenerateAllJobState();
+        return new
+        {
+            isRunning = job.IsRunning,
+            workerActive = IsGenerateAllWorkerActive,
+            totalDays = job.TotalDays,
+            totalChannels = job.TotalChannels,
+            totalSteps = job.TotalSteps,
+            completedSteps = job.CompletedSteps,
+            currentDay = job.CurrentDay,
+            currentChannelName = job.CurrentChannelName,
+            lineupsGenerated = job.LineupsGenerated,
+            lineupsFailed = job.LineupsFailed,
+            playoutDaysBuilt = job.PlayoutDaysBuilt,
+            playoutDaysFailed = job.PlayoutDaysFailed,
+            lastError = job.LastError,
+            startedAt = job.StartedAt,
+            completedAt = job.CompletedAt,
+            lastProgressAt = job.LastProgressAt,
+            wasCancelled = job.WasCancelled,
+            wasStale = job.WasStale
+        };
+    }
 
     /// <summary>
     /// Requests cancellation of the in-flight staggered generate-all job.
@@ -149,21 +226,48 @@ public class AiChannelAutoApplyService
     /// <returns>True when a running job received a cancel signal.</returns>
     public bool CancelGenerateAll()
     {
+        RefreshGenerateAllJobState();
+
+        var plugin = Plugin.Instance;
+        var job = plugin?.Configuration.AiGenerateAllJob;
+        if (job is null || !job.IsRunning)
+        {
+            return false;
+        }
+
         lock (GenerateAllCancelLock)
         {
-            if (!IsGenerateAllJobRunning || _generateAllCts is null)
+            if (_generateAllCts is not null && !_generateAllCts.IsCancellationRequested)
             {
-                return false;
-            }
-
-            if (_generateAllCts.IsCancellationRequested)
-            {
+                _generateAllCts.Cancel();
                 return true;
             }
+        }
 
-            _generateAllCts.Cancel();
+        if (!IsGenerateAllWorkerActive)
+        {
+            ClearStuckGenerateAllJob("Cancelled by user.");
             return true;
         }
+
+        return _generateAllCts?.IsCancellationRequested == true;
+    }
+
+    private static void ClearStuckGenerateAllJob(string message)
+    {
+        var plugin = Plugin.Instance;
+        if (plugin is null)
+        {
+            return;
+        }
+
+        var job = plugin.Configuration.AiGenerateAllJob;
+        job.IsRunning = false;
+        job.WasCancelled = true;
+        job.WasStale = !IsGenerateAllWorkerActive;
+        job.CompletedAt = DateTime.UtcNow;
+        job.LastError = message;
+        plugin.SaveConfiguration();
     }
 
     private CancellationToken BeginGenerateAllCancellation()
@@ -205,7 +309,9 @@ public class AiChannelAutoApplyService
             StartedAt = DateTime.UtcNow,
             LastError = null,
             CompletedAt = null,
-            WasCancelled = false
+            WasCancelled = false,
+            WasStale = false,
+            LastProgressAt = DateTime.UtcNow
         };
 
         try
@@ -510,6 +616,7 @@ public class AiChannelAutoApplyService
         }
 
         plugin.Configuration.AiGenerateAllJob = state;
+        state.LastProgressAt = DateTime.UtcNow;
         plugin.SaveConfiguration();
     }
 
@@ -668,6 +775,7 @@ public class AiChannelAutoApplyService
     {
         _logger.LogInformation("Queueing staggered AI {Operation} for eligible channels.", operationName);
         var cancellationToken = BeginGenerateAllCancellation();
+        Interlocked.Increment(ref _generateAllWorkerActive);
         _ = Task.Run(async () =>
         {
             try
@@ -706,6 +814,7 @@ public class AiChannelAutoApplyService
             }
             finally
             {
+                Interlocked.Decrement(ref _generateAllWorkerActive);
                 EndGenerateAllCancellation();
             }
         });

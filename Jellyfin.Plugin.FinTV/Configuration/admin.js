@@ -2186,6 +2186,8 @@
     }
 
     let aiGenerateAllPollTimer = null;
+    let aiGenerateAllLastCompletedSteps = null;
+    let aiGenerateAllIdlePolls = 0;
 
     function renderGenerateAllStatus(job) {
         const el = $('ai-generate-all-status');
@@ -2206,9 +2208,15 @@
         if (job.isRunning) {
             const totalSteps = job.totalSteps || 0;
             const pct = totalSteps ? Math.round((job.completedSteps / totalSteps) * 100) : 0;
-            el.textContent =
+            let statusLine =
                 `Generate all: day ${job.currentDay}/${job.totalDays || 14} · ${job.currentChannelName || '…'} (all channels per day, then next day) · ` +
                 `${job.completedSteps}/${totalSteps || '?'} steps (${pct}%)`;
+            if (job.workerActive === false) {
+                statusLine += ' · no background worker (stale — click Cancel to reset)';
+            } else if (aiGenerateAllIdlePolls >= 6) {
+                statusLine += ' · no recent progress (may be waiting on AI — click Cancel to stop)';
+            }
+            el.textContent = statusLine;
             if ($('btn-ai-generate-all')) {
                 $('btn-ai-generate-all').disabled = true;
                 $('btn-ai-generate-all').textContent = 'Generating…';
@@ -2225,6 +2233,9 @@
         if (job.wasCancelled) {
             el.textContent =
                 `Generate all cancelled after ${job.lineupsGenerated} lineup(s) and ${job.playoutDaysBuilt} playout day(s).`;
+        } else if (job.wasStale) {
+            el.textContent =
+                `Generate all stopped at ${job.completedSteps}/${job.totalSteps || '?'} steps. ${job.lastError || 'Background task is no longer running.'}`;
         } else {
             let message = `Generate all finished: ${job.lineupsGenerated} lineups, ${job.playoutDaysBuilt} playout days built across ${job.totalChannels} channel(s) and ${job.totalDays} day(s).`;
             if (job.lineupsFailed || job.playoutDaysFailed) {
@@ -2259,6 +2270,18 @@
     async function pollGenerateAllStatus() {
         try {
             const job = await api('/ai/generate-all/status');
+            if (job.isRunning) {
+                if (aiGenerateAllLastCompletedSteps === job.completedSteps) {
+                    aiGenerateAllIdlePolls++;
+                } else {
+                    aiGenerateAllLastCompletedSteps = job.completedSteps;
+                    aiGenerateAllIdlePolls = 0;
+                }
+            } else {
+                aiGenerateAllLastCompletedSteps = null;
+                aiGenerateAllIdlePolls = 0;
+            }
+
             renderGenerateAllStatus(job);
             if (job.isRunning) {
                 startGenerateAllPolling();
@@ -2268,7 +2291,9 @@
             stopGenerateAllPolling();
 
             if (job.completedAt) {
-                if (job.wasCancelled) {
+                if (job.wasStale) {
+                    toast(job.lastError || 'Generate all is no longer running. Status was reset.', 'info');
+                } else if (job.wasCancelled) {
                     toast(
                         `Generate all cancelled after ${job.lineupsGenerated} lineup(s) and ${job.playoutDaysBuilt} playout day(s).`,
                         'info'
@@ -2297,7 +2322,7 @@
             if (data.cancelled) {
                 toast('Cancel requested. Generate all will stop after the current channel/day step.', 'info');
             } else {
-                toast('Generate all is not running.', 'info');
+                toast('Generate all is not running. Status reset if it was stale.', 'info');
             }
 
             renderGenerateAllStatus(data.job);
