@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.91"
+version: "0.0.2.94"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -81,6 +81,9 @@ artifacts:
   - "logos/binarygeek119/Weather/WeatherStar4000.png"
   - "scripts/install-docker-cli-jellyfin.sh"
 changelog: |-
+  - Add Cancel Generate All button on the AI tab to stop the background staggered generate-all job
+  - Queue lineup Rebuild and Rebuild All in the background so admin requests return immediately instead of timing out with Error processing request
+  - AI Generate All runs day-by-day across channels: day 1 lineup+playout for each channel, then day 2 playout for each channel, through the full horizon; clears stale playout before rebuilding
   - AI lineups group TV series into 1-4 episode blocks with occasional 5-6 episode mini-marathons in flagship dayparts (about 1-2 per week)
   - OpenSwim catalog and AI lineups prioritize Nickelodeon, Disney Channel, Fox Kids, and Cartoon Network style kid-rated shows from any year
   - Rename Slappy channel 6pm block from Animation Domination to Slappy's Toon Takeover

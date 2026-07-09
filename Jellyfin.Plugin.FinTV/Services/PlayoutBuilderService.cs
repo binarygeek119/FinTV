@@ -8,6 +8,8 @@ namespace Jellyfin.Plugin.FinTV.Services;
 
 public class PlayoutBuilderService : BackgroundService
 {
+    private static readonly SemaphoreSlim ManualRebuildAllLock = new(1, 1);
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<PlayoutBuilderService> _logger;
 
@@ -202,5 +204,76 @@ public class PlayoutBuilderService : BackgroundService
         }
 
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Replaces the playout window for one channel from today through the horizon.
+    /// </summary>
+    public async Task RebuildChannelAsync(Guid channelId, CancellationToken cancellationToken = default)
+    {
+        using var gate = await ChannelApplyLocks.AcquireAsync(channelId, cancellationToken);
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
+        var generator = scope.ServiceProvider.GetRequiredService<LineupGeneratorService>();
+
+        var channel = await db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken)
+            ?? throw new InvalidOperationException("Channel not found.");
+
+        var start = DateTime.UtcNow.Date;
+        var end = PlayoutScheduleHelper.GetHorizonEndUtc(start);
+        await generator.BuildPlayoutAsync(channel, start, end, PlayoutBuildMode.ReplaceWindow, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Rebuilt playout for channel {Channel} from {Start} to {End}",
+            channel.Name,
+            start,
+            end);
+    }
+
+    /// <summary>
+    /// Queues a background playout rebuild so the admin HTTP request returns immediately.
+    /// </summary>
+    public void QueueRebuildChannel(Guid channelId)
+    {
+        _logger.LogInformation("Queueing background playout rebuild for channel {ChannelId}", channelId);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await RebuildChannelAsync(channelId, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Background playout rebuild failed for channel {ChannelId}", channelId);
+            }
+        });
+    }
+
+    /// <summary>
+    /// Queues a background rebuild for every enabled channel.
+    /// </summary>
+    public void QueueForceRebuildAllChannels()
+    {
+        _logger.LogInformation("Queueing background rebuild-all for enabled channels.");
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await ManualRebuildAllLock.WaitAsync().ConfigureAwait(false);
+                try
+                {
+                    await ForceRebuildAllChannelsAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+                finally
+                {
+                    ManualRebuildAllLock.Release();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Background rebuild-all failed");
+            }
+        });
     }
 }

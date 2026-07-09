@@ -17,27 +17,27 @@ namespace Jellyfin.Plugin.FinTV.Api;
 public class LineupsController : ControllerBase
 {
     private readonly LineupService _lineups;
-    private readonly LineupGeneratorService _generator;
     private readonly ChannelService _channels;
     private readonly FinTvDbContext _db;
+    private readonly PlayoutBuilderService _playoutBuilder;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LineupsController"/> class.
     /// </summary>
     /// <param name="lineups">Lineup service.</param>
-    /// <param name="generator">Playout generator service.</param>
     /// <param name="channels">Channel service.</param>
     /// <param name="db">Database context.</param>
+    /// <param name="playoutBuilder">Background playout builder.</param>
     public LineupsController(
         LineupService lineups,
-        LineupGeneratorService generator,
         ChannelService channels,
-        FinTvDbContext db)
+        FinTvDbContext db,
+        PlayoutBuilderService playoutBuilder)
     {
         _lineups = lineups;
-        _generator = generator;
         _channels = channels;
         _db = db;
+        _playoutBuilder = playoutBuilder;
     }
 
     /// <summary>
@@ -111,7 +111,7 @@ public class LineupsController : ControllerBase
 
         if (channel.ContentType != ChannelContentType.Weather)
         {
-            await RebuildPlayoutAsync(channel, cancellationToken);
+            _playoutBuilder.QueueRebuildChannel(channel.Id);
         }
 
         return NoContent();
@@ -235,16 +235,8 @@ public class LineupsController : ControllerBase
             return NotFound();
         }
 
-        await RebuildPlayoutAsync(channel, cancellationToken);
-        return Accepted();
-    }
-
-    private async Task RebuildPlayoutAsync(Channel channel, CancellationToken cancellationToken)
-    {
-        var start = DateTime.UtcNow.Date;
-        var end = PlayoutScheduleHelper.GetHorizonEndUtc(start);
-        await _generator.BuildPlayoutAsync(channel, start, end, PlayoutBuildMode.ReplaceWindow, cancellationToken);
-        await _db.SaveChangesAsync(cancellationToken);
+        _playoutBuilder.QueueRebuildChannel(channel.Id);
+        return Accepted(new { queued = true, channelId, channelName = channel.Name });
     }
 
     [HttpGet("{channelId:guid}/playout-horizon")]

@@ -83,16 +83,32 @@
 
         try {
             const parsed = JSON.parse(message);
-            if (parsed.title) {
-                return parsed.title;
+            const genericTitles = new Set([
+                'error processing request',
+                'an error occurred while processing your request.',
+                'an error occurred while processing your request',
+                'bad request',
+                'internal server error'
+            ]);
+
+            if (parsed.detail) {
+                return parsed.detail;
             }
 
             if (parsed.message) {
                 return parsed.message;
             }
 
+            if (parsed.title && !genericTitles.has(String(parsed.title).trim().toLowerCase())) {
+                return parsed.title;
+            }
+
             if (parsed.errors) {
                 return Object.values(parsed.errors).flat().join(' ');
+            }
+
+            if (parsed.title) {
+                return parsed.title;
             }
         } catch (ignore) {
             // Keep raw response text.
@@ -1355,7 +1371,7 @@
     async function saveLineup() {
         try {
             await api('/lineups/' + selectedChannelId, { method: 'PUT', body: JSON.stringify(lineupSlots) });
-            toast('Lineup saved and Live TV guide playout rebuilt.', 'success');
+            toast('Lineup saved. Playout rebuild started in background.', 'success');
             await loadLineupPlayoutStatus();
         } catch (err) {
             toast(err.message, 'error');
@@ -1363,12 +1379,32 @@
     }
 
     async function rebuildLineup() {
+        const btn = $('btn-rebuild-lineup');
         try {
+            if (btn) {
+                btn.disabled = true;
+            }
+
             await api('/lineups/' + selectedChannelId + '/rebuild', { method: 'POST' });
-            toast('Playout rebuilt for the Live TV guide.', 'success');
-            await loadLineupPlayoutStatus();
+            toast('Playout rebuild started in background. Guide status will refresh automatically.', 'success');
+
+            for (let attempt = 0; attempt < 24; attempt++) {
+                await new Promise((resolve) => setTimeout(resolve, 5000));
+                await loadLineupPlayoutStatus();
+                const h = await api('/lineups/' + selectedChannelId + '/playout-horizon');
+                if (Number(h.daysBuilt || 0) >= 1) {
+                    toast('Playout rebuild finished for this channel.', 'success');
+                    return;
+                }
+            }
+
+            toast('Playout rebuild is still running. Check the guide banner again in a minute.', 'success');
         } catch (err) {
             toast(err.message, 'error');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+            }
         }
     }
 
@@ -2153,13 +2189,16 @@
 
     function renderGenerateAllStatus(job) {
         const el = $('ai-generate-all-status');
+        const cancelBtn = $('btn-ai-cancel-generate-all');
         if (!el || !job) {
             el?.classList.add('hidden');
+            cancelBtn?.classList.add('hidden');
             return;
         }
 
         if (!job.isRunning && !job.completedAt) {
             el.classList.add('hidden');
+            cancelBtn?.classList.add('hidden');
             return;
         }
 
@@ -2168,26 +2207,45 @@
             const totalSteps = job.totalSteps || 0;
             const pct = totalSteps ? Math.round((job.completedSteps / totalSteps) * 100) : 0;
             el.textContent =
-                `Generate all running: day ${job.currentDay}/${job.totalDays || 14} · ${job.currentChannelName || '…'} · ` +
+                `Generate all: day ${job.currentDay}/${job.totalDays || 14} · ${job.currentChannelName || '…'} (all channels per day, then next day) · ` +
                 `${job.completedSteps}/${totalSteps || '?'} steps (${pct}%)`;
             if ($('btn-ai-generate-all')) {
                 $('btn-ai-generate-all').disabled = true;
                 $('btn-ai-generate-all').textContent = 'Generating…';
             }
+            cancelBtn?.classList.remove('hidden');
+            if (cancelBtn) {
+                cancelBtn.disabled = false;
+            }
             return;
         }
 
-        let message = `Generate all finished: ${job.lineupsGenerated} lineups, ${job.playoutDaysBuilt} playout days built across ${job.totalChannels} channel(s) and ${job.totalDays} day(s).`;
-        if (job.lineupsFailed || job.playoutDaysFailed) {
-            message += ` Failures: ${job.lineupsFailed} lineup, ${job.playoutDaysFailed} day.`;
+        cancelBtn?.classList.add('hidden');
+
+        if (job.wasCancelled) {
+            el.textContent =
+                `Generate all cancelled after ${job.lineupsGenerated} lineup(s) and ${job.playoutDaysBuilt} playout day(s).`;
+        } else {
+            let message = `Generate all finished: ${job.lineupsGenerated} lineups, ${job.playoutDaysBuilt} playout days built across ${job.totalChannels} channel(s) and ${job.totalDays} day(s).`;
+            if (job.lineupsFailed || job.playoutDaysFailed) {
+                message += ` Failures: ${job.lineupsFailed} lineup, ${job.playoutDaysFailed} day.`;
+            }
+            if (job.lastError) {
+                message += ` Last error: ${job.lastError}`;
+            }
+            el.textContent = message;
         }
-        if (job.lastError) {
-            message += ` Last error: ${job.lastError}`;
-        }
-        el.textContent = message;
+
         if ($('btn-ai-generate-all')) {
             $('btn-ai-generate-all').disabled = !($('ai-enabled')?.checked);
             $('btn-ai-generate-all').textContent = 'Generate All Channels';
+        }
+    }
+
+    function stopGenerateAllPolling() {
+        if (aiGenerateAllPollTimer) {
+            clearTimeout(aiGenerateAllPollTimer);
+            aiGenerateAllPollTimer = null;
         }
     }
 
@@ -2207,15 +2265,53 @@
                 return;
             }
 
+            stopGenerateAllPolling();
+
             if (job.completedAt) {
-                toast(
-                    `Generate all finished: ${job.lineupsGenerated} lineups and ${job.playoutDaysBuilt} playout days built.`,
-                    job.lineupsFailed || job.playoutDaysFailed ? 'info' : 'success'
-                );
+                if (job.wasCancelled) {
+                    toast(
+                        `Generate all cancelled after ${job.lineupsGenerated} lineup(s) and ${job.playoutDaysBuilt} playout day(s).`,
+                        'info'
+                    );
+                } else {
+                    toast(
+                        `Generate all finished: ${job.lineupsGenerated} lineups and ${job.playoutDaysBuilt} playout days built.`,
+                        job.lineupsFailed || job.playoutDaysFailed ? 'info' : 'success'
+                    );
+                }
                 await loadAi();
             }
         } catch (_) {
             startGenerateAllPolling();
+        }
+    }
+
+    async function cancelGenerateAll() {
+        const cancelBtn = $('btn-ai-cancel-generate-all');
+        try {
+            if (cancelBtn) {
+                cancelBtn.disabled = true;
+            }
+
+            const data = await api('/ai/generate-all/cancel', { method: 'POST', body: '{}' });
+            if (data.cancelled) {
+                toast('Cancel requested. Generate all will stop after the current channel/day step.', 'info');
+            } else {
+                toast('Generate all is not running.', 'info');
+            }
+
+            renderGenerateAllStatus(data.job);
+            if (!data.job?.isRunning) {
+                stopGenerateAllPolling();
+            } else {
+                startGenerateAllPolling();
+            }
+        } catch (err) {
+            toast(err.message, 'error');
+        } finally {
+            if (cancelBtn && $('ai-generate-all-status')?.textContent?.includes('Generate all:')) {
+                cancelBtn.disabled = false;
+            }
         }
     }
 
@@ -3373,7 +3469,10 @@
         click('btn-repair-logos', () => repairChannelLogos());
         click('btn-create-logo-set', openCreateLogoSetModal);
         click('btn-rebuild-all', () => api('/tasks/rebuild-all', { method: 'POST' })
-            .then(() => { toast('Rebuild all playouts completed.', 'success'); $('task-status').textContent = 'All channel playouts rebuilt.'; })
+            .then(() => {
+                toast('Rebuild all started in background. This may take several minutes.', 'success');
+                $('task-status').textContent = 'Rebuild all playouts running in background…';
+            })
             .catch((e) => toast(e.message, 'error')));
 
         qa('.btn-copy').forEach((btn) => btn.onclick = () => copyText(btn.dataset.copyTarget));
@@ -3382,6 +3481,7 @@
         click('btn-save-ai-settings', () => saveAiSettings().catch((e) => toast(e.message, 'error')));
         click('btn-test-ai', () => { void testAiConnection(); });
         click('btn-ai-generate-all', () => generateAllAiLineups().catch((e) => toast(e.message, 'error')));
+        click('btn-ai-cancel-generate-all', () => cancelGenerateAll().catch((e) => toast(e.message, 'error')));
         click('btn-ai-apply', () => applyAiLineup().catch((e) => toast(e.message, 'error')));
         click('btn-ai-discard', discardAiPreview);
         change('ai-enabled', updateAiUiState);

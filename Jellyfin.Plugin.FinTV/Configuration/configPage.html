@@ -391,7 +391,10 @@
                 <div class="card section-card">
                     <div class="section-header-row">
                         <h3>Channel lineups</h3>
-                        <button type="button" id="btn-ai-generate-all" class="emby-button">Generate All Channels</button>
+                        <div class="actions section-header-actions">
+                            <button type="button" id="btn-ai-generate-all" class="emby-button">Generate All Channels</button>
+                            <button type="button" id="btn-ai-cancel-generate-all" class="emby-button hidden">Cancel Generate All</button>
+                        </div>
                     </div>
                     <p id="ai-generate-all-status" class="hint hidden"></p>
                     <p class="hint">Pick a <strong>playout template</strong> to structure dayparts (morning cartoons, primetime, etc.). Channel rules define content scope; fine-tune adds extra instructions. <strong>Generate All</strong> runs in the background, one channel and one day at a time, until each channel has 14 days of playout.</p>

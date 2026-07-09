@@ -236,14 +236,13 @@ public class TasksController : ControllerBase
     }
 
     /// <summary>
-    /// Rebuilds playout timelines for all enabled channels.
+    /// Queues a background rebuild of playout timelines for all enabled channels.
     /// </summary>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>No content when rebuild completes.</returns>
+    /// <returns>Accepted when the rebuild is queued.</returns>
     [HttpPost("rebuild-all")]
-    public async Task<IActionResult> RebuildAll(CancellationToken cancellationToken)
+    public IActionResult RebuildAll()
     {
-        await _playoutBuilder.ForceRebuildAllChannelsAsync(cancellationToken);
-        return NoContent();
+        _playoutBuilder.QueueForceRebuildAllChannels();
+        return Accepted(new { queued = true });
     }
 }

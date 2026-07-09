@@ -326,6 +326,13 @@ public class AiController : ControllerBase
     public ActionResult<object> GetGenerateAllStatus()
         => Ok(BuildGenerateAllStatusResponse());
 
+    [HttpPost("generate-all/cancel")]
+    public ActionResult<object> CancelGenerateAll()
+    {
+        var cancelled = _autoApply.CancelGenerateAll();
+        return Ok(new { cancelled, job = BuildGenerateAllStatusResponse() });
+    }
+
     private static object BuildGenerateAllStatusResponse()
     {
         var job = Plugin.Instance?.Configuration.AiGenerateAllJob ?? new AiGenerateAllJobState();
@@ -344,7 +351,8 @@ public class AiController : ControllerBase
             playoutDaysFailed = job.PlayoutDaysFailed,
             lastError = job.LastError,
             startedAt = job.StartedAt,
-            completedAt = job.CompletedAt
+            completedAt = job.CompletedAt,
+            wasCancelled = job.WasCancelled
         };
     }
 

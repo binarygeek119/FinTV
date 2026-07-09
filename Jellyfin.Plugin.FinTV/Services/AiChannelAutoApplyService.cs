@@ -14,6 +14,8 @@ public class AiChannelAutoApplyService
 {
     private static readonly SemaphoreSlim BulkApplyLock = new(1, 1);
     private static readonly object PendingQueueLock = new();
+    private static readonly object GenerateAllCancelLock = new();
+    private static CancellationTokenSource? _generateAllCts;
 
     private readonly FinTvDbContext _db;
     private readonly AiLineupGeneratorService _generator;
@@ -142,7 +144,51 @@ public class AiChannelAutoApplyService
         Plugin.Instance?.Configuration.AiGenerateAllJob.IsRunning == true;
 
     /// <summary>
-    /// Generates AI lineups and builds playout one channel and one day at a time until the full horizon is covered.
+    /// Requests cancellation of the in-flight staggered generate-all job.
+    /// </summary>
+    /// <returns>True when a running job received a cancel signal.</returns>
+    public bool CancelGenerateAll()
+    {
+        lock (GenerateAllCancelLock)
+        {
+            if (!IsGenerateAllJobRunning || _generateAllCts is null)
+            {
+                return false;
+            }
+
+            if (_generateAllCts.IsCancellationRequested)
+            {
+                return true;
+            }
+
+            _generateAllCts.Cancel();
+            return true;
+        }
+    }
+
+    private CancellationToken BeginGenerateAllCancellation()
+    {
+        lock (GenerateAllCancelLock)
+        {
+            _generateAllCts?.Cancel();
+            _generateAllCts?.Dispose();
+            _generateAllCts = new CancellationTokenSource();
+            return _generateAllCts.Token;
+        }
+    }
+
+    private static void EndGenerateAllCancellation()
+    {
+        lock (GenerateAllCancelLock)
+        {
+            _generateAllCts?.Dispose();
+            _generateAllCts = null;
+        }
+    }
+
+    /// <summary>
+    /// Generates AI lineups and builds playout one calendar day at a time across all channels:
+    /// day 1 for every channel (lineup + playout), then day 2 for every channel, and so on.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task RunStaggeredGenerateAllAsync(CancellationToken cancellationToken = default)
@@ -158,7 +204,8 @@ public class AiChannelAutoApplyService
             IsRunning = true,
             StartedAt = DateTime.UtcNow,
             LastError = null,
-            CompletedAt = null
+            CompletedAt = null,
+            WasCancelled = false
         };
 
         try
@@ -189,43 +236,12 @@ public class AiChannelAutoApplyService
 
             var lineupGenerated = new HashSet<Guid>();
             var excludedChannels = new HashSet<Guid>();
-            var extendOnlyChannels = new HashSet<Guid>();
-
-            foreach (var (channelId, channelName) in eligibleChannels)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                var maintainResult = await MaintainPlayoutHorizonAsync(channelId, cancellationToken)
-                    .ConfigureAwait(false);
-                if (maintainResult is PlayoutHorizonMaintainResult.AlreadyAtHorizon
-                    or PlayoutHorizonMaintainResult.ExtendedOneDay)
-                {
-                    extendOnlyChannels.Add(channelId);
-                    if (maintainResult == PlayoutHorizonMaintainResult.ExtendedOneDay)
-                    {
-                        state.PlayoutDaysBuilt++;
-                    }
-
-                    state.CompletedSteps += daysToBuild;
-                    SaveGenerateAllState(state);
-                    if (maintainResult == PlayoutHorizonMaintainResult.ExtendedOneDay)
-                    {
-                        _logger.LogInformation(
-                            "AI generate-all extended playout by one day for {ChannelName} (13-day horizon maintenance).",
-                            channelName);
-                    }
-                }
-            }
 
             for (var dayIndex = 0; dayIndex < daysToBuild; dayIndex++)
             {
                 foreach (var (channelId, channelName) in eligibleChannels)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-
-                    if (extendOnlyChannels.Contains(channelId))
-                    {
-                        continue;
-                    }
 
                     state.CurrentDay = dayIndex + 1;
                     state.CurrentChannelName = channelName;
@@ -240,9 +256,9 @@ public class AiChannelAutoApplyService
 
                     if (!lineupGenerated.Contains(channelId))
                     {
-                        using var scope = _scopeFactory.CreateScope();
-                        var service = scope.ServiceProvider.GetRequiredService<AiChannelAutoApplyService>();
-                        var lineupResult = await service.ApplyChannelLineupAsync(
+                        using var lineupScope = _scopeFactory.CreateScope();
+                        var lineupService = lineupScope.ServiceProvider.GetRequiredService<AiChannelAutoApplyService>();
+                        var lineupResult = await lineupService.ApplyChannelLineupAsync(
                             channelId,
                             rebuildPlayout: false,
                             cancellationToken).ConfigureAwait(false);
@@ -251,6 +267,15 @@ public class AiChannelAutoApplyService
                         {
                             lineupGenerated.Add(channelId);
                             state.LineupsGenerated++;
+                            _logger.LogInformation(
+                                "AI generate-all day {Day}: generated lineup for {ChannelName}.",
+                                dayIndex + 1,
+                                channelName);
+
+                            using var clearScope = _scopeFactory.CreateScope();
+                            var clearService = clearScope.ServiceProvider.GetRequiredService<AiChannelAutoApplyService>();
+                            await clearService.ClearChannelPlayoutFromTodayAsync(channelId, cancellationToken)
+                                .ConfigureAwait(false);
                         }
                         else if (!lineupResult.WasSkipped)
                         {
@@ -276,11 +301,15 @@ public class AiChannelAutoApplyService
 
                     try
                     {
-                        using var scope = _scopeFactory.CreateScope();
-                        var service = scope.ServiceProvider.GetRequiredService<AiChannelAutoApplyService>();
-                        await service.BuildChannelPlayoutDayAsync(channelId, dayIndex, cancellationToken)
+                        using var playoutScope = _scopeFactory.CreateScope();
+                        var playoutService = playoutScope.ServiceProvider.GetRequiredService<AiChannelAutoApplyService>();
+                        await playoutService.BuildChannelPlayoutDayAsync(channelId, dayIndex, cancellationToken)
                             .ConfigureAwait(false);
                         state.PlayoutDaysBuilt++;
+                        _logger.LogInformation(
+                            "AI generate-all day {Day}: built playout for {ChannelName}.",
+                            dayIndex + 1,
+                            channelName);
                     }
                     catch (Exception ex)
                     {
@@ -305,6 +334,12 @@ public class AiChannelAutoApplyService
                 eligibleChannels.Count,
                 daysToBuild);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            state.WasCancelled = true;
+            _logger.LogInformation("Staggered AI generate-all cancelled.");
+            throw;
+        }
         finally
         {
             state.IsRunning = false;
@@ -313,6 +348,24 @@ public class AiChannelAutoApplyService
             SaveGenerateAllState(state);
             BulkApplyLock.Release();
         }
+    }
+
+    public async Task ClearChannelPlayoutFromTodayAsync(
+        Guid channelId,
+        CancellationToken cancellationToken = default)
+    {
+        var start = DateTime.UtcNow.Date;
+        var existing = await _db.PlayoutItems
+            .Where(p => p.ChannelId == channelId && p.Finish > start)
+            .ToListAsync(cancellationToken);
+        if (existing.Count == 0)
+        {
+            return;
+        }
+
+        _db.PlayoutItems.RemoveRange(existing);
+        await _db.SaveChangesAsync(cancellationToken);
+        _db.ChangeTracker.Clear();
     }
 
     public async Task BuildChannelPlayoutDayAsync(
@@ -614,15 +667,16 @@ public class AiChannelAutoApplyService
     private void QueueStaggeredGenerateAllInBackground(string operationName)
     {
         _logger.LogInformation("Queueing staggered AI {Operation} for eligible channels.", operationName);
+        var cancellationToken = BeginGenerateAllCancellation();
         _ = Task.Run(async () =>
         {
             try
             {
                 using var scope = _scopeFactory.CreateScope();
                 var service = scope.ServiceProvider.GetRequiredService<AiChannelAutoApplyService>();
-                await service.RunStaggeredGenerateAllAsync(CancellationToken.None).ConfigureAwait(false);
+                await service.RunStaggeredGenerateAllAsync(cancellationToken).ConfigureAwait(false);
                 var job = Plugin.Instance?.Configuration.AiGenerateAllJob;
-                if (job is not null)
+                if (job is not null && !job.WasCancelled)
                 {
                     _logger.LogInformation(
                         "Background staggered AI {Operation} finished: {Lineups} lineups, {PlayoutDays} playout days, {FailedLineups} lineup failures, {FailedDays} day failures.",
@@ -632,6 +686,10 @@ public class AiChannelAutoApplyService
                         job.LineupsFailed,
                         job.PlayoutDaysFailed);
                 }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                _logger.LogInformation("Background staggered AI {Operation} cancelled.", operationName);
             }
             catch (Exception ex)
             {
@@ -645,6 +703,10 @@ public class AiChannelAutoApplyService
                     job.CompletedAt = DateTime.UtcNow;
                     plugin.SaveConfiguration();
                 }
+            }
+            finally
+            {
+                EndGenerateAllCancellation();
             }
         });
     }

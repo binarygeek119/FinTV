@@ -198,4 +198,6 @@ public class AiGenerateAllJobState
     public DateTime? StartedAt { get; set; }
 
     public DateTime? CompletedAt { get; set; }
+
+    public bool WasCancelled { get; set; }
 }
