@@ -22,19 +22,22 @@ public class AiController : ControllerBase
     private readonly LlmClientService _llm;
     private readonly FinTvDbContext _db;
     private readonly LineupGeneratorService _playoutGenerator;
+    private readonly WeatherGuideMetadataService _weatherGuide;
 
     public AiController(
         AiLineupGeneratorService generator,
         AiChannelAutoApplyService autoApply,
         LlmClientService llm,
         FinTvDbContext db,
-        LineupGeneratorService playoutGenerator)
+        LineupGeneratorService playoutGenerator,
+        WeatherGuideMetadataService weatherGuide)
     {
         _generator = generator;
         _autoApply = autoApply;
         _llm = llm;
         _db = db;
         _playoutGenerator = playoutGenerator;
+        _weatherGuide = weatherGuide;
     }
 
     [HttpGet("settings")]
@@ -333,6 +336,53 @@ public class AiController : ControllerBase
         return Ok(new { cancelled, job = _autoApply.BuildGenerateAllStatus() });
     }
 
+    [HttpGet("weather-guide-cache/status")]
+    public async Task<ActionResult<object>> GetWeatherGuideCacheStatus(CancellationToken cancellationToken)
+        => Ok(await _weatherGuide.BuildCacheStatusAsync(cancellationToken));
+
+    [HttpPost("weather-guide-cache/generate")]
+    public async Task<IActionResult> GenerateWeatherGuideCache(
+        [FromBody] WeatherGuideCacheGenerateRequest? request,
+        CancellationToken cancellationToken)
+    {
+        if (Plugin.Instance?.Configuration.Ai.Enabled != true)
+        {
+            return BadRequest(new { message = "AI lineup generation is disabled." });
+        }
+
+        if (_weatherGuide.IsGenerating)
+        {
+            return Ok(new
+            {
+                queued = false,
+                alreadyRunning = true,
+                status = await _weatherGuide.BuildCacheStatusAsync(cancellationToken)
+            });
+        }
+
+        try
+        {
+            _weatherGuide.QueueGenerateCache(request?.Force == true);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+
+        return Accepted(new
+        {
+            queued = true,
+            status = await _weatherGuide.BuildCacheStatusAsync(cancellationToken)
+        });
+    }
+
+    [HttpDelete("weather-guide-cache")]
+    public ActionResult<object> ClearWeatherGuideCache()
+    {
+        var cleared = _weatherGuide.ClearCache();
+        return Ok(new { cleared });
+    }
+
     private static string MaskKey(string? key)
     {
         if (string.IsNullOrWhiteSpace(key))
@@ -403,4 +453,9 @@ public class AiApplyLineupRequest
     public List<LineupSlotDto>? Slots { get; set; }
 
     public bool RebuildPlayout { get; set; }
+}
+
+public class WeatherGuideCacheGenerateRequest
+{
+    public bool Force { get; set; }
 }

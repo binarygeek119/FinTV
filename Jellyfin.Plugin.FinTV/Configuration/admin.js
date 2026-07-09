@@ -261,6 +261,10 @@
         };
     }
 
+    function isEmptyApiBody(data) {
+        return data == null || data === '' || (typeof data === 'string' && !data.trim());
+    }
+
     function isEmptyApiResponseError(err) {
         const message = String((err && err.message) || '');
         const status = err && err.status;
@@ -271,7 +275,7 @@
     }
 
     function normalizeApiResponseData(data) {
-        if (data == null || data === '') {
+        if (isEmptyApiBody(data)) {
             return null;
         }
 
@@ -295,7 +299,7 @@
             };
 
             const handleSuccess = (data, statusCode) => {
-                if (statusCode === 204 || data == null || data === '') {
+                if (statusCode === 204 || isEmptyApiBody(data)) {
                     finish(resolve, null);
                     return;
                 }
@@ -303,7 +307,50 @@
                 try {
                     finish(resolve, normalizeApiResponseData(data));
                 } catch (parseErr) {
+                    if (isEmptyApiBody(data)) {
+                        finish(resolve, null);
+                        return;
+                    }
+
                     finish(reject, parseErr);
+                }
+            };
+
+            const handleFailure = async (err) => {
+                if (settled) {
+                    return;
+                }
+
+                if (err instanceof Response) {
+                    if (err.status === 204 || err.status === 205) {
+                        finish(resolve, null);
+                        return;
+                    }
+
+                    try {
+                        await readApiFailure(err);
+                    } catch (parsedErr) {
+                        finish(reject, parsedErr instanceof Error ? parsedErr : new Error(String(parsedErr)));
+                    }
+
+                    return;
+                }
+
+                if (isEmptyApiResponseError(err)) {
+                    finish(resolve, null);
+                    return;
+                }
+
+                const message = String((err && err.message) || err || '');
+                if (message.includes('Unexpected end of JSON input') || message === 'parsererror') {
+                    finish(resolve, null);
+                    return;
+                }
+
+                try {
+                    await readApiFailure(err);
+                } catch (parsedErr) {
+                    finish(reject, parsedErr instanceof Error ? parsedErr : new Error(String(parsedErr)));
                 }
             };
 
@@ -336,16 +383,8 @@
                     }
 
                     handleSuccess(data);
-                }).catch(async (err) => {
-                    if (settled) {
-                        return;
-                    }
-
-                    try {
-                        await readApiFailure(err);
-                    } catch (parsedErr) {
-                        finish(reject, parsedErr instanceof Error ? parsedErr : new Error(String(parsedErr)));
-                    }
+                }).catch((err) => {
+                    void handleFailure(err);
                 });
             }
         });
@@ -403,11 +442,15 @@
                 throw new Error(parseErrorMessage(text || res.statusText));
             }
 
-            if (res.status === 204) {
+            if (res.status === 204 || res.status === 205) {
                 return null;
             }
 
             const text = await res.text();
+            if (isEmptyApiBody(text)) {
+                return null;
+            }
+
             return normalizeApiResponse(parseApiJsonBody(text));
         }).catch((err) => {
             if (isNetworkError(err)) {
@@ -1081,10 +1124,23 @@
             const h = await api('/lineups/' + selectedChannelId + '/playout-horizon');
             const daysBuilt = Number(h.daysBuilt || 0);
             const targetDays = Number(h.playoutDaysToBuild || 14);
+            const itemCount = Number(h.playoutItemCount || 0);
+            const hasCoverageNow = !!h.hasCoverageNow;
+
+            if (!hasCoverageNow) {
+                banner.classList.remove('hidden');
+                if (itemCount > 0 && h.earliestStartUtc) {
+                    const nextStart = new Date(h.earliestStartUtc).toLocaleString();
+                    banner.textContent = `Nothing on air right now. Next programme starts ${nextStart}. Live TV will show EBS until then.`;
+                } else {
+                    banner.textContent = 'Live TV guide has no playout for this channel yet. Fill lineup slots (AI Generate or manual), then click Rebuild Playout.';
+                }
+                return;
+            }
 
             if (!h.latestScheduledFinishUtc || daysBuilt < 0.5) {
                 banner.classList.remove('hidden');
-                banner.textContent = 'Live TV guide has no playout for this channel yet. Click Rebuild Playout (or Save Lineup) to populate the EPG.';
+                banner.textContent = 'Guide playout is ending soon. Click Rebuild Playout to refresh the schedule.';
                 return;
             }
 
@@ -1392,8 +1448,21 @@
                 await new Promise((resolve) => setTimeout(resolve, 5000));
                 await loadLineupPlayoutStatus();
                 const h = await api('/lineups/' + selectedChannelId + '/playout-horizon');
-                if (Number(h.daysBuilt || 0) >= 1) {
-                    toast('Playout rebuild finished for this channel.', 'success');
+                const rebuild = h.rebuild || {};
+
+                if (rebuild.state === 'failed') {
+                    toast(rebuild.error || 'Playout rebuild failed. Check the Jellyfin server log.', 'error');
+                    return;
+                }
+
+                if (rebuild.state === 'completed') {
+                    if (rebuild.hasCoverageNow) {
+                        toast('Playout rebuild finished. Live TV guide is active for this channel.', 'success');
+                    } else if (Number(rebuild.playoutItemCount || 0) > 0) {
+                        toast('Playout rebuilt, but nothing is on air right now. Check the guide banner for the next start time.', 'success');
+                    } else {
+                        toast('Rebuild finished but the guide is empty. Fill lineup slots (Preview shows 0/48), then rebuild again.', 'error');
+                    }
                     return;
                 }
             }
@@ -2137,6 +2206,8 @@
         if ($('btn-ai-generate-all')) $('btn-ai-generate-all').disabled = !enabled;
         if ($('ai-auto-apply-channel-add')) $('ai-auto-apply-channel-add').disabled = !enabled;
         if ($('ai-auto-apply-all-on-save')) $('ai-auto-apply-all-on-save').disabled = !enabled;
+        if ($('btn-weather-guide-cache-generate')) $('btn-weather-guide-cache-generate').disabled = !enabled;
+        if ($('btn-weather-guide-cache-clear')) $('btn-weather-guide-cache-clear').disabled = !enabled;
     }
 
     function readAiSettingsFromForm() {
@@ -2180,9 +2251,135 @@
             if (job.isRunning) {
                 startGenerateAllPolling();
             }
+            await loadWeatherGuideCacheStatus();
         } catch (err) {
             reportApiError(err, 'Could not load AI settings.');
         }
+    }
+
+    let weatherGuideCachePollTimer = null;
+
+    function renderWeatherGuideCacheStatus(status) {
+        const el = $('ai-weather-guide-cache-status');
+        const genBtn = $('btn-weather-guide-cache-generate');
+        const clearBtn = $('btn-weather-guide-cache-clear');
+        if (!el || !status) {
+            return;
+        }
+
+        if (status.isGenerating) {
+            el.textContent =
+                `Generating weather guide cache… ${status.completeChannels}/${status.channelCount} channel(s) complete · ${status.entryCount} hour slot(s) cached.`;
+            if (genBtn) {
+                genBtn.disabled = true;
+                genBtn.textContent = 'Generating…';
+            }
+            if (clearBtn) {
+                clearBtn.disabled = true;
+            }
+            return;
+        }
+
+        if (genBtn) {
+            genBtn.disabled = !($('ai-enabled')?.checked);
+            genBtn.textContent = 'Generate Weather Guide Cache';
+        }
+        if (clearBtn) {
+            clearBtn.disabled = !($('ai-enabled')?.checked);
+        }
+
+        if (!status.channelCount) {
+            el.textContent = 'No enabled weather channels. Add a weather channel to build guide metadata.';
+            return;
+        }
+
+        let line =
+            `${status.completeChannels}/${status.channelCount} weather channel(s) fully cached (24 hours each) · ${status.entryCount} total cache entries.`;
+        const partial = (status.channels || []).filter((c) => c.hoursCached > 0 && !c.isComplete);
+        if (partial.length) {
+            const names = partial.map((c) => `${c.channelName} (${c.hoursCached}/24)`).join(', ');
+            line += ` Partial: ${names}.`;
+        } else if (status.completeChannels < status.channelCount) {
+            line += ' Click Generate Weather Guide Cache to fill missing hour slots.';
+        }
+
+        el.textContent = line;
+    }
+
+    function stopWeatherGuideCachePolling() {
+        if (weatherGuideCachePollTimer) {
+            clearTimeout(weatherGuideCachePollTimer);
+            weatherGuideCachePollTimer = null;
+        }
+    }
+
+    function startWeatherGuideCachePolling() {
+        stopWeatherGuideCachePolling();
+        weatherGuideCachePollTimer = setTimeout(pollWeatherGuideCacheStatus, 3000);
+    }
+
+    async function loadWeatherGuideCacheStatus() {
+        try {
+            const status = await api('/ai/weather-guide-cache/status');
+            renderWeatherGuideCacheStatus(status);
+            if (status.isGenerating) {
+                startWeatherGuideCachePolling();
+            } else {
+                stopWeatherGuideCachePolling();
+            }
+        } catch (err) {
+            const el = $('ai-weather-guide-cache-status');
+            if (el) {
+                el.textContent = 'Could not load weather guide cache status.';
+            }
+        }
+    }
+
+    async function pollWeatherGuideCacheStatus() {
+        try {
+            const status = await api('/ai/weather-guide-cache/status');
+            renderWeatherGuideCacheStatus(status);
+            if (status.isGenerating) {
+                startWeatherGuideCachePolling();
+            } else {
+                stopWeatherGuideCachePolling();
+            }
+        } catch (err) {
+            stopWeatherGuideCachePolling();
+        }
+    }
+
+    async function generateWeatherGuideCache(force = false) {
+        if (!$('ai-enabled')?.checked) {
+            toast('Enable AI lineup generation first.', 'error');
+            return;
+        }
+
+        const result = await api('/ai/weather-guide-cache/generate', {
+            method: 'POST',
+            body: JSON.stringify({ force })
+        });
+
+        if (result.alreadyRunning) {
+            toast('Weather guide cache generation is already running.', 'info');
+        } else if (result.queued) {
+            toast('Weather guide cache generation started.', 'success');
+        }
+
+        renderWeatherGuideCacheStatus(result.status);
+        if (result.status?.isGenerating) {
+            startWeatherGuideCachePolling();
+        }
+    }
+
+    async function clearWeatherGuideCache() {
+        if (!confirm('Delete all cached weather guide metadata? EPG will use fallback titles until you generate a new cache.')) {
+            return;
+        }
+
+        const result = await api('/ai/weather-guide-cache', { method: 'DELETE' });
+        toast(`Cleared ${result.cleared} weather guide cache entries.`, 'success');
+        await loadWeatherGuideCacheStatus();
     }
 
     let aiGenerateAllPollTimer = null;
@@ -2939,6 +3136,40 @@
         }
     }
 
+    async function loadGeneral() {
+        try {
+            const settings = await api('/general/settings');
+            if ($('general-debug-logging')) {
+                $('general-debug-logging').checked = !!settings.debugLogging;
+            }
+            if ($('general-schedule-tz')) {
+                $('general-schedule-tz').value = settings.scheduleTimeZone || 'America/New_York';
+            }
+            if ($('general-playout-days')) {
+                $('general-playout-days').value = String(settings.playoutDaysToBuild ?? 14);
+            }
+        } catch (err) {
+            reportApiError(err, 'Could not load general settings.');
+        }
+    }
+
+    async function saveGeneralSettings() {
+        try {
+            await api('/general/settings', {
+                method: 'PUT',
+                body: JSON.stringify({
+                    debugLogging: !!$('general-debug-logging')?.checked,
+                    scheduleTimeZone: $('general-schedule-tz')?.value.trim() || 'America/New_York',
+                    playoutDaysToBuild: Number($('general-playout-days')?.value || '14')
+                })
+            });
+            toast('General settings saved.', 'success');
+            await loadGeneral();
+        } catch (err) {
+            toast(err.message, 'error');
+        }
+    }
+
     async function loadSetup() {
         try {
             const data = await api('/setup/urls');
@@ -3396,6 +3627,7 @@
         stopOnAirPolling();
         if (name === 'channels') startOnAirPolling();
         if (name === 'setup') loadSetup();
+        if (name === 'general') loadGeneral();
         if (name === 'ebs') loadEbs();
         if (name === 'ai') loadAi();
         if (name === 'weather') loadWeather();
@@ -3502,11 +3734,14 @@
 
         qa('.btn-copy').forEach((btn) => btn.onclick = () => copyText(btn.dataset.copyTarget));
         click('btn-save-setup', saveSetupSettings);
+        click('btn-save-general', saveGeneralSettings);
         click('btn-save-ebs', () => saveEbsSettings().catch((e) => toast(e.message, 'error')));
         click('btn-save-ai-settings', () => saveAiSettings().catch((e) => toast(e.message, 'error')));
         click('btn-test-ai', () => { void testAiConnection(); });
         click('btn-ai-generate-all', () => generateAllAiLineups().catch((e) => toast(e.message, 'error')));
         click('btn-ai-cancel-generate-all', () => cancelGenerateAll().catch((e) => toast(e.message, 'error')));
+        click('btn-weather-guide-cache-generate', () => generateWeatherGuideCache().catch((e) => toast(e.message, 'error')));
+        click('btn-weather-guide-cache-clear', () => clearWeatherGuideCache().catch((e) => toast(e.message, 'error')));
         click('btn-ai-apply', () => applyAiLineup().catch((e) => toast(e.message, 'error')));
         click('btn-ai-discard', discardAiPreview);
         change('ai-enabled', updateAiUiState);

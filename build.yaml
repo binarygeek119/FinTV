@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.95"
+version: "0.0.2.101"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -81,6 +81,12 @@ artifacts:
   - "logos/binarygeek119/Weather/WeatherStar4000.png"
   - "scripts/install-docker-cli-jellyfin.sh"
 changelog: |-
+  - Weather guide metadata uses a persistent AI cache: generate once per location/hour slot, reuse every day; EPG reads cache only (no live Open-Meteo or LLM during playout)
+  - Add Generate Weather Guide Cache and Delete Weather Guide Cache buttons on the AI tab
+  - Add General tab with debug logging toggle for verbose AI channel building logs in the Jellyfin server log
+  - Add rich Live TV guide metadata from Jellyfin library items: series/movie titles, episode numbers, descriptions, genres, ratings, year, and series/movie posters in XMLTV EPG
+  - Fix Rebuild Playout false success toast when future-only playout exists but nothing is on air now; admin waits for rebuild completion and reports empty guide or next start time
+  - Fix Save Lineup Unexpected end of JSON input on Jellyfin 12 when the server returns an empty 204 response
   - Fix Generate All UI stuck on Generating after server restart or crashed background task; Cancel clears stale jobs
   - Add Cancel Generate All button on the AI tab to stop the background staggered generate-all job
   - Queue lineup Rebuild and Rebuild All in the background so admin requests return immediately instead of timing out with Error processing request

@@ -3,6 +3,7 @@ using Jellyfin.Plugin.FinTV.Configuration;
 using Jellyfin.Plugin.FinTV.Data;
 using Jellyfin.Plugin.FinTV.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.FinTV.Services;
 
@@ -16,6 +17,7 @@ public class AiLineupGeneratorService
     private readonly JellyfinCatalogService _catalog;
     private readonly LineupService _lineups;
     private readonly HolidayChannelService _holidays;
+    private readonly ILogger<AiLineupGeneratorService> _logger;
 
     public AiLineupGeneratorService(
         FinTvDbContext db,
@@ -23,7 +25,8 @@ public class AiLineupGeneratorService
         LlmClientService llm,
         JellyfinCatalogService catalog,
         LineupService lineups,
-        HolidayChannelService holidays)
+        HolidayChannelService holidays,
+        ILogger<AiLineupGeneratorService> logger)
     {
         _db = db;
         _manifestBuilder = manifestBuilder;
@@ -31,6 +34,7 @@ public class AiLineupGeneratorService
         _catalog = catalog;
         _lineups = lineups;
         _holidays = holidays;
+        _logger = logger;
     }
 
     public async Task<AiLineupPreviewResult> GenerateAsync(
@@ -59,6 +63,15 @@ public class AiLineupGeneratorService
         }
 
         var manifest = _manifestBuilder.Build(channel);
+        FinTvDebugLog.Ai(
+            _logger,
+            "Catalog manifest for {Channel}: mode={Mode}, tagMatched={TagMatched}, available={Available}, inPrompt={InPrompt}",
+            channel.Name,
+            manifest.CatalogMode,
+            manifest.TagMatchedCount,
+            manifest.TotalAvailable,
+            manifest.IncludedInPrompt);
+
         if (manifest.Catalog.Count == 0)
         {
             if (_holidays.IsHolidayChannel(channel))
@@ -78,9 +91,23 @@ public class AiLineupGeneratorService
 
         var systemPrompt = BuildSystemPrompt(catalogMode, playoutTemplate);
         var userPrompt = BuildUserPrompt(channel, manifest, ruleBrief, catalogMode, playoutTemplate);
+        FinTvDebugLog.Ai(
+            _logger,
+            "LLM request for {Channel} via {Provider}: systemPrompt={SystemChars} chars, userPrompt={UserChars} chars, template={Template}",
+            channel.Name,
+            provider,
+            systemPrompt.Length,
+            userPrompt.Length,
+            playoutTemplate.Id);
 
         var rawJson = await _llm.CompleteJsonAsync(provider, systemPrompt, userPrompt, cancellationToken);
         var aiResponse = ParseAiResponse(rawJson);
+        FinTvDebugLog.Ai(
+            _logger,
+            "LLM response for {Channel}: {ResponseChars} chars, slotsReturned={Slots}",
+            channel.Name,
+            rawJson.Length,
+            aiResponse.Slots?.Count ?? 0);
 
         var validIds = manifest.Catalog.Select(c => c.Id).ToHashSet();
         var catalogById = manifest.Catalog.ToDictionary(c => c.Id);
@@ -94,6 +121,13 @@ public class AiLineupGeneratorService
             playoutTemplate,
             catalogMode);
 
+        var filledSlots = slots.Count(s => s.Candidates.Count > 0);
+        FinTvDebugLog.Ai(
+            _logger,
+            "Validated lineup for {Channel}: {Filled}/48 slots with candidates",
+            channel.Name,
+            filledSlots);
+
         return BuildPreview(channel, slots, manifest, provider, playoutTemplate);
     }
 
@@ -105,6 +139,13 @@ public class AiLineupGeneratorService
         CancellationToken cancellationToken = default)
     {
         EnsureAiEnabled();
+        FinTvDebugLog.Ai(
+            _logger,
+            "Applying AI lineup to {ChannelId}: {SlotCount} slots, rebuildPlayout={Rebuild}",
+            channelId,
+            slots.Count,
+            rebuildPlayout);
+
         await _lineups.UpdateDefaultSlotsAsync(channelId, NormalizeSlots(slots), cancellationToken);
         _db.ChangeTracker.Clear();
 
@@ -120,7 +161,21 @@ public class AiLineupGeneratorService
         {
             var start = DateTime.UtcNow.Date;
             var end = PlayoutScheduleHelper.GetHorizonEndUtc(start);
+            FinTvDebugLog.Ai(
+                _logger,
+                "Rebuilding playout for {Channel} from {Start:u} to {End:u}",
+                channel.Name,
+                start,
+                end);
             await generator.BuildPlayoutAsync(channel, start, end, PlayoutBuildMode.ReplaceWindow, cancellationToken);
+            var itemCount = await _db.PlayoutItems.CountAsync(
+                p => p.ChannelId == channelId && p.Finish > DateTime.UtcNow,
+                cancellationToken);
+            FinTvDebugLog.Ai(
+                _logger,
+                "Playout rebuild finished for {Channel}: {ItemCount} future items",
+                channel.Name,
+                itemCount);
         }
         catch (InvalidOperationException)
         {

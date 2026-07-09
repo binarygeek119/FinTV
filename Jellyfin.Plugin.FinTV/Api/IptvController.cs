@@ -102,4 +102,37 @@ public class IptvController : ControllerBase
         var current = await _stream.GetCurrentItemAsync(id, cancellationToken);
         return current is null ? NotFound() : Ok(current);
     }
+
+    /// <summary>
+    /// Serves a Jellyfin library poster for XMLTV programme icons.
+    /// </summary>
+    /// <param name="itemId">Jellyfin item identifier (movie, series, or episode).</param>
+    /// <param name="guideMetadata">Guide metadata service.</param>
+    /// <returns>Poster image file.</returns>
+    [HttpGet("poster/{itemId:guid}")]
+    public IActionResult GetPoster(
+        Guid itemId,
+        [FromServices] GuideMetadataService guideMetadata)
+    {
+        var path = guideMetadata.GetPosterImagePath(itemId);
+        if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path))
+        {
+            return NotFound();
+        }
+
+        return PhysicalFile(path, GetPosterContentType(path));
+    }
+
+    private static string GetPosterContentType(string path)
+    {
+        var extension = Path.GetExtension(path);
+        return extension.ToLowerInvariant() switch
+        {
+            ".png" => "image/png",
+            ".webp" => "image/webp",
+            ".gif" => "image/gif",
+            ".bmp" => "image/bmp",
+            _ => "image/jpeg"
+        };
+    }
 }

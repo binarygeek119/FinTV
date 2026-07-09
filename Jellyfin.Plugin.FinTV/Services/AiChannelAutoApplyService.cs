@@ -85,9 +85,11 @@ public class AiChannelAutoApplyService
         var settings = Plugin.Instance?.Configuration.Ai ?? new AiSettings();
         if (!settings.Enabled || !settings.AutoApplyOnChannelAdd)
         {
+            FinTvDebugLog.Ai(_logger, "Auto-apply skipped for {ChannelId}: AI disabled or auto-apply off", channelId);
             return AiAutoApplyChannelResult.Skipped("AI auto-apply is disabled.");
         }
 
+        FinTvDebugLog.Ai(_logger, "Auto-apply starting for channel {ChannelId}", channelId);
         var result = await ApplyChannelLineupAsync(channelId, cancellationToken: cancellationToken);
         if (result.Ok)
         {
@@ -114,8 +116,16 @@ public class AiChannelAutoApplyService
 
         if (!IsEligible(channel))
         {
+            FinTvDebugLog.Ai(_logger, "Channel {ChannelName} ({ChannelId}) is not eligible for AI lineups", channel.Name, channelId);
             return AiAutoApplyChannelResult.Skipped($"{channel.Name} is not eligible for AI lineups.");
         }
+
+        FinTvDebugLog.Ai(
+            _logger,
+            "Applying AI lineup to {ChannelName} ({ChannelId}), rebuildPlayout={Rebuild}",
+            channel.Name,
+            channelId,
+            rebuildPlayout);
 
         try
         {
@@ -124,6 +134,11 @@ public class AiChannelAutoApplyService
 
             var preview = await _generator.GenerateAsync(channelId, null, cancellationToken);
             _db.ChangeTracker.Clear();
+            FinTvDebugLog.Ai(
+                _logger,
+                "Generated preview for {ChannelName}: {SlotCount} slots",
+                channel.Name,
+                preview.LineupSlots.Count);
 
             await _generator.ApplyAsync(
                 channelId,
@@ -329,6 +344,14 @@ public class AiChannelAutoApplyService
                 .Select(c => (c.Id, c.Name))
                 .ToList();
 
+            FinTvDebugLog.Ai(
+                _logger,
+                "Generate-all starting: {Eligible}/{Total} eligible channels, {Days} days, {Steps} steps",
+                eligibleChannels.Count,
+                channelRows.Count,
+                daysToBuild,
+                eligibleChannels.Count * daysToBuild);
+
             state.TotalDays = daysToBuild;
             state.TotalChannels = eligibleChannels.Count;
             state.TotalSteps = eligibleChannels.Count * daysToBuild;
@@ -355,6 +378,11 @@ public class AiChannelAutoApplyService
 
                     if (excludedChannels.Contains(channelId))
                     {
+                        FinTvDebugLog.Ai(
+                            _logger,
+                            "Generate-all skipping excluded channel {ChannelName} on day {Day}",
+                            channelName,
+                            dayIndex + 1);
                         state.CompletedSteps++;
                         SaveGenerateAllState(state);
                         continue;
@@ -398,6 +426,11 @@ public class AiChannelAutoApplyService
                         }
                         else
                         {
+                            FinTvDebugLog.Ai(
+                                _logger,
+                                "Generate-all skipped ineligible channel {ChannelName}: {Reason}",
+                                channelName,
+                                lineupResult.Error ?? "(none)");
                             excludedChannels.Add(channelId);
                             state.CompletedSteps++;
                             SaveGenerateAllState(state);
@@ -466,9 +499,11 @@ public class AiChannelAutoApplyService
             .ToListAsync(cancellationToken);
         if (existing.Count == 0)
         {
+            FinTvDebugLog.Ai(_logger, "No future playout to clear for channel {ChannelId}", channelId);
             return;
         }
 
+        FinTvDebugLog.Ai(_logger, "Clearing {Count} future playout items for channel {ChannelId}", existing.Count, channelId);
         _db.PlayoutItems.RemoveRange(existing);
         await _db.SaveChangesAsync(cancellationToken);
         _db.ChangeTracker.Clear();
@@ -484,12 +519,30 @@ public class AiChannelAutoApplyService
 
         var dayStart = DateTime.UtcNow.Date.AddDays(dayOffset);
         var dayEnd = dayStart.AddDays(1);
+        FinTvDebugLog.Ai(
+            _logger,
+            "Building playout day {DayOffset} for {ChannelName}: {Start:u} to {End:u}",
+            dayOffset,
+            channel.Name,
+            dayStart,
+            dayEnd);
+
         await _playoutGenerator.BuildPlayoutAsync(
             channel,
             dayStart,
             dayEnd,
             PlayoutBuildMode.ReplaceWindow,
             cancellationToken);
+
+        var itemCount = await _db.PlayoutItems.CountAsync(
+            p => p.ChannelId == channelId && p.Start >= dayStart && p.Start < dayEnd,
+            cancellationToken);
+        FinTvDebugLog.Ai(
+            _logger,
+            "Playout day {DayOffset} for {ChannelName}: {ItemCount} items in window",
+            dayOffset,
+            channel.Name,
+            itemCount);
     }
 
     /// <summary>
@@ -514,6 +567,13 @@ public class AiChannelAutoApplyService
         var latestFinish = await GetLatestPlayoutFinishUtcAsync(channelId, now, cancellationToken)
             .ConfigureAwait(false);
         var status = PlayoutScheduleHelper.AnalyzeHorizon(now, latestFinish);
+        FinTvDebugLog.Ai(
+            _logger,
+            "Horizon check for {ChannelName}: latestFinish={LatestFinish}, needsExtension={NeedsExtension}, atHorizon={AtHorizon}",
+            channel.Name,
+            latestFinish?.ToString("u") ?? "none",
+            status.NeedsOneDayExtension,
+            status.IsAtHorizon);
 
         if (status.IsAtHorizon)
         {

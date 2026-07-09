@@ -21,6 +21,7 @@
                 <button type="button" class="tab" data-tab="ai" role="tab">AI</button>
                 <button type="button" class="tab" data-tab="weather" role="tab">Weather</button>
                 <button type="button" class="tab" data-tab="playwright" role="tab">Playwright</button>
+                <button type="button" class="tab" data-tab="general" role="tab">General</button>
                 <button type="button" class="tab" data-tab="setup" role="tab">Live TV Setup</button>
                 <button type="button" class="tab" data-tab="tasks" role="tab">Tasks</button>
             </nav>
@@ -390,6 +391,17 @@
                 </div>
                 <div class="card section-card">
                     <div class="section-header-row">
+                        <h3>Weather guide metadata</h3>
+                        <div class="actions section-header-actions">
+                            <button type="button" id="btn-weather-guide-cache-generate" class="emby-button">Generate Weather Guide Cache</button>
+                            <button type="button" id="btn-weather-guide-cache-clear" class="emby-button">Delete Weather Guide Cache</button>
+                        </div>
+                    </div>
+                    <p class="hint">When AI is enabled, FinTV generates TV-guide-style titles and descriptions for each weather channel location and hour of day (0–23). Generation runs once when you click <strong>Generate Weather Guide Cache</strong>, then the same metadata is reused every day for matching time slots. EPG and playout builds read the cache only — they do not call the LLM.</p>
+                    <p id="ai-weather-guide-cache-status" class="hint">Loading weather guide cache status…</p>
+                </div>
+                <div class="card section-card">
+                    <div class="section-header-row">
                         <h3>Channel lineups</h3>
                         <div class="actions section-header-actions">
                             <button type="button" id="btn-ai-generate-all" class="emby-button">Generate All Channels</button>
@@ -513,6 +525,29 @@
                     </label>
                     <div class="actions">
                         <button type="button" id="btn-save-playwright" class="raised button-submit emby-button">Save Playwright Settings</button>
+                    </div>
+                </div>
+            </section>
+
+            <section id="tab-general" class="tab-panel">
+                <div class="card section-card">
+                    <h2>General</h2>
+                    <p class="hint">Plugin-wide settings. Debug logging writes extra detail to the Jellyfin server log for troubleshooting AI channel building and playout.</p>
+                    <label class="field checkbox-field">
+                        <input id="general-debug-logging" type="checkbox">
+                        <span>Debug logging (verbose developer logs)</span>
+                    </label>
+                    <p class="hint">When enabled, FinTV logs detailed AI lineup, catalog, LLM, and playout build steps with an <code>[FinTV AI]</code> prefix. Leave off for normal operation.</p>
+                    <label class="field">
+                        <span>Schedule time zone</span>
+                        <input id="general-schedule-tz" type="text" class="emby-input" placeholder="America/Chicago">
+                    </label>
+                    <label class="field">
+                        <span>Playout days to build (1–14)</span>
+                        <input id="general-playout-days" type="number" min="1" max="14" step="1" class="emby-input">
+                    </label>
+                    <div class="actions">
+                        <button type="button" id="btn-save-general" class="raised button-submit emby-button">Save General Settings</button>
                     </div>
                 </div>
             </section>

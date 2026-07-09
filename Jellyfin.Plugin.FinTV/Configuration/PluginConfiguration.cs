@@ -8,6 +8,11 @@ public class PluginConfiguration : BasePluginConfiguration
 {
     public string ScheduleTimeZone { get; set; } = "America/New_York";
 
+    /// <summary>
+    /// When true, FinTV emits verbose developer logs (especially for AI channel building).
+    /// </summary>
+    public bool DebugLogging { get; set; }
+
     public string? CommercialLibraryId { get; set; }
 
     public string? CommercialLibraryTag { get; set; } = "fintv-commercial";
@@ -95,6 +100,11 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Progress for background staggered AI generate-all jobs.
     /// </summary>
     public AiGenerateAllJobState AiGenerateAllJob { get; set; } = new();
+
+    /// <summary>
+    /// Persistent AI-generated weather guide entries keyed by channel, location, and local hour (00-23).
+    /// </summary>
+    public Dictionary<string, WeatherGuideSlotCache> WeatherGuideAiCache { get; set; } = new();
 
     public Ws4kpDockerSettings Ws4kp { get; set; } = new();
 
@@ -206,4 +216,20 @@ public class AiGenerateAllJobState
 
     /// <summary>True when the job flag was cleared because no background worker was active.</summary>
     public bool WasStale { get; set; }
+}
+
+/// <summary>
+/// Cached TV guide metadata for one weather channel hour slot (reused every day).
+/// </summary>
+public class WeatherGuideSlotCache
+{
+    public string Title { get; set; } = string.Empty;
+
+    public string? SubTitle { get; set; }
+
+    public string? Description { get; set; }
+
+    public List<string> Categories { get; set; } = new();
+
+    public DateTime GeneratedAtUtc { get; set; }
 }

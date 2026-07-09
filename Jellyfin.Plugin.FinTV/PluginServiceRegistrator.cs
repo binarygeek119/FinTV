@@ -47,6 +47,8 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<YtDlpLocator>();
         serviceCollection.AddScoped<YouTubeCommercialStreamService>();
         serviceCollection.AddScoped<EpgService>();
+        serviceCollection.AddScoped<GuideMetadataService>();
+        serviceCollection.AddScoped<WeatherGuideMetadataService>();
         serviceCollection.AddScoped<LogoSetService>();
         serviceCollection.AddScoped<HolidayChannelService>();
         serviceCollection.AddScoped<JellyfinCatalogService>();

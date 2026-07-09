@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Jellyfin.Plugin.FinTV.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -9,6 +10,7 @@ namespace Jellyfin.Plugin.FinTV.Services;
 public class PlayoutBuilderService : BackgroundService
 {
     private static readonly SemaphoreSlim ManualRebuildAllLock = new(1, 1);
+    private static readonly ConcurrentDictionary<Guid, ChannelPlayoutRebuildState> RebuildStates = new();
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<PlayoutBuilderService> _logger;
@@ -224,11 +226,29 @@ public class PlayoutBuilderService : BackgroundService
         await generator.BuildPlayoutAsync(channel, start, end, PlayoutBuildMode.ReplaceWindow, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
 
+        var now = DateTime.UtcNow;
+        var itemCount = await db.PlayoutItems.CountAsync(
+            p => p.ChannelId == channelId && p.Finish > now,
+            cancellationToken);
+        var hasCoverageNow = await db.PlayoutItems.AnyAsync(
+            p => p.ChannelId == channelId && p.Start <= now && p.Finish > now,
+            cancellationToken);
+
         _logger.LogInformation(
-            "Rebuilt playout for channel {Channel} from {Start} to {End}",
+            "Rebuilt playout for channel {Channel} from {Start} to {End}: {ItemCount} future items, on-air now={HasCoverageNow}",
             channel.Name,
             start,
-            end);
+            end,
+            itemCount,
+            hasCoverageNow);
+    }
+
+    /// <summary>
+    /// Gets the latest background rebuild status for a channel, if any.
+    /// </summary>
+    public ChannelPlayoutRebuildState? GetRebuildState(Guid channelId)
+    {
+        return RebuildStates.TryGetValue(channelId, out var state) ? state : null;
     }
 
     /// <summary>
@@ -237,17 +257,58 @@ public class PlayoutBuilderService : BackgroundService
     public void QueueRebuildChannel(Guid channelId)
     {
         _logger.LogInformation("Queueing background playout rebuild for channel {ChannelId}", channelId);
+        var startedAt = DateTime.UtcNow;
+        RebuildStates[channelId] = new ChannelPlayoutRebuildState
+        {
+            State = "queued",
+            StartedAtUtc = startedAt
+        };
+
         _ = Task.Run(async () =>
         {
+            RebuildStates[channelId] = new ChannelPlayoutRebuildState
+            {
+                State = "running",
+                StartedAtUtc = startedAt
+            };
+
             try
             {
                 await RebuildChannelAsync(channelId, CancellationToken.None).ConfigureAwait(false);
+                await UpdateRebuildStateAfterSuccessAsync(channelId).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Background playout rebuild failed for channel {ChannelId}", channelId);
+                RebuildStates[channelId] = new ChannelPlayoutRebuildState
+                {
+                    State = "failed",
+                    StartedAtUtc = startedAt,
+                    FinishedAtUtc = DateTime.UtcNow,
+                    Error = ex.Message
+                };
             }
         });
+    }
+
+    private async Task UpdateRebuildStateAfterSuccessAsync(Guid channelId)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
+        var now = DateTime.UtcNow;
+        var playoutItemCount = await db.PlayoutItems.CountAsync(p => p.ChannelId == channelId && p.Finish > now)
+            .ConfigureAwait(false);
+        var hasCoverageNow = await db.PlayoutItems.AnyAsync(
+                p => p.ChannelId == channelId && p.Start <= now && p.Finish > now)
+            .ConfigureAwait(false);
+
+        RebuildStates[channelId] = new ChannelPlayoutRebuildState
+        {
+            State = "completed",
+            FinishedAtUtc = DateTime.UtcNow,
+            PlayoutItemCount = playoutItemCount,
+            HasCoverageNow = hasCoverageNow
+        };
     }
 
     /// <summary>
@@ -276,4 +337,40 @@ public class PlayoutBuilderService : BackgroundService
             }
         });
     }
+}
+
+/// <summary>
+/// Background playout rebuild status for one channel.
+/// </summary>
+public sealed class ChannelPlayoutRebuildState
+{
+    /// <summary>
+    /// Gets or sets the rebuild state: queued, running, completed, or failed.
+    /// </summary>
+    public string State { get; set; } = "idle";
+
+    /// <summary>
+    /// Gets or sets when the rebuild was queued or started.
+    /// </summary>
+    public DateTime? StartedAtUtc { get; set; }
+
+    /// <summary>
+    /// Gets or sets when the rebuild finished.
+    /// </summary>
+    public DateTime? FinishedAtUtc { get; set; }
+
+    /// <summary>
+    /// Gets or sets how many future playout items exist after rebuild.
+    /// </summary>
+    public int PlayoutItemCount { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether a playout item covers the current time after rebuild.
+    /// </summary>
+    public bool HasCoverageNow { get; set; }
+
+    /// <summary>
+    /// Gets or sets the error message when <see cref="State"/> is failed.
+    /// </summary>
+    public string? Error { get; set; }
 }

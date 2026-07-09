@@ -86,6 +86,14 @@ public class LlmClientService
             throw new InvalidOperationException("LLM returned an empty response.");
         }
 
+        FinTvDebugLog.Ai(
+            _logger,
+            "LLM completed via {Provider}/{Model}: response={ResponseChars} chars, jsonMode={JsonMode}",
+            provider,
+            model,
+            content.Length,
+            useJsonResponseFormat);
+
         return useJsonResponseFormat ? content : ExtractJsonFromText(content);
     }
 

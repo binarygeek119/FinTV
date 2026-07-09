@@ -114,17 +114,12 @@ public class LineupsController : ControllerBase
             _playoutBuilder.QueueRebuildChannel(channel.Id);
         }
 
-        return NoContent();
+        return Ok(new { ok = true, rebuildQueued = true });
     }
 
     /// <summary>
     /// Creates a special-day lineup override.
     /// </summary>
-    /// <param name="channelId">Channel identifier.</param>
-    /// <param name="dto">Override definition.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The created override.</returns>
-    [HttpPost("{channelId:guid}/overrides")]
     public async Task<ActionResult<LineupOverride>> CreateOverride(Guid channelId, [FromBody] LineupOverrideDto dto, CancellationToken cancellationToken)
     {
         try
@@ -250,19 +245,37 @@ public class LineupsController : ControllerBase
 
         var now = DateTime.UtcNow;
         var horizonEnd = PlayoutScheduleHelper.GetHorizonEndUtc(now);
-        var latestFinish = await _db.PlayoutItems
-            .Where(p => p.ChannelId == channelId && p.Finish > now)
-            .Select(p => (DateTime?)p.Finish)
-            .MaxAsync(cancellationToken);
+        var futureItems = _db.PlayoutItems.Where(p => p.ChannelId == channelId && p.Finish > now);
+        var latestFinish = await futureItems.Select(p => (DateTime?)p.Finish).MaxAsync(cancellationToken);
+        var earliestStart = await futureItems.Select(p => (DateTime?)p.Start).MinAsync(cancellationToken);
+        var playoutItemCount = await futureItems.CountAsync(cancellationToken);
+        var hasCoverageNow = await _db.PlayoutItems.AnyAsync(
+            p => p.ChannelId == channelId && p.Start <= now && p.Finish > now,
+            cancellationToken);
+        var rebuild = _playoutBuilder.GetRebuildState(channelId);
 
         return Ok(new
         {
             playoutDaysToBuild = PlayoutScheduleHelper.GetPlayoutDaysToBuild(),
             horizonEndUtc = horizonEnd,
             latestScheduledFinishUtc = latestFinish,
+            earliestStartUtc = earliestStart,
+            playoutItemCount,
+            hasCoverageNow,
             daysBuilt = latestFinish.HasValue
                 ? Math.Max(0, (latestFinish.Value - now).TotalDays)
-                : 0
+                : 0,
+            rebuild = rebuild is null
+                ? null
+                : new
+                {
+                    rebuild.State,
+                    rebuild.StartedAtUtc,
+                    rebuild.FinishedAtUtc,
+                    rebuild.PlayoutItemCount,
+                    rebuild.HasCoverageNow,
+                    rebuild.Error
+                }
         });
     }
 }

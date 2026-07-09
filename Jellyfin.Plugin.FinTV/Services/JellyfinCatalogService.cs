@@ -816,7 +816,7 @@ public class JellyfinCatalogService
         };
     }
 
-    private static ResolvedCandidate MapItem(BaseItem item)
+    private ResolvedCandidate MapItem(BaseItem item)
     {
         var duration = item.RunTimeTicks.HasValue
             ? TimeSpan.FromTicks(item.RunTimeTicks.Value)
@@ -825,12 +825,32 @@ public class JellyfinCatalogService
         return new ResolvedCandidate
         {
             JellyfinItemId = item.Id,
-            Title = item.Name,
+            Title = BuildPlayoutTitle(item),
             Duration = duration
         };
     }
 
-    private static IReadOnlyList<ResolvedCandidate> PickFromPool(
+    private string BuildPlayoutTitle(BaseItem item)
+    {
+        if (item is Episode episode)
+        {
+            var series = ResolveSeriesForEpisode(episode);
+            var onScreen = GuideMetadataService.FormatOnScreen(episode.ParentIndexNumber, episode.IndexNumber);
+            if (series is not null && !string.IsNullOrWhiteSpace(onScreen))
+            {
+                return $"{series.Name} · {onScreen} · {episode.Name}";
+            }
+
+            if (series is not null)
+            {
+                return $"{series.Name} · {episode.Name}";
+            }
+        }
+
+        return item.Name;
+    }
+
+    private IReadOnlyList<ResolvedCandidate> PickFromPool(
         IReadOnlyList<BaseItem> items,
         Channel channel,
         PlayoutAnchorState anchor)
@@ -866,7 +886,7 @@ public class JellyfinCatalogService
             }
         }
 
-        return items.Select(MapItem).Take(1).ToList();
+        return items.Select(item => MapItem(item)).Take(1).ToList();
     }
 }
 

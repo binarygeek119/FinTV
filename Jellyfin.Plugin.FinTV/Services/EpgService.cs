@@ -16,11 +16,19 @@ public class EpgService
 
     private readonly FinTvDbContext _db;
     private readonly HolidayChannelService _holidays;
+    private readonly GuideMetadataService _guideMetadata;
+    private readonly WeatherGuideMetadataService _weatherGuideMetadata;
 
-    public EpgService(FinTvDbContext db, HolidayChannelService holidays)
+    public EpgService(
+        FinTvDbContext db,
+        HolidayChannelService holidays,
+        GuideMetadataService guideMetadata,
+        WeatherGuideMetadataService weatherGuideMetadata)
     {
         _db = db;
         _holidays = holidays;
+        _guideMetadata = guideMetadata;
+        _weatherGuideMetadata = weatherGuideMetadata;
     }
 
     public async Task<byte[]> GenerateXmlTvBytesAsync(string baseUrl, CancellationToken cancellationToken = default)
@@ -64,17 +72,112 @@ public class EpgService
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
+        var metadataByItemId = _guideMetadata.ResolveBatch(items.Select(i => i.JellyfinItemId));
+        var channelsById = channels.ToDictionary(c => c.Id);
+        var weatherItems = items
+            .Where(i => i.IsVirtual && i.VirtualSource == VirtualContentSource.WeatherStar)
+            .ToList();
+        var weatherMetadataByPlayoutId = await _weatherGuideMetadata.ResolveAsync(
+            weatherItems,
+            channelsById,
+            channel => GetLogoUrl(channel, baseUrl),
+            cancellationToken);
+
         foreach (var item in items)
         {
-            root.Add(new XElement(
-                "programme",
-                new XAttribute("start", FormatXmlTvDate(item.Start)),
-                new XAttribute("stop", FormatXmlTvDate(item.Finish)),
-                new XAttribute("channel", item.ChannelId.ToString("N")),
-                new XElement("title", item.Title)));
+            GuideProgramMetadata? metadata = null;
+            if (weatherMetadataByPlayoutId.TryGetValue(item.Id, out var weatherMetadata))
+            {
+                metadata = weatherMetadata;
+            }
+            else if (item.JellyfinItemId.HasValue)
+            {
+                metadataByItemId.TryGetValue(item.JellyfinItemId.Value, out metadata);
+            }
+
+            root.Add(BuildProgrammeElement(item, metadata, baseUrl));
         }
 
         return new XDocument(new XDeclaration("1.0", "UTF-8", null), root);
+    }
+
+    private static XElement BuildProgrammeElement(PlayoutItem item, GuideProgramMetadata? metadata, string baseUrl)
+    {
+        var programme = new XElement(
+            "programme",
+            new XAttribute("start", FormatXmlTvDate(item.Start)),
+            new XAttribute("stop", FormatXmlTvDate(item.Finish)),
+            new XAttribute("channel", item.ChannelId.ToString("N")));
+
+        var title = metadata?.Title ?? item.Title;
+        if (!string.IsNullOrWhiteSpace(title))
+        {
+            programme.Add(CreateLangElement("title", title, metadata?.Language));
+        }
+
+        if (!string.IsNullOrWhiteSpace(metadata?.SubTitle))
+        {
+            programme.Add(CreateLangElement("sub-title", metadata.SubTitle, metadata.Language));
+        }
+
+        if (!string.IsNullOrWhiteSpace(metadata?.Description))
+        {
+            programme.Add(CreateLangElement("desc", metadata.Description, metadata.Language));
+        }
+
+        if (metadata?.Categories is not null)
+        {
+            foreach (var category in metadata.Categories.Where(c => !string.IsNullOrWhiteSpace(c)))
+            {
+                programme.Add(CreateLangElement("category", category, metadata.Language));
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(metadata?.EpisodeXmlTvNs))
+        {
+            programme.Add(new XElement(
+                "episode-num",
+                new XAttribute("system", "xmltv_ns"),
+                metadata.EpisodeXmlTvNs));
+        }
+
+        if (!string.IsNullOrWhiteSpace(metadata?.EpisodeOnScreen))
+        {
+            programme.Add(new XElement(
+                "episode-num",
+                new XAttribute("system", "onscreen"),
+                metadata.EpisodeOnScreen));
+        }
+
+        if (metadata?.ProductionYear is int year && year > 0)
+        {
+            programme.Add(new XElement("date", year.ToString(CultureInfo.InvariantCulture)));
+        }
+
+        if (!string.IsNullOrWhiteSpace(metadata?.OfficialRating))
+        {
+            programme.Add(new XElement(
+                "rating",
+                new XAttribute("system", "MPAA"),
+                metadata.OfficialRating));
+        }
+
+        var posterUrl = !string.IsNullOrWhiteSpace(metadata?.IconUrl)
+            ? metadata.IconUrl
+            : GuideMetadataService.GetPosterUrl(baseUrl, metadata?.PosterItemId);
+        if (!string.IsNullOrWhiteSpace(posterUrl))
+        {
+            programme.Add(new XElement("icon", new XAttribute("src", posterUrl)));
+        }
+
+        return programme;
+    }
+
+    private static XElement CreateLangElement(string name, string value, string? language)
+    {
+        return string.IsNullOrWhiteSpace(language)
+            ? new XElement(name, value)
+            : new XElement(name, new XAttribute("lang", language), value);
     }
 
     private static byte[] SerializeUtf8(XDocument doc)
