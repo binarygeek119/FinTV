@@ -2218,8 +2218,8 @@
             defaultProvider: Number($('ai-default-provider')?.value || '0'),
             openAiModel: $('ai-openai-model')?.value?.trim() || 'gpt-4o-mini',
             veniceModel: $('ai-venice-model')?.value?.trim() || 'gpt-4o-mini',
-            openAiApiKey: $('ai-openai-key')?.value?.trim() || null,
-            veniceApiKey: $('ai-venice-key')?.value?.trim() || null
+            openAiApiKey: normalizeApiKeyInput($('ai-openai-key')?.value) || null,
+            veniceApiKey: normalizeApiKeyInput($('ai-venice-key')?.value) || null
         };
     }
 
@@ -2641,6 +2641,19 @@
                 btn.textContent = originalLabel || 'Save AI Settings';
             }
         }
+    }
+
+    function normalizeApiKeyInput(value) {
+        if (!value) {
+            return '';
+        }
+
+        let key = String(value).trim().replace(/^['"]|['"]$/g, '');
+        if (/^bearer\s+/i.test(key)) {
+            key = key.replace(/^bearer\s+/i, '').trim();
+        }
+
+        return key;
     }
 
     async function testAiConnection() {
