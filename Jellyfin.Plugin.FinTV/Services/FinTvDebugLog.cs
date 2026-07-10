@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.FinTV.Services;
@@ -48,6 +49,42 @@ public static class FinTvDebugLog
             return message;
         }
 
-        return string.Format(CultureInfo.InvariantCulture, message, args);
+        return string.Format(CultureInfo.InvariantCulture, NormalizeNamedPlaceholders(message), args);
+    }
+
+    private static string NormalizeNamedPlaceholders(string message)
+    {
+        var result = new StringBuilder(message.Length);
+        var argIndex = 0;
+
+        for (var i = 0; i < message.Length; i++)
+        {
+            if (message[i] != '{')
+            {
+                result.Append(message[i]);
+                continue;
+            }
+
+            var close = message.IndexOf('}', i + 1);
+            if (close < 0)
+            {
+                result.Append(message[i]);
+                continue;
+            }
+
+            var token = message.Substring(i + 1, close - i - 1);
+            if (token.Length > 0 && (char.IsDigit(token[0]) || token[0] == ','))
+            {
+                result.Append('{').Append(token).Append('}');
+            }
+            else
+            {
+                result.Append('{').Append(argIndex++).Append('}');
+            }
+
+            i = close;
+        }
+
+        return result.ToString();
     }
 }
