@@ -43,7 +43,7 @@ public class LineupGeneratorService
             return;
         }
 
-        var tz = TimeZoneInfo.FindSystemTimeZoneById(Plugin.Instance?.Configuration.ScheduleTimeZone ?? "America/New_York");
+        var tz = ScheduleTimeZoneHelper.ResolveScheduleTimeZone();
         var anchor = await _channelService.GetAnchorAsync<PlayoutAnchorState>(channel.Id, cancellationToken)
             ?? new PlayoutAnchorState();
 

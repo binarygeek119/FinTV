@@ -2713,6 +2713,29 @@
         }
     }
 
+    async function waitForChannelGenerate(channelId, maxWaitMs) {
+        const started = Date.now();
+        const timeoutMs = maxWaitMs || 900000;
+        while (Date.now() - started < timeoutMs) {
+            const status = await api('/ai/channels/' + channelId + '/generate/status');
+            if (!status.isRunning) {
+                if (status.error) {
+                    throw new Error(status.error);
+                }
+
+                if (!status.preview) {
+                    throw new Error('AI lineup generation finished without a preview.');
+                }
+
+                return status.preview;
+            }
+
+            await new Promise((resolve) => setTimeout(resolve, 3000));
+        }
+
+        throw new Error('AI lineup generation is taking longer than expected. Check the Jellyfin log and try again.');
+    }
+
     async function generateAiLineup(channelId) {
         if (!syncConfigPage()) {
             toast('FinTV admin page is not ready. Close and reopen FinTV settings.', 'error');
@@ -2726,7 +2749,14 @@
         const btn = row?.querySelector('.ai-generate-channel');
         if (btn) btn.disabled = true;
         try {
-            aiPreview = await api('/ai/channels/' + channelId + '/generate', { method: 'POST', body: '{}' });
+            const start = await api('/ai/channels/' + channelId + '/generate', { method: 'POST', body: '{}' });
+            if (start.alreadyRunning) {
+                toast('AI lineup generation is already running for this channel…', 'info');
+            } else {
+                toast('AI lineup generation started…', 'info');
+            }
+
+            aiPreview = await waitForChannelGenerate(channelId);
             renderAiPreview();
             toast('AI lineup generated. Review the preview below.', 'success');
         } catch (err) {
@@ -3151,12 +3181,43 @@
 
     async function loadGeneral() {
         try {
-            const settings = await api('/general/settings');
+            const [settings, timeZones] = await Promise.all([
+                api('/general/settings'),
+                api('/general/timezones')
+            ]);
+
+            const tzSelect = $('general-schedule-tz');
+            if (tzSelect) {
+                const selected = settings.scheduleTimeZone || 'America/New_York';
+                const options = Array.isArray(timeZones) ? timeZones : [];
+                const hasSelected = options.some((tz) => tz.id === selected);
+
+                tzSelect.innerHTML = '';
+                if (!hasSelected && selected) {
+                    const legacy = document.createElement('option');
+                    legacy.value = selected;
+                    legacy.textContent = `${selected} (saved — pick a listed zone)`;
+                    legacy.selected = true;
+                    tzSelect.appendChild(legacy);
+                }
+
+                options.forEach((tz) => {
+                    const option = document.createElement('option');
+                    option.value = tz.id;
+                    option.textContent = tz.label || `${tz.id} (${tz.offset || ''})`;
+                    if (tz.id === selected) {
+                        option.selected = true;
+                    }
+                    tzSelect.appendChild(option);
+                });
+
+                if (!tzSelect.value && options.length > 0) {
+                    tzSelect.value = options[0].id;
+                }
+            }
+
             if ($('general-debug-logging')) {
                 $('general-debug-logging').checked = !!settings.debugLogging;
-            }
-            if ($('general-schedule-tz')) {
-                $('general-schedule-tz').value = settings.scheduleTimeZone || 'America/New_York';
             }
             if ($('general-playout-days')) {
                 $('general-playout-days').value = String(settings.playoutDaysToBuild ?? 14);
@@ -3177,7 +3238,7 @@
                 method: 'PUT',
                 body: JSON.stringify({
                     debugLogging: !!$('general-debug-logging')?.checked,
-                    scheduleTimeZone: $('general-schedule-tz')?.value.trim() || 'America/New_York',
+                    scheduleTimeZone: $('general-schedule-tz')?.value || 'America/New_York',
                     playoutDaysToBuild: Number($('general-playout-days')?.value || '14')
                 })
             });

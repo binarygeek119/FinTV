@@ -15,6 +15,8 @@ namespace Jellyfin.Plugin.FinTV.Services;
 /// </summary>
 public class WeatherGuideMetadataService
 {
+    private const int HoursPerAiBatch = 4;
+
     private static readonly SemaphoreSlim GenerateLock = new(1, 1);
     private static readonly JsonSerializerOptions JsonOptions = FinTvJson.Options;
     private static int _generateWorkerActive;
@@ -204,17 +206,84 @@ public class WeatherGuideMetadataService
                 location,
                 missingHours.Count);
 
-            var generated = await GenerateChannelHoursAsync(channel, location, missingHours, cancellationToken)
-                .ConfigureAwait(false);
-            SaveCacheEntries(channel.Id, location, generated);
+            var generatedCount = 0;
+            foreach (var hourBatch in missingHours.Chunk(HoursPerAiBatch))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var batchHours = hourBatch.ToList();
+                Dictionary<int, WeatherGuideSlotCache> generated;
+                try
+                {
+                    generated = await GenerateChannelHoursAsync(channel, location, batchHours, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex) when (IsTransientLlmFailure(ex))
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Weather guide AI batch failed for {Channel} hours {Hours}; using static fallback for this batch",
+                        channel.Name,
+                        string.Join(", ", batchHours.Select(h => h.ToString("00", CultureInfo.InvariantCulture))));
+                    generated = batchHours.ToDictionary(
+                        hour => hour,
+                        hour => BuildStaticCacheEntry(channel, location, hour));
+                }
+
+                SaveCacheEntries(channel.Id, location, generated);
+                generatedCount += generated.Count;
+            }
+
             _logger.LogInformation(
                 "Weather guide AI cache updated for {Channel}: {Count} hour slots",
                 channel.Name,
-                generated.Count);
+                generatedCount);
         }
     }
 
+    private static bool IsTransientLlmFailure(Exception ex)
+    {
+        if (ex is TaskCanceledException or HttpRequestException)
+        {
+            return true;
+        }
+
+        if (ex is InvalidOperationException invalid
+            && invalid.Message.Contains("timed out", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return ex.InnerException is not null && IsTransientLlmFailure(ex.InnerException);
+    }
+
     private async Task<Dictionary<int, WeatherGuideSlotCache>> GenerateChannelHoursAsync(
+        Channel channel,
+        string locationQuery,
+        IReadOnlyList<int> hours,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; attempt <= 2; attempt++)
+        {
+            try
+            {
+                return await GenerateChannelHoursCoreAsync(channel, locationQuery, hours, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (attempt < 2 && IsTransientLlmFailure(ex))
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Weather guide AI batch attempt {Attempt} failed for {Channel}; retrying",
+                    attempt,
+                    channel.Name);
+                await Task.Delay(TimeSpan.FromSeconds(3 * attempt), cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        throw new InvalidOperationException("Weather guide AI batch failed after retries.");
+    }
+
+    private async Task<Dictionary<int, WeatherGuideSlotCache>> GenerateChannelHoursCoreAsync(
         Channel channel,
         string locationQuery,
         IReadOnlyList<int> hours,

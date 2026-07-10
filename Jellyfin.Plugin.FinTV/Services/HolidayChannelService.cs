@@ -31,7 +31,7 @@ public class HolidayChannelService
 
     public DateOnly GetScheduleDateUtc(DateTime utcNow)
     {
-        var tz = ResolveScheduleTimeZone();
+        var tz = ScheduleTimeZoneHelper.ResolveScheduleTimeZone();
         return DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(utcNow, tz));
     }
 
@@ -110,18 +110,5 @@ public class HolidayChannelService
         }
 
         return null;
-    }
-
-    private static TimeZoneInfo ResolveScheduleTimeZone()
-    {
-        var id = Plugin.Instance?.Configuration.ScheduleTimeZone ?? "America/New_York";
-        try
-        {
-            return TimeZoneInfo.FindSystemTimeZoneById(id);
-        }
-        catch
-        {
-            return TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
-        }
     }
 }

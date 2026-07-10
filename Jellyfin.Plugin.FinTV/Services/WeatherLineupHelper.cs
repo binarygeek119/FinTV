@@ -84,6 +84,5 @@ public static class WeatherLineupHelper
     }
 
     public static TimeZoneInfo GetScheduleTimeZone()
-        => TimeZoneInfo.FindSystemTimeZoneById(
-            Plugin.Instance?.Configuration.ScheduleTimeZone ?? "America/New_York");
+        => ScheduleTimeZoneHelper.ResolveScheduleTimeZone();
 }

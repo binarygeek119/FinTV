@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.106"
+version: "0.0.2.109"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -81,7 +81,9 @@ artifacts:
   - "logos/binarygeek119/Weather/WeatherStar4000.png"
   - "scripts/install-docker-cli-jellyfin.sh"
 changelog: |-
-  - Fix AI Generate All and debug logging crashing with Input string was not in a correct format when debug logging is enabled
+  - Fix single-channel AI Generate timing out after 120 seconds by running lineup generation in the background with status polling; raise LLM HttpClient timeout to 10 minutes
+  - Fix weather guide AI cache generation timing out by batching hours into smaller LLM requests, retrying transient failures, and saving progress after each batch
+  - General tab schedule time zone is now a dropdown with IANA id and current UTC offset; normalizes common typos like American/Chicago
   - Fix weather guide AI cache generation failing with DbContext concurrency errors by running background work in its own DI scope
   - Improve AI Test Connection errors when no API key is saved and bypass HTTP proxy for outbound LLM requests from Jellyfin Docker
   - Fix AI Test Connection failing with Input string was not in a correct format by normalizing API keys and using safer HTTP/JSON handling for LLM requests

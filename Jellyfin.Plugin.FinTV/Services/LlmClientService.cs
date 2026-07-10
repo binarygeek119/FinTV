@@ -168,7 +168,6 @@ public class LlmClientService
     private async Task<string> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         var client = _httpClientFactory.CreateClient(nameof(LlmClientService));
-        client.Timeout = TimeSpan.FromSeconds(120);
 
         try
         {
@@ -185,6 +184,12 @@ public class LlmClientService
             }
 
             return body;
+        }
+        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new InvalidOperationException(
+                $"LLM request timed out after {(int)client.Timeout.TotalSeconds} seconds. Try again or use a faster model.",
+                ex);
         }
         catch (FormatException ex)
         {

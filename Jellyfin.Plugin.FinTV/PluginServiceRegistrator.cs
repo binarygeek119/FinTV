@@ -34,6 +34,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         });
 
         serviceCollection.AddHttpClient(nameof(LlmClientService))
+            .ConfigureHttpClient(client => client.Timeout = TimeSpan.FromMinutes(10))
             .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
             {
                 UseProxy = false,
@@ -63,6 +64,7 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddScoped<LlmClientService>();
         serviceCollection.AddScoped<AiLineupGeneratorService>();
         serviceCollection.AddScoped<AiChannelAutoApplyService>();
+        serviceCollection.AddSingleton<AiChannelGenerateJobService>();
         serviceCollection.AddSingleton<AiLineupAutoApplyTask>();
         serviceCollection.AddSingleton<IScheduledTask>(sp => sp.GetRequiredService<AiLineupAutoApplyTask>());
         serviceCollection.AddScoped<EbsService>();

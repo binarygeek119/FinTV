@@ -1,4 +1,5 @@
 using Jellyfin.Plugin.FinTV.Configuration;
+using Jellyfin.Plugin.FinTV.Services;
 using MediaBrowser.Common.Api;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -22,16 +23,41 @@ public class GeneralController : ControllerBase
         try
         {
             var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+            var scheduleTimeZone = ScheduleTimeZoneHelper.NormalizeTimeZoneId(config.ScheduleTimeZone);
             return Ok(new
             {
                 debugLogging = config.DebugLogging,
-                scheduleTimeZone = config.ScheduleTimeZone,
+                scheduleTimeZone,
                 playoutDaysToBuild = config.PlayoutDaysToBuild
             });
         }
         catch (Exception ex)
         {
             return StatusCode(500, new { message = $"Could not load general settings: {ex.Message}" });
+        }
+    }
+
+    /// <summary>
+    /// Lists time zones available on this server for the schedule dropdown.
+    /// </summary>
+    [HttpGet("timezones")]
+    public ActionResult<object> GetTimeZones()
+    {
+        try
+        {
+            var timeZones = ScheduleTimeZoneHelper.GetAvailableTimeZones()
+                .Select(tz => new
+                {
+                    id = tz.Id,
+                    label = tz.Label,
+                    offset = tz.Offset
+                });
+
+            return Ok(timeZones);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = $"Could not load time zones: {ex.Message}" });
         }
     }
 
@@ -61,7 +87,13 @@ public class GeneralController : ControllerBase
 
             if (!string.IsNullOrWhiteSpace(request.ScheduleTimeZone))
             {
-                plugin.Configuration.ScheduleTimeZone = request.ScheduleTimeZone.Trim();
+                var normalized = ScheduleTimeZoneHelper.NormalizeTimeZoneId(request.ScheduleTimeZone);
+                if (!ScheduleTimeZoneHelper.TryResolveScheduleTimeZone(normalized, out _, out var resolvedId))
+                {
+                    return BadRequest(new { message = $"Time zone '{request.ScheduleTimeZone}' is not available on this server." });
+                }
+
+                plugin.Configuration.ScheduleTimeZone = resolvedId;
             }
 
             if (request.PlayoutDaysToBuild.HasValue)
@@ -70,7 +102,12 @@ public class GeneralController : ControllerBase
             }
 
             plugin.SaveConfiguration();
-            return Ok(new { saved = true, debugLogging = plugin.Configuration.DebugLogging });
+            return Ok(new
+            {
+                saved = true,
+                debugLogging = plugin.Configuration.DebugLogging,
+                scheduleTimeZone = plugin.Configuration.ScheduleTimeZone
+            });
         }
         catch (Exception ex)
         {

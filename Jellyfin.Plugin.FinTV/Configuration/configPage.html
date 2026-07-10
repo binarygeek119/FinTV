@@ -540,8 +540,9 @@
                     <p class="hint">When enabled, FinTV logs detailed AI lineup, catalog, LLM, and playout build steps with an <code>[FinTV AI]</code> prefix. Leave off for normal operation.</p>
                     <label class="field">
                         <span>Schedule time zone</span>
-                        <input id="general-schedule-tz" type="text" class="emby-input" placeholder="America/Chicago">
+                        <select id="general-schedule-tz" class="emby-input"></select>
                     </label>
+                    <p class="hint">Used for EPG, weather guide cache hours, and playout scheduling. Offsets reflect the current DST rules on this Jellyfin server.</p>
                     <label class="field">
                         <span>Playout days to build (1–14)</span>
                         <input id="general-playout-days" type="number" min="1" max="14" step="1" class="emby-input">

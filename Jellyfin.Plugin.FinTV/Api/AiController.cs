@@ -23,6 +23,7 @@ public class AiController : ControllerBase
     private readonly FinTvDbContext _db;
     private readonly LineupGeneratorService _playoutGenerator;
     private readonly WeatherGuideMetadataService _weatherGuide;
+    private readonly AiChannelGenerateJobService _channelGenerateJobs;
 
     public AiController(
         AiLineupGeneratorService generator,
@@ -30,7 +31,8 @@ public class AiController : ControllerBase
         LlmClientService llm,
         FinTvDbContext db,
         LineupGeneratorService playoutGenerator,
-        WeatherGuideMetadataService weatherGuide)
+        WeatherGuideMetadataService weatherGuide,
+        AiChannelGenerateJobService channelGenerateJobs)
     {
         _generator = generator;
         _autoApply = autoApply;
@@ -38,6 +40,7 @@ public class AiController : ControllerBase
         _db = db;
         _playoutGenerator = playoutGenerator;
         _weatherGuide = weatherGuide;
+        _channelGenerateJobs = channelGenerateJobs;
     }
 
     [HttpGet("settings")]
@@ -284,21 +287,35 @@ public class AiController : ControllerBase
     }
 
     [HttpPost("channels/{channelId:guid}/generate")]
-    public async Task<ActionResult<AiLineupPreviewResult>> Generate(
+    public ActionResult<object> Generate(
         Guid channelId,
-        [FromBody] AiGenerateRequest? request,
-        CancellationToken cancellationToken)
+        [FromBody] AiGenerateRequest? request)
     {
-        try
+        if (Plugin.Instance?.Configuration.Ai.Enabled != true)
         {
-            var preview = await _generator.GenerateAsync(channelId, request?.Provider, cancellationToken);
-            return Ok(preview);
+            return BadRequest(new { message = "AI lineup generation is disabled." });
         }
-        catch (InvalidOperationException ex)
+
+        if (!_channelGenerateJobs.TryQueue(channelId, request?.Provider))
         {
-            return BadRequest(new { message = ex.Message });
+            return Ok(new
+            {
+                queued = false,
+                alreadyRunning = true,
+                job = _channelGenerateJobs.BuildStatus(channelId)
+            });
         }
+
+        return Ok(new
+        {
+            queued = true,
+            job = _channelGenerateJobs.BuildStatus(channelId)
+        });
     }
+
+    [HttpGet("channels/{channelId:guid}/generate/status")]
+    public ActionResult<object> GetGenerateStatus(Guid channelId)
+        => Ok(_channelGenerateJobs.BuildStatus(channelId));
 
     [HttpPost("channels/{channelId:guid}/apply")]
     public async Task<IActionResult> Apply(
