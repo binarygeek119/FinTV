@@ -23,8 +23,15 @@ public class PlaywrightController : ControllerBase
     [HttpGet("docker/status")]
     public async Task<ActionResult<object>> GetDockerStatus(CancellationToken cancellationToken)
     {
-        var status = await _docker.GetStatusAsync(cancellationToken);
-        return Ok(ToResponse(status));
+        try
+        {
+            var status = await _docker.GetStatusAsync(cancellationToken);
+            return Ok(ToResponse(status));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = $"Could not read Playwright Docker status: {ex.Message}" });
+        }
     }
 
     [HttpPost("docker/start")]

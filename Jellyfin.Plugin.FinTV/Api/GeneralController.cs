@@ -19,44 +19,63 @@ public class GeneralController : ControllerBase
     [HttpGet("settings")]
     public ActionResult<object> GetSettings()
     {
-        var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
-        return Ok(new
+        try
         {
-            debugLogging = config.DebugLogging,
-            scheduleTimeZone = config.ScheduleTimeZone,
-            playoutDaysToBuild = config.PlayoutDaysToBuild
-        });
+            var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+            return Ok(new
+            {
+                debugLogging = config.DebugLogging,
+                scheduleTimeZone = config.ScheduleTimeZone,
+                playoutDaysToBuild = config.PlayoutDaysToBuild
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = $"Could not load general settings: {ex.Message}" });
+        }
     }
 
     /// <summary>
     /// Updates general plugin settings.
     /// </summary>
     [HttpPut("settings")]
-    public IActionResult UpdateSettings([FromBody] GeneralSettingsRequest request)
+    public IActionResult UpdateSettings([FromBody] GeneralSettingsRequest? request)
     {
+        if (request is null)
+        {
+            return BadRequest(new { message = "Request body is required." });
+        }
+
         var plugin = Plugin.Instance;
         if (plugin is null)
         {
             return NotFound();
         }
 
-        if (request.DebugLogging.HasValue)
+        try
         {
-            plugin.Configuration.DebugLogging = request.DebugLogging.Value;
-        }
+            if (request.DebugLogging.HasValue)
+            {
+                plugin.Configuration.DebugLogging = request.DebugLogging.Value;
+            }
 
-        if (!string.IsNullOrWhiteSpace(request.ScheduleTimeZone))
+            if (!string.IsNullOrWhiteSpace(request.ScheduleTimeZone))
+            {
+                plugin.Configuration.ScheduleTimeZone = request.ScheduleTimeZone.Trim();
+            }
+
+            if (request.PlayoutDaysToBuild.HasValue)
+            {
+                plugin.Configuration.PlayoutDaysToBuild = Math.Clamp(request.PlayoutDaysToBuild.Value, 1, 14);
+            }
+
+            plugin.SaveConfiguration();
+            return Ok(new { saved = true, debugLogging = plugin.Configuration.DebugLogging });
+        }
+        catch (Exception ex)
         {
-            plugin.Configuration.ScheduleTimeZone = request.ScheduleTimeZone.Trim();
+            return BadRequest(new { message = $"Could not save general settings: {ex.Message}" });
         }
-
-        if (request.PlayoutDaysToBuild.HasValue)
-        {
-            plugin.Configuration.PlayoutDaysToBuild = Math.Clamp(request.PlayoutDaysToBuild.Value, 1, 14);
-        }
-
-        plugin.SaveConfiguration();
-        return Ok(new { saved = true, debugLogging = plugin.Configuration.DebugLogging });
     }
 }
 

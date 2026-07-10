@@ -101,11 +101,6 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public AiGenerateAllJobState AiGenerateAllJob { get; set; } = new();
 
-    /// <summary>
-    /// Persistent AI-generated weather guide entries keyed by channel, location, and local hour (00-23).
-    /// </summary>
-    public Dictionary<string, WeatherGuideSlotCache> WeatherGuideAiCache { get; set; } = new();
-
     public Ws4kpDockerSettings Ws4kp { get; set; } = new();
 
     public Ws3kpDockerSettings Ws3kp { get; set; } = new();

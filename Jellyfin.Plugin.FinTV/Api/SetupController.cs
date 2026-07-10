@@ -37,7 +37,14 @@ public class SetupController : ControllerBase
     [AllowAnonymous]
     public ActionResult<object> GetUrls()
     {
-        return Ok(BuildUrlResponse());
+        try
+        {
+            return Ok(BuildUrlResponse());
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { message = $"Could not build setup URLs: {ex.Message}" });
+        }
     }
 
     /// <summary>

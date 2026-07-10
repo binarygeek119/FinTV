@@ -3154,6 +3154,11 @@
     }
 
     async function saveGeneralSettings() {
+        if (!syncConfigPage()) {
+            toast('FinTV admin page is not ready. Close and reopen FinTV settings.', 'error');
+            return;
+        }
+
         try {
             await api('/general/settings', {
                 method: 'PUT',

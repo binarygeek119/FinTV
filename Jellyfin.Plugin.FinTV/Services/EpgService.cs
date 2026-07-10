@@ -233,7 +233,14 @@ public class EpgService
 
         if (request is not null && appHost is not null)
         {
-            return appHost.GetSmartApiUrl(request).TrimEnd('/');
+            try
+            {
+                return appHost.GetSmartApiUrl(request).TrimEnd('/');
+            }
+            catch
+            {
+                // Fall back to forwarded headers or request host when Jellyfin cannot resolve a smart API URL.
+            }
         }
 
         if (request is not null)

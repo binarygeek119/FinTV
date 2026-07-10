@@ -98,15 +98,8 @@ public class WeatherGuideMetadataService
     /// </summary>
     public int ClearCache()
     {
-        var plugin = Plugin.Instance;
-        if (plugin is null)
-        {
-            return 0;
-        }
-
-        var count = plugin.Configuration.WeatherGuideAiCache.Count;
-        plugin.Configuration.WeatherGuideAiCache.Clear();
-        plugin.SaveConfiguration();
+        var count = WeatherGuideCacheStore.Count();
+        WeatherGuideCacheStore.Clear();
         _logger.LogInformation("Cleared {Count} weather guide AI cache entries", count);
         return count;
     }
@@ -116,7 +109,6 @@ public class WeatherGuideMetadataService
     /// </summary>
     public async Task<object> BuildCacheStatusAsync(CancellationToken cancellationToken = default)
     {
-        var cache = Plugin.Instance?.Configuration.WeatherGuideAiCache ?? new Dictionary<string, WeatherGuideSlotCache>();
         var weatherChannels = await _db.Channels
             .AsNoTracking()
             .Where(c => c.Enabled && c.ContentType == ChannelContentType.Weather)
@@ -127,7 +119,7 @@ public class WeatherGuideMetadataService
         {
             var location = NormalizeLocation(channel.WeatherLocationQuery);
             var hoursCached = Enumerable.Range(0, 24)
-                .Count(hour => cache.ContainsKey(BuildCacheKey(channel.Id, location, hour)));
+                .Count(hour => WeatherGuideCacheStore.Contains(BuildCacheKey(channel.Id, location, hour)));
             return new
             {
                 channelId = channel.Id,
@@ -141,7 +133,7 @@ public class WeatherGuideMetadataService
         return new
         {
             isGenerating = IsGenerating,
-            entryCount = cache.Count,
+            entryCount = WeatherGuideCacheStore.Count(),
             channelCount = weatherChannels.Count,
             completeChannels = channels.Count(c => c.isComplete),
             channels
@@ -285,25 +277,15 @@ public class WeatherGuideMetadataService
 
     private static void SaveCacheEntries(Guid channelId, string location, Dictionary<int, WeatherGuideSlotCache> entries)
     {
-        var plugin = Plugin.Instance;
-        if (plugin is null)
-        {
-            return;
-        }
-
-        foreach (var (hour, entry) in entries)
-        {
-            plugin.Configuration.WeatherGuideAiCache[BuildCacheKey(channelId, location, hour)] = entry;
-        }
-
-        plugin.SaveConfiguration();
+        WeatherGuideCacheStore.SetMany(entries.Select(pair => new KeyValuePair<string, WeatherGuideSlotCache>(
+            BuildCacheKey(channelId, location, pair.Key),
+            pair.Value)));
     }
 
     private static bool TryGetCachedMetadata(string cacheKey, out GuideProgramMetadata metadata)
     {
         metadata = new GuideProgramMetadata();
-        var cache = Plugin.Instance?.Configuration.WeatherGuideAiCache;
-        if (cache is null || !cache.TryGetValue(cacheKey, out var entry))
+        if (!WeatherGuideCacheStore.TryGet(cacheKey, out var entry))
         {
             return false;
         }
@@ -320,7 +302,7 @@ public class WeatherGuideMetadataService
     }
 
     private static bool IsHourCached(Guid channelId, string location, int hour)
-        => Plugin.Instance?.Configuration.WeatherGuideAiCache.ContainsKey(BuildCacheKey(channelId, location, hour)) == true;
+        => WeatherGuideCacheStore.Contains(BuildCacheKey(channelId, location, hour));
 
     public static string BuildCacheKey(Guid channelId, string location, int hour)
         => $"{channelId:N}|{location}|{hour:00}";
