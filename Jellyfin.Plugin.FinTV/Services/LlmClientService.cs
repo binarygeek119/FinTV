@@ -34,7 +34,7 @@ public class LlmClientService
 
         if (string.IsNullOrWhiteSpace(apiKey))
         {
-            throw new InvalidOperationException($"{provider} API key is not configured.");
+            throw new InvalidOperationException(BuildMissingApiKeyMessage(provider, settings, openAiApiKeyOverride, veniceApiKeyOverride));
         }
 
         var useJsonResponseFormat = provider != AiProvider.Venice;
@@ -141,7 +141,7 @@ public class LlmClientService
 
         if (string.IsNullOrWhiteSpace(apiKey))
         {
-            throw new InvalidOperationException($"{provider} API key is not configured.");
+            throw new InvalidOperationException(BuildMissingApiKeyMessage(provider, settings, openAiApiKeyOverride, veniceApiKeyOverride));
         }
 
         if (provider == AiProvider.OpenAi)
@@ -190,6 +190,12 @@ public class LlmClientService
         {
             throw new InvalidOperationException(
                 "LLM request could not be sent. Check that the API key contains only plain text characters and does not include a 'Bearer ' prefix.",
+                ex);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new InvalidOperationException(
+                "Could not reach the LLM API from the Jellyfin server. Check internet access, DNS, and firewall rules.",
                 ex);
         }
     }
@@ -312,6 +318,24 @@ public class LlmClientService
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
         };
+
+    private static string BuildMissingApiKeyMessage(
+        AiProvider provider,
+        AiSettings settings,
+        string? openAiApiKeyOverride,
+        string? veniceApiKeyOverride)
+    {
+        if (provider == AiProvider.Venice)
+        {
+            return !string.IsNullOrWhiteSpace(veniceApiKeyOverride) || !string.IsNullOrWhiteSpace(settings.VeniceApiKey)
+                ? "Venice API key is empty after trimming. Re-paste the key without quotes or a Bearer prefix."
+                : "No Venice API key is saved. Enter your Venice API key in the field above, then click Test Connection.";
+        }
+
+        return !string.IsNullOrWhiteSpace(openAiApiKeyOverride) || !string.IsNullOrWhiteSpace(settings.OpenAiApiKey)
+            ? "OpenAI API key is empty after trimming. Re-paste the key without quotes or a Bearer prefix."
+            : "No OpenAI API key is saved. Enter your sk-... key in the OpenAI API key field, then click Test Connection.";
+    }
 
     private static (string ApiKey, string Model, string BaseUrl) ResolveProvider(
         AiProvider provider,

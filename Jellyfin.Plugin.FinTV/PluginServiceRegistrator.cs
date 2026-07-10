@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using Jellyfin.Plugin.FinTV.Data;
 using Jellyfin.Plugin.FinTV.Domain;
@@ -32,6 +33,12 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
             options.UseSqlite($"Data Source={plugin.DatabasePath}");
         });
 
+        serviceCollection.AddHttpClient(nameof(LlmClientService))
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                UseProxy = false,
+                AutomaticDecompression = DecompressionMethods.All
+            });
         serviceCollection.AddHttpClient();
         serviceCollection.AddScoped<ChannelService>();
         serviceCollection.AddScoped<ChannelPresetService>();

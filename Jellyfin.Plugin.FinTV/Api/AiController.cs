@@ -139,7 +139,7 @@ public class AiController : ControllerBase
     public async Task<IActionResult> TestSettings([FromBody] AiTestSettingsRequest? request, CancellationToken cancellationToken)
     {
         var plugin = Plugin.Instance ?? throw new InvalidOperationException("FinTV plugin not initialized.");
-        var provider = request?.Provider ?? plugin.Configuration.Ai.DefaultProvider;
+        var provider = ResolveTestProvider(request, plugin.Configuration.Ai);
 
         try
         {
@@ -152,12 +152,31 @@ public class AiController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(new { message = ex.Message });
+            return BadRequest(new { message = ex.Message, provider = provider.ToString() });
+        }
+        catch (HttpRequestException ex)
+        {
+            return BadRequest(new
+            {
+                message = $"Could not reach {provider} API. Check Jellyfin server internet access and DNS.",
+                provider = provider.ToString(),
+                detail = ex.Message
+            });
         }
         catch (Exception ex)
         {
-            return BadRequest(new { message = $"Connection test failed: {ex.Message}" });
+            return BadRequest(new { message = $"Connection test failed: {ex.Message}", provider = provider.ToString() });
         }
+    }
+
+    private static AiProvider ResolveTestProvider(AiTestSettingsRequest? request, AiSettings settings)
+    {
+        if (request?.ProviderId is >= 0 and <= 1)
+        {
+            return (AiProvider)request.ProviderId.Value;
+        }
+
+        return request?.Provider ?? settings.DefaultProvider;
     }
 
     [HttpGet("channels")]
@@ -422,6 +441,11 @@ public class AiSettingsRequest
 
 public class AiTestSettingsRequest
 {
+    /// <summary>
+    /// Provider id: 0 = OpenAI, 1 = Venice. Preferred over <see cref="Provider"/> for Jellyfin JSON binding.
+    /// </summary>
+    public int? ProviderId { get; set; }
+
     public AiProvider? Provider { get; set; }
 
     public string? OpenAiApiKey { get; set; }

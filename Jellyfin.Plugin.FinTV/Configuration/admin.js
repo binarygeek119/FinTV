@@ -2671,7 +2671,7 @@
             }
             const form = readAiSettingsFromForm();
             const payload = {
-                provider: form.defaultProvider
+                providerId: form.defaultProvider
             };
             if (form.openAiApiKey) payload.openAiApiKey = form.openAiApiKey;
             if (form.veniceApiKey) payload.veniceApiKey = form.veniceApiKey;
@@ -2681,7 +2681,7 @@
             });
             toast(`Connected to ${data.provider}.`, 'success');
         } catch (err) {
-            reportApiError(err, 'AI connection test failed.');
+            toast((err && err.message) || 'AI connection test failed.', 'error');
         } finally {
             if (btn) {
                 btn.disabled = false;
