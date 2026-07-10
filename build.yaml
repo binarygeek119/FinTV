@@ -1,7 +1,7 @@
 ---
 name: "FinTV"
 guid: "f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b"
-version: "0.0.2.104"
+version: "0.0.2.105"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "binarygeek119"
@@ -81,6 +81,7 @@ artifacts:
   - "logos/binarygeek119/Weather/WeatherStar4000.png"
   - "scripts/install-docker-cli-jellyfin.sh"
 changelog: |-
+  - Fix weather guide AI cache generation failing with DbContext concurrency errors by running background work in its own DI scope
   - Improve AI Test Connection errors when no API key is saved and bypass HTTP proxy for outbound LLM requests from Jellyfin Docker
   - Fix AI Test Connection failing with Input string was not in a correct format by normalizing API keys and using safer HTTP/JSON handling for LLM requests
   - Fix General tab and other settings saves failing with Error processing request by moving weather guide AI cache out of plugin XML config into weather-guide-cache.json

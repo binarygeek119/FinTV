@@ -5,6 +5,7 @@ using Jellyfin.Plugin.FinTV.Configuration;
 using Jellyfin.Plugin.FinTV.Data;
 using Jellyfin.Plugin.FinTV.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.FinTV.Services;
@@ -20,15 +21,18 @@ public class WeatherGuideMetadataService
 
     private readonly FinTvDbContext _db;
     private readonly LlmClientService _llm;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<WeatherGuideMetadataService> _logger;
 
     public WeatherGuideMetadataService(
         FinTvDbContext db,
         LlmClientService llm,
+        IServiceScopeFactory scopeFactory,
         ILogger<WeatherGuideMetadataService> logger)
     {
         _db = db;
         _llm = llm;
+        _scopeFactory = scopeFactory;
         _logger = logger;
     }
 
@@ -79,7 +83,9 @@ public class WeatherGuideMetadataService
             Interlocked.Increment(ref _generateWorkerActive);
             try
             {
-                await GenerateAllChannelsCacheAsync(force, CancellationToken.None).ConfigureAwait(false);
+                using var scope = _scopeFactory.CreateScope();
+                var worker = scope.ServiceProvider.GetRequiredService<WeatherGuideMetadataService>();
+                await worker.GenerateAllChannelsCacheAsync(force, CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
