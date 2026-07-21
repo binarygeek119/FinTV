@@ -422,7 +422,7 @@ public class JellyfinCatalogService
         if (!string.IsNullOrWhiteSpace(libraryId) && Guid.TryParse(libraryId, out var parsedId))
         {
             if (_libraryManager.GetItemById(parsedId) is CollectionFolder folderById
-                && folderById.CollectionType == CollectionType.music)
+                && IsMusicLibrary(folderById))
             {
                 return folderById;
             }
@@ -439,15 +439,65 @@ public class JellyfinCatalogService
 
     private IEnumerable<CollectionFolder> EnumerateMusicLibraries()
     {
+        var seen = new HashSet<Guid>();
+
+        foreach (var virtualFolder in _libraryManager.GetVirtualFolders())
+        {
+            if (virtualFolder.CollectionType != CollectionTypeOptions.music)
+            {
+                continue;
+            }
+
+            var folder = ResolveCollectionFolder(virtualFolder);
+            if (folder is not null && seen.Add(folder.Id))
+            {
+                yield return folder;
+            }
+        }
+
+        // Fallback for servers where virtual folder metadata is incomplete.
         var root = _libraryManager.GetUserRootFolder();
         foreach (var child in root.Children)
         {
-            if (child is CollectionFolder folder && folder.CollectionType == CollectionType.music)
+            if (child is CollectionFolder folder
+                && IsMusicLibrary(folder)
+                && seen.Add(folder.Id))
             {
                 yield return folder;
             }
         }
     }
+
+    private CollectionFolder? ResolveCollectionFolder(VirtualFolderInfo virtualFolder)
+    {
+        if (!string.IsNullOrWhiteSpace(virtualFolder.ItemId)
+            && Guid.TryParse(virtualFolder.ItemId, out var parsedId)
+            && _libraryManager.GetItemById(parsedId) is CollectionFolder folderById)
+        {
+            return folderById;
+        }
+
+        if (string.IsNullOrWhiteSpace(virtualFolder.Name))
+        {
+            return null;
+        }
+
+        var root = _libraryManager.GetUserRootFolder();
+        foreach (var child in root.Children)
+        {
+            if (child is CollectionFolder folder
+                && folder.Name.Equals(virtualFolder.Name, StringComparison.OrdinalIgnoreCase)
+                && IsMusicLibrary(folder))
+            {
+                return folder;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsMusicLibrary(CollectionFolder folder)
+        => folder.CollectionType == CollectionType.music;
 
     public TimeSpan GetRuntime(BaseItem item)
     {
