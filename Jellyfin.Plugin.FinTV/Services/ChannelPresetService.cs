@@ -36,7 +36,7 @@ public class ChannelPresetService
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Preset status rows grouped by category.</returns>
     public async Task<IReadOnlyList<ChannelPresetStatus>> GetStatusAsync(
-        ChannelPresetNumberingMode numberingMode = ChannelPresetNumberingMode.Legacy,
+        ChannelPresetNumberingMode numberingMode = ChannelPresetNumberingMode.Subchannels,
         CancellationToken cancellationToken = default)
     {
         var existingNumbers = await _db.Channels
@@ -299,7 +299,7 @@ public class ApplyChannelPresetsRequest
 {
     public IReadOnlyList<string>? PresetIds { get; set; }
 
-    public ChannelPresetNumberingMode NumberingMode { get; set; } = ChannelPresetNumberingMode.Legacy;
+    public ChannelPresetNumberingMode NumberingMode { get; set; } = ChannelPresetNumberingMode.Subchannels;
 
     public bool SkipExisting { get; set; } = true;
 
