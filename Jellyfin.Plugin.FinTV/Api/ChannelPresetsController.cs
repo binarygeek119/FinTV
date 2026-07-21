@@ -33,8 +33,8 @@ public class ChannelPresetsController : ControllerBase
     /// <returns>Preset rows.</returns>
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<ChannelPresetStatus>>> GetAll(
-        [FromQuery] ChannelPresetNumberingMode numberingMode = ChannelPresetNumberingMode.Subchannels,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        [FromQuery] ChannelPresetNumberingMode numberingMode = ChannelPresetNumberingMode.Subchannels)
     {
         return Ok(await _presets.GetStatusAsync(numberingMode, cancellationToken));
     }
