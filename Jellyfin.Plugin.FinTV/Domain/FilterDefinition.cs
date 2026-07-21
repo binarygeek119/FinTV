@@ -43,6 +43,10 @@ public class FilterDefinition
         }
     }
 
+    public static bool IsFintvChannelTag(string? tag)
+        => !string.IsNullOrWhiteSpace(tag)
+           && tag.StartsWith("fintv-", StringComparison.OrdinalIgnoreCase);
+
     public static string? ExtractFintvLibraryTag(string? filterJson)
     {
         var filter = Parse(filterJson);

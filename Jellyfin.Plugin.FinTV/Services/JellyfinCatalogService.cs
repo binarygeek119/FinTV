@@ -1,4 +1,5 @@
 using Jellyfin.Data.Enums;
+using Jellyfin.Plugin.FinTV.Configuration;
 using Jellyfin.Plugin.FinTV.Domain;
 using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Entities.Movies;
@@ -563,6 +564,12 @@ public class JellyfinCatalogService
         var tags = new List<string>();
         tags.AddRange(FilterDefinition.GetOptionalJellyfinTags(channel.FilterJson));
 
+        var catalogTag = GetChannelCatalogTag(channel);
+        if (!string.IsNullOrWhiteSpace(catalogTag))
+        {
+            tags.Add(catalogTag);
+        }
+
         if (slotFilter?.Tags is { Count: > 0 })
         {
             tags.AddRange(slotFilter.Tags.Where(tag => !string.IsNullOrWhiteSpace(tag)));
@@ -571,6 +578,25 @@ public class JellyfinCatalogService
         return tags
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    private static bool UseAutoTaggedCatalog()
+        => Plugin.Instance?.Configuration.Ai.UseAutoTaggedCatalog == true;
+
+    private static string? GetChannelCatalogTag(Channel channel)
+    {
+        if (!UseAutoTaggedCatalog())
+        {
+            return null;
+        }
+
+        var tag = FilterDefinition.ExtractFintvLibraryTag(channel.FilterJson);
+        if (string.IsNullOrWhiteSpace(tag) || ChannelAiRules.IsExcludedFromAutoTagging(tag))
+        {
+            return null;
+        }
+
+        return tag;
     }
 
     private static bool ItemMatchesRequiredTags(BaseItem item, IReadOnlyList<string> requiredTags)
@@ -632,7 +658,13 @@ public class JellyfinCatalogService
             OrderBy = new[] { (ItemSortBy.SortName, Jellyfin.Database.Implementations.Enums.SortOrder.Ascending) }
         };
 
-        if (!ChannelAiRules.HasCatalogConstraints(channel))
+        var catalogTag = GetChannelCatalogTag(channel);
+        if (!string.IsNullOrWhiteSpace(catalogTag))
+        {
+            query.Tags = new[] { catalogTag };
+            query.Limit = Math.Clamp(limit * 5, limit, 5000);
+        }
+        else if (!ChannelAiRules.HasCatalogConstraints(channel))
         {
             query.Limit = limit;
         }
@@ -780,6 +812,12 @@ public class JellyfinCatalogService
         if (!string.IsNullOrWhiteSpace(channelFilter.Genre))
         {
             query.Genres = new[] { channelFilter.Genre };
+        }
+
+        var catalogTag = GetChannelCatalogTag(channel);
+        if (!string.IsNullOrWhiteSpace(catalogTag))
+        {
+            query.Tags = new[] { catalogTag };
         }
     }
 

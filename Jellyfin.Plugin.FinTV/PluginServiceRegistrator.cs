@@ -64,9 +64,12 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddScoped<LlmClientService>();
         serviceCollection.AddScoped<AiLineupGeneratorService>();
         serviceCollection.AddScoped<AiChannelAutoApplyService>();
+        serviceCollection.AddScoped<FinTvChannelTaggingService>();
         serviceCollection.AddSingleton<AiChannelGenerateJobService>();
         serviceCollection.AddSingleton<AiLineupAutoApplyTask>();
         serviceCollection.AddSingleton<IScheduledTask>(sp => sp.GetRequiredService<AiLineupAutoApplyTask>());
+        serviceCollection.AddSingleton<FinTvChannelAutoTaggingTask>();
+        serviceCollection.AddSingleton<IScheduledTask>(sp => sp.GetRequiredService<FinTvChannelAutoTaggingTask>());
         serviceCollection.AddScoped<EbsService>();
         serviceCollection.AddSingleton<PlaywrightDockerBrowserService>();
         serviceCollection.AddSingleton<WeatherStarDockerService>();
