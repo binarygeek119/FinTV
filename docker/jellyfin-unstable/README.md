@@ -2,8 +2,8 @@
 
 Custom Docker image extending official [`jellyfin/jellyfin:unstable`](https://hub.docker.com/r/jellyfin/jellyfin/tags) with:
 
-- **Docker CLI 29.5.2** (static binary from download.docker.com, matches Docker Engine 29.x API 1.54)
-- **yt-dlp** at `/usr/local/bin/yt-dlp` (CommercialBrainz YouTube commercial streaming)
+- **Docker CLI 29.6.2** (static binary from download.docker.com, matches Docker Engine 29.x API 1.54)
+- **yt-dlp 2026.07.04** at `/usr/local/bin/yt-dlp` (CommercialBrainz YouTube commercial streaming)
 - **fpcalc** at `/usr/bin/fpcalc` (`libchromaprint-tools`, audio fingerprinting)
 - **Automatic rebuilds** published to GHCR when upstream Jellyfin unstable changes
 
@@ -51,7 +51,7 @@ Stock Jellyfin images without this layer still need the bundled `scripts/install
 
 ## Build locally
 
-From the repository root (build context must include `scripts/yt-dlp-version.txt`):
+From the repository root (build context must include `scripts/*-version.txt`):
 
 ```bash
 docker build -f docker/jellyfin-unstable/Dockerfile -t jellyfin-unstable-fintv:local .
