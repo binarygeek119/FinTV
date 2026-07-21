@@ -4,17 +4,14 @@
 # Rebuilt automatically when jellyfin/jellyfin:unstable changes (see .github/workflows).
 
 ARG JELLYFIN_TAG=unstable
-ARG DOCKER_CLI_VERSION=29.5.2
-ARG PLAYWRIGHT_VERSION=1.49.0
 
 FROM jellyfin/jellyfin:${JELLYFIN_TAG}
 
-ARG DOCKER_CLI_VERSION
-ARG PLAYWRIGHT_VERSION
 ARG TARGETARCH
 
 USER root
 
+COPY scripts/docker-cli-version.txt /tmp/docker-cli-version.txt
 COPY scripts/yt-dlp-version.txt /tmp/yt-dlp-version.txt
 COPY scripts/playwright-version.txt /tmp/playwright-version.txt
 
@@ -28,6 +25,7 @@ RUN apt-get update \
         curl \
         libchromaprint-tools \
         unzip \
+    && DOCKER_CLI_VERSION="$(tr -d '\r\n' < /tmp/docker-cli-version.txt)" \
     && YTDLP_VERSION="$(tr -d '\r\n' < /tmp/yt-dlp-version.txt)" \
     && PLAYWRIGHT_VERSION="$(tr -d '\r\n' < /tmp/playwright-version.txt)" \
     && case "${TARGETARCH:-amd64}" in \
@@ -51,7 +49,7 @@ RUN apt-get update \
        fi \
     && if [ -n "${pw_node_dir}" ]; then \
          mkdir -p /opt/fintv/playwright-driver/.playwright/node \
-         && curl -fsSL "https://www.nuget.org/api/v2/package/Microsoft.Playwright/${PLAYWRIGHT_VERSION}" -o /tmp/playwright.nupkg \
+         && curl -fsSL "https://api.nuget.org/v3-flatcontainer/microsoft.playwright/${PLAYWRIGHT_VERSION}/microsoft.playwright.${PLAYWRIGHT_VERSION}.nupkg" -o /tmp/playwright.nupkg \
          && unzip -q /tmp/playwright.nupkg -d /tmp/playwright-nupkg \
          && cp -a /tmp/playwright-nupkg/.playwright/package /opt/fintv/playwright-driver/.playwright/ \
          && cp /tmp/playwright-nupkg/.playwright/node/LICENSE /opt/fintv/playwright-driver/.playwright/node/ \
@@ -59,15 +57,13 @@ RUN apt-get update \
          && chmod 0755 /opt/fintv/playwright-driver/.playwright/node/${pw_node_dir}/node \
          && rm -rf /tmp/playwright.nupkg /tmp/playwright-nupkg; \
        fi \
-    && rm -f /tmp/yt-dlp-version.txt /tmp/playwright-version.txt \
+    && rm -f /tmp/docker-cli-version.txt /tmp/yt-dlp-version.txt /tmp/playwright-version.txt \
     && rm -rf /var/lib/apt/lists/*
 
 ENV FINTV_DOCKER_READY=1
 ENV PLAYWRIGHT_DRIVER_SEARCH_PATH=/opt/fintv/playwright-driver
 
 LABEL org.opencontainers.image.title="Jellyfin Unstable (FinTV-ready)" \
-      org.opencontainers.image.description="Official jellyfin/jellyfin:unstable with Docker CLI 29.5.2, yt-dlp, fpcalc, and Playwright .NET driver for FinTV" \
+      org.opencontainers.image.description="Official jellyfin/jellyfin:unstable with Docker CLI, yt-dlp, fpcalc, and Playwright .NET driver for FinTV" \
       org.opencontainers.image.source="https://github.com/binarygeek119/FinTV" \
-      org.opencontainers.image.vendor="binarygeek119" \
-      fintv.docker-cli.version="${DOCKER_CLI_VERSION}" \
-      fintv.playwright.version="${PLAYWRIGHT_VERSION}"
+      org.opencontainers.image.vendor="binarygeek119"
