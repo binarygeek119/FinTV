@@ -2141,9 +2141,17 @@
         const select = $(selectId || 'ebs-music-library') || $('setup-ebs-music-library');
         if (!select) return;
 
-        const options = (libraries || []).map((lib) =>
-            `<option value="${escapeHtml(String(lib.id))}">${escapeHtml(lib.name)}</option>`
-        );
+        const items = libraries || [];
+        if (items.length === 0) {
+            select.innerHTML = '<option value="">No music libraries found in Jellyfin</option>';
+            return;
+        }
+
+        const options = items.map((lib) => {
+            const id = lib.id ?? lib.Id ?? '';
+            const name = lib.name ?? lib.Name ?? 'Music library';
+            return `<option value="${escapeHtml(String(id))}">${escapeHtml(String(name))}</option>`;
+        });
         select.innerHTML = options.join('');
 
         if (selectedId && [...select.options].some((opt) => opt.value === selectedId)) {
