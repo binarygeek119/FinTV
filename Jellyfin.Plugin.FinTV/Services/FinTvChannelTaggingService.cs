@@ -1,3 +1,4 @@
+using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.FinTV.Configuration;
 using Jellyfin.Plugin.FinTV.Domain;
 using MediaBrowser.Controller.Entities;
