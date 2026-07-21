@@ -2208,6 +2208,8 @@
         if ($('ai-auto-apply-all-on-save')) $('ai-auto-apply-all-on-save').disabled = !enabled;
         if ($('btn-weather-guide-cache-generate')) $('btn-weather-guide-cache-generate').disabled = !enabled;
         if ($('btn-weather-guide-cache-clear')) $('btn-weather-guide-cache-clear').disabled = !enabled;
+        if ($('btn-channel-tagging-run')) $('btn-channel-tagging-run').disabled = !enabled;
+        if ($('btn-channel-tagging-full')) $('btn-channel-tagging-full').disabled = !enabled;
     }
 
     function readAiSettingsFromForm() {
@@ -2215,6 +2217,8 @@
             enabled: !!$('ai-enabled')?.checked,
             autoApplyOnChannelAdd: !!$('ai-auto-apply-channel-add')?.checked,
             autoApplyToAllChannelsOnSave: !!$('ai-auto-apply-all-on-save')?.checked,
+            autoTagChannelsWeekly: !!$('ai-auto-tag-weekly')?.checked,
+            useAutoTaggedCatalog: !!$('ai-use-auto-tagged-catalog')?.checked,
             defaultProvider: Number($('ai-default-provider')?.value || '0'),
             openAiModel: $('ai-openai-model')?.value?.trim() || 'gpt-4o-mini',
             veniceModel: $('ai-venice-model')?.value?.trim() || 'gpt-4o-mini',
@@ -2233,6 +2237,8 @@
             if ($('ai-enabled')) $('ai-enabled').checked = !!aiSettings.enabled;
             if ($('ai-auto-apply-channel-add')) $('ai-auto-apply-channel-add').checked = !!aiSettings.autoApplyOnChannelAdd;
             if ($('ai-auto-apply-all-on-save')) $('ai-auto-apply-all-on-save').checked = !!aiSettings.autoApplyToAllChannelsOnSave;
+            if ($('ai-auto-tag-weekly')) $('ai-auto-tag-weekly').checked = !!aiSettings.autoTagChannelsWeekly;
+            if ($('ai-use-auto-tagged-catalog')) $('ai-use-auto-tagged-catalog').checked = aiSettings.useAutoTaggedCatalog !== false;
             if ($('ai-default-provider')) $('ai-default-provider').value = String(aiSettings.defaultProvider ?? 0);
             if ($('ai-openai-model')) $('ai-openai-model').value = aiSettings.openAiModel || 'gpt-4o-mini';
             if ($('ai-venice-model')) $('ai-venice-model').value = aiSettings.veniceModel || 'gpt-4o-mini';
@@ -2252,8 +2258,143 @@
                 startGenerateAllPolling();
             }
             await loadWeatherGuideCacheStatus();
+            await loadChannelTaggingStatus();
         } catch (err) {
             reportApiError(err, 'Could not load AI settings.');
+        }
+    }
+
+    let channelTaggingPollTimer = null;
+
+    function renderChannelTaggingStatus(status) {
+        const el = $('ai-channel-tagging-status');
+        const runBtn = $('btn-channel-tagging-run');
+        const fullBtn = $('btn-channel-tagging-full');
+        if (!el || !status) {
+            return;
+        }
+
+        if (status.isRunning) {
+            el.textContent =
+                `Tagging library… ${status.processedItems}/${status.totalItems} processed · ${status.taggedItems} updated · ${status.skippedItems} unchanged · ${status.taggableChannelCount} channel tag(s).`;
+            if (runBtn) {
+                runBtn.disabled = true;
+                runBtn.textContent = 'Tagging…';
+            }
+            if (fullBtn) {
+                fullBtn.disabled = true;
+            }
+            return;
+        }
+
+        if (runBtn) {
+            runBtn.disabled = !($('ai-enabled')?.checked);
+            runBtn.textContent = 'Run Tagging Now';
+        }
+        if (fullBtn) {
+            fullBtn.disabled = !($('ai-enabled')?.checked);
+        }
+
+        if (status.lastError) {
+            el.textContent =
+                `Last run failed: ${status.lastError}` +
+                (status.lastCompletedAt ? ` · previous success ${new Date(status.lastCompletedAt).toLocaleString()}` : '');
+            return;
+        }
+
+        if (status.lastCompletedAt) {
+            el.textContent =
+                `Last run ${new Date(status.lastCompletedAt).toLocaleString()}: ${status.taggedItems} item(s) updated, ${status.skippedItems} unchanged` +
+                (status.autoTagChannelsWeekly ? ' · weekly task enabled' : '') +
+                (status.useAutoTaggedCatalog ? ' · catalog tag queries enabled' : ' · catalog tag queries disabled') +
+                `.`;
+            return;
+        }
+
+        el.textContent =
+            `No tagging run yet. ${status.taggableChannelCount} channel tag(s) available.` +
+            (status.autoTagChannelsWeekly ? ' Weekly task is enabled.' : ' Enable weekly auto-tagging or click Run Tagging Now.');
+    }
+
+    async function loadChannelTaggingStatus() {
+        if (!syncConfigPage()) {
+            return;
+        }
+
+        try {
+            const status = await api('/ai/channel-tagging/status');
+            renderChannelTaggingStatus(status);
+            if (status.isRunning) {
+                startChannelTaggingPolling();
+            } else {
+                stopChannelTaggingPolling();
+            }
+        } catch (err) {
+            const el = $('ai-channel-tagging-status');
+            if (el) {
+                el.textContent = 'Could not load channel tagging status.';
+            }
+        }
+    }
+
+    function startChannelTaggingPolling() {
+        if (channelTaggingPollTimer) {
+            return;
+        }
+
+        channelTaggingPollTimer = setInterval(() => {
+            loadChannelTaggingStatus().catch(() => {});
+        }, 3000);
+    }
+
+    function stopChannelTaggingPolling() {
+        if (!channelTaggingPollTimer) {
+            return;
+        }
+
+        clearInterval(channelTaggingPollTimer);
+        channelTaggingPollTimer = null;
+    }
+
+    async function runChannelTagging(fullRetag) {
+        if (!syncConfigPage()) {
+            toast('FinTV admin page is not ready. Close and reopen FinTV settings.', 'error');
+            return;
+        }
+
+        if (!($('ai-enabled')?.checked)) {
+            toast('Enable AI lineup generation first.', 'error');
+            return;
+        }
+
+        const btn = fullRetag ? $('btn-channel-tagging-full') : $('btn-channel-tagging-run');
+        const originalLabel = btn ? btn.textContent : '';
+        try {
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = fullRetag ? 'Starting full retag…' : 'Starting…';
+            }
+
+            const response = await api('/ai/channel-tagging/run', {
+                method: 'POST',
+                body: JSON.stringify({ fullRetag: !!fullRetag })
+            });
+
+            if (response.alreadyRunning) {
+                toast('Channel tagging is already running.', 'info');
+            } else {
+                toast(fullRetag ? 'Full library retag started.' : 'Channel tagging started.', 'success');
+            }
+
+            renderChannelTaggingStatus(response.status || response);
+            startChannelTaggingPolling();
+        } catch (err) {
+            reportApiError(err, 'Could not start channel tagging.');
+        } finally {
+            if (btn && !channelTaggingPollTimer) {
+                btn.disabled = !($('ai-enabled')?.checked);
+                btn.textContent = originalLabel;
+            }
         }
     }
 
@@ -2610,6 +2751,8 @@
                 enabled: form.enabled,
                 autoApplyOnChannelAdd: form.autoApplyOnChannelAdd,
                 autoApplyToAllChannelsOnSave: form.autoApplyToAllChannelsOnSave,
+                autoTagChannelsWeekly: form.autoTagChannelsWeekly,
+                useAutoTaggedCatalog: form.useAutoTaggedCatalog,
                 defaultProvider: form.defaultProvider,
                 openAiModel: form.openAiModel,
                 veniceModel: form.veniceModel
@@ -3821,6 +3964,11 @@
         click('btn-ai-cancel-generate-all', () => cancelGenerateAll().catch((e) => toast(e.message, 'error')));
         click('btn-weather-guide-cache-generate', () => generateWeatherGuideCache().catch((e) => toast(e.message, 'error')));
         click('btn-weather-guide-cache-clear', () => clearWeatherGuideCache().catch((e) => toast(e.message, 'error')));
+        click('btn-channel-tagging-run', () => runChannelTagging(false).catch((e) => toast(e.message, 'error')));
+        click('btn-channel-tagging-full', () => {
+            if (!confirm('Retag the entire library? This re-evaluates every movie, series, and music video.')) return;
+            runChannelTagging(true).catch((e) => toast(e.message, 'error'));
+        });
         click('btn-ai-apply', () => applyAiLineup().catch((e) => toast(e.message, 'error')));
         click('btn-ai-discard', discardAiPreview);
         change('ai-enabled', updateAiUiState);

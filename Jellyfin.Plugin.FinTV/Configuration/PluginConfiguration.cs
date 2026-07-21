@@ -87,6 +87,8 @@ public class PluginConfiguration : BasePluginConfiguration
 
     public BlackframeTaskState BlackframeTaskState { get; set; } = new();
 
+    public ChannelAutoTaggingTaskState ChannelAutoTaggingTaskState { get; set; } = new();
+
     public CommercialBrainzSettings CommercialBrainz { get; set; } = new();
 
     public AiSettings Ai { get; set; } = new();
@@ -155,6 +157,35 @@ public class AiSettings
     /// When true, saving AI settings also generates and applies lineups for all eligible channels.
     /// </summary>
     public bool AutoApplyToAllChannelsOnSave { get; set; }
+
+    /// <summary>
+    /// When true, a weekly scheduled task tags library items with fintv-* channel tags using channel rules.
+    /// </summary>
+    public bool AutoTagChannelsWeekly { get; set; }
+
+    /// <summary>
+    /// When true, AI catalog browse queries Jellyfin using fintv-* tags written by auto-tagging (faster manifests).
+    /// </summary>
+    public bool UseAutoTaggedCatalog { get; set; } = true;
+}
+
+public class ChannelAutoTaggingTaskState
+{
+    public bool IsRunning { get; set; }
+
+    public int TotalItems { get; set; }
+
+    public int ProcessedItems { get; set; }
+
+    public int TaggedItems { get; set; }
+
+    public int SkippedItems { get; set; }
+
+    public string? LastError { get; set; }
+
+    public DateTime? LastStartedAt { get; set; }
+
+    public DateTime? LastCompletedAt { get; set; }
 }
 
 public class BlackframeTaskState

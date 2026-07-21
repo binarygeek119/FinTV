@@ -355,6 +355,14 @@
                         <input type="checkbox" id="ai-auto-apply-all-on-save">
                         <span>Apply AI lineups to all eligible channels when saving settings (14-day playout rebuild)</span>
                     </label>
+                    <label class="field checkbox-field">
+                        <input type="checkbox" id="ai-auto-tag-weekly">
+                        <span>Weekly auto-tag library items with fintv-* channel tags (Sunday 2:00 AM scheduled task)</span>
+                    </label>
+                    <label class="field checkbox-field">
+                        <input type="checkbox" id="ai-use-auto-tagged-catalog">
+                        <span>Use auto-tagged fintv-* tags for faster AI catalog loading</span>
+                    </label>
                     <div class="actions" style="margin-bottom:1rem">
                         <button type="button" id="btn-save-ai-settings" class="raised button-submit emby-button">Save AI Settings</button>
                         <button type="button" id="btn-test-ai" class="emby-button">Test Connection</button>
@@ -399,6 +407,17 @@
                     </div>
                     <p class="hint">When AI is enabled, FinTV generates TV-guide-style titles and descriptions for each weather channel location and hour of day (0–23). Generation runs once when you click <strong>Generate Weather Guide Cache</strong>, then the same metadata is reused every day for matching time slots. EPG and playout builds read the cache only — they do not call the LLM.</p>
                     <p id="ai-weather-guide-cache-status" class="hint">Loading weather guide cache status…</p>
+                </div>
+                <div class="card section-card">
+                    <div class="section-header-row">
+                        <h3>Channel auto-tagging</h3>
+                        <div class="actions section-header-actions">
+                            <button type="button" id="btn-channel-tagging-run" class="emby-button">Run Tagging Now</button>
+                            <button type="button" id="btn-channel-tagging-full" class="emby-button">Full Library Retag</button>
+                        </div>
+                    </div>
+                    <p class="hint">FinTV can write <code>fintv-*</code> tags onto movies, series, and music videos using the same channel rules used for AI lineups. When enabled, AI catalog loading queries those tags first so Generate All is much faster on large libraries. Run once before your first Generate All, or enable the weekly scheduled task to pick up new media automatically.</p>
+                    <p id="ai-channel-tagging-status" class="hint">Loading channel tagging status…</p>
                 </div>
                 <div class="card section-card">
                     <div class="section-header-row">

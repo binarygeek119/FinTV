@@ -6,6 +6,7 @@ using MediaBrowser.Common.Api;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Jellyfin.Plugin.FinTV.Api;
 
@@ -24,6 +25,7 @@ public class AiController : ControllerBase
     private readonly LineupGeneratorService _playoutGenerator;
     private readonly WeatherGuideMetadataService _weatherGuide;
     private readonly AiChannelGenerateJobService _channelGenerateJobs;
+    private readonly IServiceScopeFactory _scopeFactory;
 
     public AiController(
         AiLineupGeneratorService generator,
@@ -32,7 +34,8 @@ public class AiController : ControllerBase
         FinTvDbContext db,
         LineupGeneratorService playoutGenerator,
         WeatherGuideMetadataService weatherGuide,
-        AiChannelGenerateJobService channelGenerateJobs)
+        AiChannelGenerateJobService channelGenerateJobs,
+        IServiceScopeFactory scopeFactory)
     {
         _generator = generator;
         _autoApply = autoApply;
@@ -41,6 +44,7 @@ public class AiController : ControllerBase
         _playoutGenerator = playoutGenerator;
         _weatherGuide = weatherGuide;
         _channelGenerateJobs = channelGenerateJobs;
+        _scopeFactory = scopeFactory;
     }
 
     [HttpGet("settings")]
@@ -93,6 +97,16 @@ public class AiController : ControllerBase
             ai.AutoApplyToAllChannelsOnSave = request.AutoApplyToAllChannelsOnSave.Value;
         }
 
+        if (request.AutoTagChannelsWeekly.HasValue)
+        {
+            ai.AutoTagChannelsWeekly = request.AutoTagChannelsWeekly.Value;
+        }
+
+        if (request.UseAutoTaggedCatalog.HasValue)
+        {
+            ai.UseAutoTaggedCatalog = request.UseAutoTaggedCatalog.Value;
+        }
+
         if (!string.IsNullOrWhiteSpace(request.OpenAiApiKey))
         {
             ai.OpenAiApiKey = request.OpenAiApiKey.Trim();
@@ -134,7 +148,9 @@ public class AiController : ControllerBase
             openAiApiKeyMasked = MaskKey(ai.OpenAiApiKey),
             veniceApiKeyMasked = MaskKey(ai.VeniceApiKey),
             autoApplyOnChannelAdd = ai.AutoApplyOnChannelAdd,
-            autoApplyToAllChannelsOnSave = ai.AutoApplyToAllChannelsOnSave
+            autoApplyToAllChannelsOnSave = ai.AutoApplyToAllChannelsOnSave,
+            autoTagChannelsWeekly = ai.AutoTagChannelsWeekly,
+            useAutoTaggedCatalog = ai.UseAutoTaggedCatalog
         };
     }
 
@@ -419,6 +435,69 @@ public class AiController : ControllerBase
         return Ok(new { cleared });
     }
 
+    [HttpGet("channel-tagging/status")]
+    public ActionResult<object> GetChannelTaggingStatus()
+        => Ok(BuildChannelTaggingStatus());
+
+    [HttpPost("channel-tagging/run")]
+    public async Task<IActionResult> RunChannelTagging(
+        [FromBody] ChannelTaggingRunRequest? request,
+        CancellationToken cancellationToken)
+    {
+        var state = Plugin.Instance?.Configuration.ChannelAutoTaggingTaskState ?? new ChannelAutoTaggingTaskState();
+        if (state.IsRunning)
+        {
+            return Ok(new
+            {
+                queued = false,
+                alreadyRunning = true,
+                status = BuildChannelTaggingStatus()
+            });
+        }
+
+        var fullRetag = request?.FullRetag == true;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var tagging = scope.ServiceProvider.GetRequiredService<FinTvChannelTaggingService>();
+                await tagging.RunAsync(fullRetag, null, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // State is persisted on the service; admin polls status for errors.
+            }
+        }, CancellationToken.None);
+
+        await Task.Delay(250, cancellationToken).ConfigureAwait(false);
+        return Accepted(new
+        {
+            queued = true,
+            status = BuildChannelTaggingStatus()
+        });
+    }
+
+    private static object BuildChannelTaggingStatus()
+    {
+        var state = Plugin.Instance?.Configuration.ChannelAutoTaggingTaskState ?? new ChannelAutoTaggingTaskState();
+        var ai = Plugin.Instance?.Configuration.Ai ?? new AiSettings();
+        return new
+        {
+            isRunning = state.IsRunning,
+            totalItems = state.TotalItems,
+            processedItems = state.ProcessedItems,
+            taggedItems = state.TaggedItems,
+            skippedItems = state.SkippedItems,
+            lastError = state.LastError,
+            lastStartedAt = state.LastStartedAt,
+            lastCompletedAt = state.LastCompletedAt,
+            autoTagChannelsWeekly = ai.AutoTagChannelsWeekly,
+            useAutoTaggedCatalog = ai.UseAutoTaggedCatalog,
+            taggableChannelCount = ChannelAiRules.GetAutoTaggableChannelTags().Count
+        };
+    }
+
     private static string MaskKey(string? key)
     {
         if (string.IsNullOrWhiteSpace(key))
@@ -454,6 +533,10 @@ public class AiSettingsRequest
     public bool? AutoApplyOnChannelAdd { get; set; }
 
     public bool? AutoApplyToAllChannelsOnSave { get; set; }
+
+    public bool? AutoTagChannelsWeekly { get; set; }
+
+    public bool? UseAutoTaggedCatalog { get; set; }
 }
 
 public class AiTestSettingsRequest
@@ -499,4 +582,9 @@ public class AiApplyLineupRequest
 public class WeatherGuideCacheGenerateRequest
 {
     public bool Force { get; set; }
+}
+
+public class ChannelTaggingRunRequest
+{
+    public bool FullRetag { get; set; }
 }
