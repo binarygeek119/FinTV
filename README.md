@@ -2,7 +2,7 @@
 
 Custom Docker image extending official [`jellyfin/jellyfin:unstable`](https://hub.docker.com/r/jellyfin/jellyfin/tags) with tools required by the [FinTV](https://github.com/binarygeek119/FinTV) Jellyfin plugin.
 
-Repository: [github.com/binarygeek119/jellyfin-](https://github.com/binarygeek119/jellyfin-) (GitHub normalizes `jellyfin+` to `jellyfin-` in repo names).
+Repository: [github.com/binarygeek119/jellyfinplus](https://github.com/binarygeek119/jellyfinplus)
 
 - **Docker CLI 29.6.2** (static binary from download.docker.com, matches Docker Engine 29.x API 1.54)
 - **yt-dlp 2026.07.04** at `/usr/local/bin/yt-dlp` (CommercialBrainz YouTube commercial streaming)
@@ -11,13 +11,10 @@ Repository: [github.com/binarygeek119/jellyfin-](https://github.com/binarygeek11
 - **Automatic rebuilds** published to GHCR when upstream Jellyfin unstable changes
 
 Weather channel capture uses a separate **`fintv-playwright-chromium`** container (Playwright's official image). This Jellyfin image does not bundle Chromium.
-
-> **Repo name:** This project is **Jellyfin+**. GitHub stores the repository as [`binarygeek119/jellyfin-`](https://github.com/binarygeek119/jellyfin-) because `+` is not allowed in repo names.
-
 ## Pull
 
 ```bash
-docker pull ghcr.io/binarygeek119/jellyfin-:unstable
+docker pull ghcr.io/binarygeek119/jellyfinplus:unstable
 ```
 
 Tags:
@@ -59,7 +56,7 @@ Stock Jellyfin images without this layer still need the bundled `scripts/install
 From this repository root:
 
 ```bash
-docker build -t jellyfin-plus:local .
+docker build -t jellyfinplus:local .
 ```
 
 ## Updates

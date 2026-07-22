@@ -19,7 +19,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: binarygeek119/jellyfin-
+  IMAGE_NAME: binarygeek119/jellyfinplus
 
 jobs:
   build:

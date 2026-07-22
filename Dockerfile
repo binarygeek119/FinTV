@@ -65,5 +65,5 @@ ENV PLAYWRIGHT_DRIVER_SEARCH_PATH=/opt/fintv/playwright-driver
 
 LABEL org.opencontainers.image.title="Jellyfin+ (FinTV-ready)" \
       org.opencontainers.image.description="Official jellyfin/jellyfin:unstable with Docker CLI, yt-dlp, fpcalc, and Playwright .NET driver for FinTV" \
-      org.opencontainers.image.source="https://github.com/binarygeek119/jellyfin-" \
+      org.opencontainers.image.source="https://github.com/binarygeek119/jellyfinplus" \
       org.opencontainers.image.vendor="binarygeek119"
