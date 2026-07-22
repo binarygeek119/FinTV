@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-# Example stack for ghcr.io/binarygeek119/jellyfin-:unstable
-=======
 # Example stack for ghcr.io/binarygeek119/jellyfin-:unstable (Jellyfin+)
->>>>>>> e46f650 (Rebrand export branch as Jellyfin+ (ghcr.io/binarygeek119/jellyfin-))
 #
 # Before first run on the host:
 #   stat -c '%g' /var/run/docker.sock
