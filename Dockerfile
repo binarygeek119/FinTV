@@ -1,4 +1,4 @@
-# FinTV-ready Jellyfin unstable: Docker CLI, yt-dlp, Playwright .NET driver, and sidecar control.
+# Jellyfin+ (FinTV-ready): Docker CLI, yt-dlp, Playwright .NET driver, and sidecar control.
 # Playwright Chromium runs in fintv-playwright-chromium (separate container), not in this image.
 # The baked-in driver is only for Playwright.CreateAsync(); weather capture connects over CDP.
 # Rebuilt automatically when jellyfin/jellyfin:unstable changes (see .github/workflows/build.yaml).
@@ -63,7 +63,7 @@ RUN apt-get update \
 ENV FINTV_DOCKER_READY=1
 ENV PLAYWRIGHT_DRIVER_SEARCH_PATH=/opt/fintv/playwright-driver
 
-LABEL org.opencontainers.image.title="Jellyfin Unstable (FinTV-ready)" \
+LABEL org.opencontainers.image.title="Jellyfin+ (FinTV-ready)" \
       org.opencontainers.image.description="Official jellyfin/jellyfin:unstable with Docker CLI, yt-dlp, fpcalc, and Playwright .NET driver for FinTV" \
       org.opencontainers.image.source="https://github.com/binarygeek119/jellyfin-" \
       org.opencontainers.image.vendor="binarygeek119"

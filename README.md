@@ -12,6 +12,8 @@ Repository: [github.com/binarygeek119/jellyfin-](https://github.com/binarygeek11
 
 Weather channel capture uses a separate **`fintv-playwright-chromium`** container (Playwright's official image). This Jellyfin image does not bundle Chromium.
 
+> **Repo name:** This project is **Jellyfin+**. GitHub stores the repository as [`binarygeek119/jellyfin-`](https://github.com/binarygeek119/jellyfin-) because `+` is not allowed in repo names.
+
 ## Pull
 
 ```bash
@@ -57,7 +59,7 @@ Stock Jellyfin images without this layer still need the bundled `scripts/install
 From this repository root:
 
 ```bash
-docker build -t jellyfin-unstable-fintv:local .
+docker build -t jellyfin-plus:local .
 ```
 
 ## Updates
