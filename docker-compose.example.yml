@@ -1,0 +1,49 @@
+# Example stack for ghcr.io/binarygeek119/jellyfin-unstable-fintv:unstable
+#
+# Before first run on the host:
+#   stat -c '%g' /var/run/docker.sock
+# Replace DOCKER_GID below with that number.
+#
+# Use a named network (below) so FinTV can reach the Playwright sidecar by container name.
+# If Jellyfin stays on the default bridge network only, FinTV falls back to publishing
+# CDP port 9222 on the host and requires extra_hosts host.docker.internal:host-gateway.
+
+networks:
+  fintv:
+
+services:
+  jellyfin:
+    image: ghcr.io/binarygeek119/jellyfin-unstable-fintv:unstable
+    container_name: jellyfin
+    restart: unless-stopped
+    shm_size: "1gb"  # optional; sidecar uses its own --shm-size when FinTV starts fintv-playwright-chromium
+    networks:
+      - fintv
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8096:8096"
+      # - "8920:8920"  # HTTPS (optional)
+    environment:
+      - TZ=America/Los_Angeles
+      # Optional: override when FinTV cannot auto-detect the compose network
+      # - FINTV_DOCKER_NETWORK=yourproject_default
+    volumes:
+      - ./config:/config
+      - ./cache:/cache
+      - /path/to/media:/media:ro
+      # Required for FinTV WeatherStar Docker buttons (ws4kp/ws3kp)
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add:
+      - "999"  # DOCKER_GID from: stat -c '%g' /var/run/docker.sock
+    devices:
+      - /dev/dri:/dev/dri  # optional hardware transcoding
+
+  # Optional: auto-pull rebuilt images from GHCR and restart Jellyfin
+  # watchtower:
+  #   image: containrrr/watchtower
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #   command: --interval 86400 --cleanup --label-enable
+  #   labels:
+  #     - com.centurylinklabs.watchtower.enable=true

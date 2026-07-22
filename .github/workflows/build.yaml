@@ -1,0 +1,118 @@
+name: Build and publish Jellyfin Unstable (FinTV)
+
+on:
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+      - main
+    paths:
+      - 'Dockerfile'
+      - 'scripts/**'
+      - '.github/workflows/build.yaml'
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: binarygeek119/jellyfin-unstable-fintv
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read bundle versions
+        id: versions
+        run: |
+          docker_cli="$(tr -d '\r\n' < scripts/docker-cli-version.txt)"
+          playwright="$(tr -d '\r\n' < scripts/playwright-version.txt)"
+          yt_dlp="$(tr -d '\r\n' < scripts/yt-dlp-version.txt)"
+          echo "docker_cli=$docker_cli" >> "$GITHUB_OUTPUT"
+          echo "playwright=$playwright" >> "$GITHUB_OUTPUT"
+          echo "yt_dlp=$yt_dlp" >> "$GITHUB_OUTPUT"
+          echo "Docker CLI: $docker_cli"
+          echo "Playwright: $playwright"
+          echo "yt-dlp: $yt_dlp"
+
+      - name: Pull upstream Jellyfin unstable
+        id: upstream
+        run: |
+          docker pull jellyfin/jellyfin:unstable
+          digest="$(docker inspect jellyfin/jellyfin:unstable --format='{{index .RepoDigests 0}}')"
+          short="$(echo "$digest" | awk -F: '{print $2}' | cut -c1-12)"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "short=$short" >> "$GITHUB_OUTPUT"
+          echo "Upstream Jellyfin unstable: $digest"
+
+      - name: Read last built base digest label
+        id: last
+        run: |
+          image="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:unstable"
+          last=""
+          if docker pull "$image" 2>/dev/null; then
+            last="$(docker inspect "$image" --format='{{ index .Config.Labels "org.opencontainers.image.base.digest" }}' 2>/dev/null || true)"
+          fi
+          echo "digest=$last" >> "$GITHUB_OUTPUT"
+          echo "Last built base digest: ${last:-<none>}"
+
+      - name: Decide whether to build
+        id: should
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "${{ github.event_name }}" = "push" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "Build forced by ${GITHUB_EVENT_NAME}."
+            exit 0
+          fi
+
+          upstream="${{ steps.upstream.outputs.digest }}"
+          last="${{ steps.last.outputs.digest }}"
+          if [ "$upstream" != "$last" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "Upstream digest changed."
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "Upstream digest unchanged; skipping build."
+          fi
+
+      - name: Build and push
+        if: steps.should.outputs.build == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:unstable
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.upstream.outputs.short }}
+          labels: |
+            org.opencontainers.image.base.digest=${{ steps.upstream.outputs.digest }}
+            fintv.docker-cli.version=${{ steps.versions.outputs.docker_cli }}
+            fintv.playwright.version=${{ steps.versions.outputs.playwright }}
+            fintv.ytdlp.version=${{ steps.versions.outputs.yt_dlp }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Skip notice
+        if: steps.should.outputs.build != 'true'
+        run: echo "No rebuild needed today."
