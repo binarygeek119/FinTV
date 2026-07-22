@@ -121,7 +121,7 @@ Click **Start** then **Use URL** to set the base URL to `http://127.0.0.1:8080` 
 
 **Windows:** FinTV downloads Chromium automatically into `{JellyfinData}/plugins/configurations/FinTV/playwright-browsers` on the first weather tune.
 
-**Linux (recommended):** Use the FinTV-ready Jellyfin Docker image [`ghcr.io/binarygeek119/jellyfin-unstable-fintv:unstable`](docker/jellyfin-unstable/README.md). It includes Docker CLI for WeatherStar and Playwright sidecar control, plus `yt-dlp` and `fpcalc` for CommercialBrainz and audio fingerprinting. Mount the Docker socket (`/var/run/docker.sock`) and add `group_add` for the socket GID.
+**Linux (recommended):** Use the FinTV-ready Jellyfin Docker image [`ghcr.io/binarygeek119/jellyfinplus:unstable`](https://github.com/binarygeek119/jellyfinplus) ([Jellyfin+](https://github.com/binarygeek119/jellyfinplus)). It includes Docker CLI for WeatherStar and Playwright sidecar control, plus `yt-dlp` and `fpcalc` for CommercialBrainz and audio fingerprinting. Mount the Docker socket (`/var/run/docker.sock`) and add `group_add` for the socket GID.
 
 **Linux (stock Jellyfin):** Mount the Docker socket and install Docker CLI (see below). FinTV starts Chromium from Playwright's official Docker image (`mcr.microsoft.com/playwright:v1.49.0-jammy`) and connects over CDP. Requirements:
 
