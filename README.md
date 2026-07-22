@@ -1,6 +1,8 @@
-# Jellyfin Unstable (FinTV-ready)
+# Jellyfin+ (FinTV-ready)
 
-Custom Docker image extending official [`jellyfin/jellyfin:unstable`](https://hub.docker.com/r/jellyfin/jellyfin/tags) with tools required by the [FinTV](https://github.com/binarygeek119/FinTV) Jellyfin plugin:
+Custom Docker image extending official [`jellyfin/jellyfin:unstable`](https://hub.docker.com/r/jellyfin/jellyfin/tags) with tools required by the [FinTV](https://github.com/binarygeek119/FinTV) Jellyfin plugin.
+
+Repository: [github.com/binarygeek119/jellyfin-](https://github.com/binarygeek119/jellyfin-) (GitHub normalizes `jellyfin+` to `jellyfin-` in repo names).
 
 - **Docker CLI 29.6.2** (static binary from download.docker.com, matches Docker Engine 29.x API 1.54)
 - **yt-dlp 2026.07.04** at `/usr/local/bin/yt-dlp` (CommercialBrainz YouTube commercial streaming)
@@ -13,7 +15,7 @@ Weather channel capture uses a separate **`fintv-playwright-chromium`** containe
 ## Pull
 
 ```bash
-docker pull ghcr.io/binarygeek119/jellyfin-unstable-fintv:unstable
+docker pull ghcr.io/binarygeek119/jellyfin-:unstable
 ```
 
 Tags:

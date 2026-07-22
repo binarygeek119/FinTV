@@ -1,4 +1,4 @@
-# Example stack for ghcr.io/binarygeek119/jellyfin-unstable-fintv:unstable
+# Example stack for ghcr.io/binarygeek119/jellyfin-:unstable
 #
 # Before first run on the host:
 #   stat -c '%g' /var/run/docker.sock
@@ -13,7 +13,7 @@ networks:
 
 services:
   jellyfin:
-    image: ghcr.io/binarygeek119/jellyfin-unstable-fintv:unstable
+    image: ghcr.io/binarygeek119/jellyfin-:unstable
     container_name: jellyfin
     restart: unless-stopped
     shm_size: "1gb"  # optional; sidecar uses its own --shm-size when FinTV starts fintv-playwright-chromium

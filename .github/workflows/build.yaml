@@ -1,4 +1,4 @@
-name: Build and publish Jellyfin Unstable (FinTV)
+name: Build and publish Jellyfin+ (FinTV-ready)
 
 on:
   schedule:
@@ -19,7 +19,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: binarygeek119/jellyfin-unstable-fintv
+  IMAGE_NAME: binarygeek119/jellyfin-
 
 jobs:
   build:
