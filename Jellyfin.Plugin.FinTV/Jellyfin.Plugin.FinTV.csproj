@@ -92,7 +92,7 @@
     <Copy SourceFiles="@(BundledScriptPublish)" DestinationFiles="@(BundledScriptPublish->'$(PublishDir)scripts\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
   </Target>
 
-  <!-- Playwright .NET driver is not bundled in the plugin zip (FinTV Jellyfin Docker image on Linux; playwright install on Windows). -->
+  <!-- Playwright .NET driver is not bundled in the plugin zip (Jellyfin+ image on Linux; playwright install on Windows). -->
   <Target Name="RemovePlaywrightDriverFromOutput" AfterTargets="Build">
     <RemoveDir Directories="$(OutputPath).playwright" Condition="Exists('$(OutputPath).playwright')" />
     <Delete Files="$(OutputPath)playwright.ps1" Condition="Exists('$(OutputPath)playwright.ps1')" />

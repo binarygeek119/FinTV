@@ -4,7 +4,7 @@ namespace Jellyfin.Plugin.FinTV.Services;
 
 /// <summary>
 /// Resolves the yt-dlp executable from FINTV_YTDLP_PATH or the process PATH.
-/// The FinTV Jellyfin Docker image installs yt-dlp at /usr/local/bin/yt-dlp.
+/// The Jellyfin+ image (https://github.com/FinTVProject/JellyfinPlus) installs yt-dlp at /usr/local/bin/yt-dlp.
 /// </summary>
 public sealed class YtDlpLocator
 {

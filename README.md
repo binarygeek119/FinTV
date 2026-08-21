@@ -26,6 +26,8 @@ Inspired by [ErsatzTV/legacy](https://github.com/ErsatzTV/legacy) scheduling con
 - FFmpeg (bundled with Jellyfin)
 - For WeatherStar channel: **Windows** uses bundled Playwright Chromium; **Linux Docker** uses the `fintv-playwright-chromium` sidecar (Docker socket required)
 
+The FinTV-ready Jellyfin Docker image lives in **[Jellyfin+](https://github.com/FinTVProject/JellyfinPlus)**. This repository is the plugin only.
+
 > **Jellyfin 10.11 users:** use [FinTV v0.0.1.3](https://github.com/binarygeek119/FinTV/releases/tag/v0.0.1.3) instead. v0.0.2.0+ targets Jellyfin 12 on .NET 10.
 
 ## Install from GitHub
@@ -121,7 +123,7 @@ Click **Start** then **Use URL** to set the base URL to `http://127.0.0.1:8080` 
 
 **Windows:** FinTV downloads Chromium automatically into `{JellyfinData}/plugins/configurations/FinTV/playwright-browsers` on the first weather tune.
 
-**Linux (recommended):** Use the FinTV-ready Jellyfin Docker image [`ghcr.io/binarygeek119/jellyfinplus:unstable`](https://github.com/binarygeek119/jellyfinplus) ([Jellyfin+](https://github.com/binarygeek119/jellyfinplus)). It includes Docker CLI for WeatherStar and Playwright sidecar control, plus `yt-dlp` and `fpcalc` for CommercialBrainz and audio fingerprinting. Mount the Docker socket (`/var/run/docker.sock`) and add `group_add` for the socket GID.
+**Linux (recommended):** Use [Jellyfin+](https://github.com/FinTVProject/JellyfinPlus) (`ghcr.io/binarygeek119/jellyfinplus:unstable`). It includes Docker CLI for WeatherStar and Playwright sidecar control, plus `yt-dlp` and `fpcalc` for CommercialBrainz and audio fingerprinting. Mount the Docker socket (`/var/run/docker.sock`) and add `group_add` for the socket GID.
 
 **Linux (stock Jellyfin):** Mount the Docker socket and install Docker CLI (see below). FinTV starts Chromium from Playwright's official Docker image (`mcr.microsoft.com/playwright:v1.49.0-jammy`) and connects over CDP. Requirements:
 
@@ -197,6 +199,7 @@ Copy build output to your Jellyfin plugins folder and restart the server.
 - [netbymatt/ws4kp](https://github.com/netbymatt/ws4kp) / [netbymatt/ws3kp](https://github.com/netbymatt/ws3kp) — self-hosted WeatherStar Docker images
 - [thornjad/weatherstar4k](https://github.com/thornjad/weatherstar4k) — WeatherStar 4000 display
 - [binarygeek119/Open-Commercial-Pack](https://github.com/binarygeek119/Open-Commercial-Pack) — commercial content packs
+- [FinTVProject/JellyfinPlus](https://github.com/FinTVProject/JellyfinPlus) — FinTV-ready Jellyfin Docker image
 
 ## License
 

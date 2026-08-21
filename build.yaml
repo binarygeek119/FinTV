@@ -81,6 +81,7 @@ artifacts:
   - "logos/binarygeek119/Weather/WeatherStar4000.png"
   - "scripts/install-docker-cli-jellyfin.sh"
 changelog: |-
+  - Move the FinTV-ready Jellyfin Docker image to https://github.com/FinTVProject/JellyfinPlus; this repo is the plugin only
   - Add weekly AI channel auto-tagging scheduled task (Sunday 2 AM) with Run Tagging Now and Full Library Retag on the AI tab
   - Use auto-tagged fintv-* Jellyfin tags for faster AI catalog loading during Generate All
   - Fix EBS background music library dropdown empty on Jellyfin 12
