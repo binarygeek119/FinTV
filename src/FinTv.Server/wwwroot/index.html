@@ -940,7 +940,10 @@
                     <h2>News video</h2>
                     <p class="hint">Builds the MP4 the news channel plays (intro, speech, story pictures, and outro) at 00:00, 06:00, 12:00, and 18:00 local time. The current video is not replaced until the new file succeeds. Skips when there are no new stories, or fewer than the minimum on the News tab.</p>
                     <p id="task-news-bulletin-status" class="hint">Loading news video status…</p>
-                    <button type="button" id="btn-run-news-bulletin-task" class="raised button-submit emby-button">Create News Video</button>
+                    <div class="actions">
+                        <button type="button" id="btn-run-news-bulletin-task" class="raised button-submit emby-button">Create News Video</button>
+                        <button type="button" id="btn-cleanup-news-bulletin-task" class="emby-button">Clean up failed / old videos</button>
+                    </div>
                 </div>
                 <div class="card section-card">
                     <h2>Catalog cleanup</h2>
@@ -1103,6 +1106,7 @@
                     <p id="news-bulletin-status" class="hint">No bulletin has run yet.</p>
                     <div class="actions">
                         <button type="button" id="btn-run-news-bulletin" class="raised button-submit emby-button">Create news video now</button>
+                        <button type="button" id="btn-cleanup-news-bulletin" class="emby-button">Clean up failed / old videos</button>
                     </div>
                 </div>
                 <div class="card section-card">

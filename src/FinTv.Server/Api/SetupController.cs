@@ -270,10 +270,15 @@ public class TasksController : ControllerBase
     }
 
     [HttpPost("news-bulletin")]
-    public async Task<ActionResult<object>> RunNewsBulletin(CancellationToken cancellationToken)
+    public ActionResult<object> RunNewsBulletin()
     {
-        var result = await _newsBulletins.RunAsync(scheduled: false, cancellationToken);
-        return Ok(result);
+        var started = _newsBulletins.TryQueue();
+        return Accepted(new
+        {
+            started,
+            alreadyRunning = !started,
+            bulletin = _newsBulletins.DescribeStatus()
+        });
     }
 
     [HttpGet("catalog-cleanup")]

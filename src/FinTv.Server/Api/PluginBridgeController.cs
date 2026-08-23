@@ -398,11 +398,20 @@ public class NewsController : ControllerBase
     }
 
     [HttpPost("bulletins/run")]
-    public async Task<ActionResult<object>> RunBulletin(CancellationToken cancellationToken)
+    public ActionResult<object> RunBulletin()
     {
-        var result = await _bulletins.RunAsync(scheduled: false, cancellationToken);
-        return Ok(result);
+        var started = _bulletins.TryQueue();
+        return Accepted(new
+        {
+            started,
+            alreadyRunning = !started,
+            bulletin = _bulletins.DescribeStatus()
+        });
     }
+
+    [HttpPost("bulletins/cleanup")]
+    public ActionResult<object> CleanupBulletins()
+        => Ok(_bulletins.SweepNow());
 
     [HttpGet("preview")]
     public async Task<ActionResult<object>> Preview([FromQuery] bool force, CancellationToken cancellationToken)

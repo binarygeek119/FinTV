@@ -3842,17 +3842,48 @@
         if (!bulletin) {
             return 'No bulletin has run yet.';
         }
+        if (bulletin.isRunning) {
+            return 'Creating news video… intro, speech, pictures, and outro. The current video stays until this one finishes.';
+        }
+        const leftover = formatNewsLeftovers(bulletin.leftovers);
         const next = bulletin.nextRunAt ? `Next run ${new Date(bulletin.nextRunAt).toLocaleString()}.` : '';
         if (!bulletin.lastRunAt) {
-            return next || 'No bulletin has run yet.';
+            return `${next || 'No bulletin has run yet.'}${leftover}`.trim();
         }
         const when = new Date(bulletin.lastRunAt).toLocaleString();
         if (bulletin.lastCreated) {
             const path = bulletin.lastVideoPath ? ` Saved ${bulletin.lastVideoPath}.` : '';
-            return `Last video ${when} · ${bulletin.lastEncodedStoryCount || 0} stories.${path} ${next}`.trim();
+            return `Last video ${when} · ${bulletin.lastEncodedStoryCount || 0} stories.${path} ${next}${leftover}`.trim();
         }
         const reason = bulletin.lastSkipReason || 'skipped';
-        return `Last run ${when}: ${reason} ${next}`.trim();
+        return `Last run ${when}: ${reason} ${next}${leftover}`.trim();
+    }
+
+    function formatNewsLeftovers(leftovers) {
+        if (!leftovers) {
+            return '';
+        }
+        const bits = [];
+        if (leftovers.workFolders) bits.push(`${leftovers.workFolders} failed job folder${leftovers.workFolders === 1 ? '' : 's'}`);
+        if (leftovers.partialFiles) bits.push(`${leftovers.partialFiles} incomplete file${leftovers.partialFiles === 1 ? '' : 's'}`);
+        if (leftovers.extraVideos) bits.push(`${leftovers.extraVideos} old video${leftovers.extraVideos === 1 ? '' : 's'}`);
+        if (leftovers.scratchFiles) bits.push(`${leftovers.scratchFiles} leftover scratch item${leftovers.scratchFiles === 1 ? '' : 's'}`);
+        return bits.length ? ` Leftovers: ${bits.join(', ')}.` : '';
+    }
+
+    function setNewsBulletinButtons(running) {
+        ['btn-run-news-bulletin', 'btn-run-news-bulletin-task'].forEach((id) => {
+            const btn = $(id);
+            if (!btn) {
+                return;
+            }
+            btn.disabled = !!running;
+            if (btn.id === 'btn-run-news-bulletin-task') {
+                btn.textContent = running ? 'Creating…' : 'Create News Video';
+            } else {
+                btn.textContent = running ? 'Creating…' : 'Create news video now';
+            }
+        });
     }
 
     function renderNewsBulletinStatus(bulletin) {
@@ -3861,21 +3892,51 @@
         const taskEl = $('task-news-bulletin-status');
         if (newsEl) newsEl.textContent = text;
         if (taskEl) taskEl.textContent = text;
+        setNewsBulletinButtons(!!bulletin?.isRunning);
     }
 
     async function runNewsBulletin() {
-        const result = await api('/news/bulletins/run', { method: 'POST' });
-        if (result?.created) {
-            toast('News video created.', 'success');
-        } else {
-            toast(result?.skipReason || 'News video skipped.', 'success');
-        }
+        setNewsBulletinButtons(true);
         try {
+            const start = await api('/news/bulletins/run', { method: 'POST' });
+            toast(start?.alreadyRunning
+                ? 'News video is already being created…'
+                : 'Creating news video in the background…', 'info');
+            renderNewsBulletinStatus({ ...(start?.bulletin || {}), isRunning: true });
+            const bulletin = await pollNewsBulletinUntilIdle();
+            if (bulletin?.lastCreated) {
+                toast('News video created.', 'success');
+            } else {
+                toast(bulletin?.lastSkipReason || 'News video finished.', 'success');
+            }
+        } finally {
+            setNewsBulletinButtons(false);
+        }
+    }
+
+    async function pollNewsBulletinUntilIdle() {
+        const deadline = Date.now() + 15 * 60 * 1000;
+        while (Date.now() < deadline) {
             const settings = await api('/news/settings');
             renderNewsBulletinStatus(settings.bulletin);
-        } catch (err) {
-            renderNewsBulletinStatus(result);
+            if (!settings.bulletin?.isRunning) {
+                return settings.bulletin;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 3000));
         }
+        throw new Error('News video is still encoding. Leave this tab open or check status again in a few minutes.');
+    }
+
+    async function cleanupNewsBulletins() {
+        const result = await api('/news/bulletins/cleanup', { method: 'POST' });
+        renderNewsBulletinStatus(result?.bulletin);
+        const removed = (result?.removedWorkFolders || 0)
+            + (result?.removedPartialFiles || 0)
+            + (result?.removedOldVideos || 0)
+            + (result?.removedScratchFiles || 0);
+        toast(removed
+            ? `Removed ${removed} leftover news file${removed === 1 ? '' : 's'}. The current video was kept.`
+            : 'No leftover news jobs or old videos to remove.', 'success');
     }
 
     let catalogCleanupPollTimer = null;
@@ -5497,6 +5558,8 @@
         click('btn-preview-news', () => loadNewsPreview(true).catch((e) => toast(e.message, 'error')));
         click('btn-run-news-bulletin', () => runNewsBulletin().catch((e) => toast(e.message, 'error')));
         click('btn-run-news-bulletin-task', () => runNewsBulletin().catch((e) => toast(e.message, 'error')));
+        click('btn-cleanup-news-bulletin', () => cleanupNewsBulletins().catch((e) => toast(e.message, 'error')));
+        click('btn-cleanup-news-bulletin-task', () => cleanupNewsBulletins().catch((e) => toast(e.message, 'error')));
         change('ebs-display-mode', updateEbsFieldVisibility);
         change('ebs-slate-variant', refreshEbsPreviews);
         change('ebs-audio-mode', updateEbsFieldVisibility);

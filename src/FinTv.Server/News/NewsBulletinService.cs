@@ -20,7 +20,7 @@ public sealed record NewsBulletinRunResult(
 public sealed class NewsBulletinService
 {
     public const int IntervalHours = 6;
-    private const int MaxKeptVideos = 12;
+    private const int MaxKeptVideos = 2;
     private const int MaxTrackedStories = 2000;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -33,6 +33,7 @@ public sealed class NewsBulletinService
     private readonly NewsHeadlineService _headlines;
     private readonly ILogger<NewsBulletinService> _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private int _busy;
 
     public NewsBulletinService(
         IServiceScopeFactory scopes,
@@ -59,9 +60,11 @@ public sealed class NewsBulletinService
         var ledger = LoadLedger();
         var enabled = settings?.BulletinVideosEnabled ?? true;
         var min = ClampMin(settings?.MinNewStories ?? 1);
+        var running = IsRunning;
         return new
         {
             enabled,
+            isRunning = running,
             intervalHours = IntervalHours,
             minNewStories = min,
             nextRunAt = NextSixHourMark(DateTimeOffset.Now),
@@ -70,8 +73,36 @@ public sealed class NewsBulletinService
             lastSkipReason = ledger.LastSkipReason,
             lastVideoPath = ledger.LastVideoPath,
             lastNewStoryCount = ledger.LastNewStoryCount,
-            lastEncodedStoryCount = ledger.LastEncodedStoryCount
+            lastEncodedStoryCount = ledger.LastEncodedStoryCount,
+            leftovers = DescribeLeftovers()
         };
+    }
+
+    public bool IsRunning => Volatile.Read(ref _busy) != 0;
+
+    public bool TryQueue(bool scheduled = false, bool required = false)
+    {
+        if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0)
+        {
+            return false;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await RunAsync(scheduled, required, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "News video run failed");
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _busy, 0);
+            }
+        });
+        return true;
     }
 
     public async Task<NewsBulletinRunResult> RunAsync(bool scheduled, CancellationToken cancellationToken)
@@ -85,8 +116,8 @@ public sealed class NewsBulletinService
             return existing;
         }
 
-        await RunAsync(scheduled: false, required: true, cancellationToken);
-        return ResolvePlayableVideoPath();
+        TryQueue(scheduled: false, required: true);
+        return null;
     }
 
     public string? ResolvePlayableVideoPath()
@@ -103,13 +134,23 @@ public sealed class NewsBulletinService
     private async Task<NewsBulletinRunResult> RunAsync(bool scheduled, bool required, CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken);
+        Interlocked.Exchange(ref _busy, 1);
         try
         {
             return await RunCoreAsync(scheduled, required, cancellationToken);
         }
         finally
         {
+            Interlocked.Exchange(ref _busy, 0);
             _gate.Release();
+            try
+            {
+                SweepFailedAndOld(keepCurrent: ResolvePlayableVideoPath(), keepNew: null);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "News leftover cleanup after a run failed");
+            }
         }
     }
 
@@ -160,15 +201,21 @@ public sealed class NewsBulletinService
         var stagingMp4 = outputMp4 + ".partial";
         var header = string.IsNullOrWhiteSpace(settings.HeaderText) ? "FlowWire News" : settings.HeaderText.Trim();
 
-        var ok = await renderer.RenderBulletinFileAsync(
-            settings,
-            encoded,
-            header,
-            workDir,
-            stagingMp4,
-            cancellationToken);
-
-        TryDeleteDirectory(workDir);
+        var ok = false;
+        try
+        {
+            ok = await renderer.RenderBulletinFileAsync(
+                settings,
+                encoded,
+                header,
+                workDir,
+                stagingMp4,
+                cancellationToken);
+        }
+        finally
+        {
+            TryDeleteDirectory(workDir);
+        }
 
         if (!ok || !IsPlayableVideo(stagingMp4))
         {
@@ -208,7 +255,7 @@ public sealed class NewsBulletinService
         ledger.LastNewStoryCount = newStories.Count;
         ledger.LastEncodedStoryCount = encoded.Count;
         SaveLedger(ledger);
-        PruneOldVideos(Path.Combine(newsRoot, "bulletins"), keepPath: currentVideo, currentPath: outputMp4);
+        SweepFailedAndOld(keepCurrent: currentVideo, keepNew: outputMp4);
 
         _logger.LogInformation(
             "News bulletin created {Path} with {Encoded} of {New} new stories",
@@ -228,7 +275,29 @@ public sealed class NewsBulletinService
         ledger.LastEncodedStoryCount = 0;
         SaveLedger(ledger);
         _logger.LogInformation("News bulletin skipped: {Reason}", reason);
+        SweepFailedAndOld(keepCurrent: ledger.LastVideoPath, keepNew: null);
         return new NewsBulletinRunResult(false, true, ledger.LastVideoPath, newCount, 0, reason, ranAt);
+    }
+
+    public object SweepNow()
+    {
+        var current = ResolvePlayableVideoPath();
+        var result = SweepFailedAndOld(keepCurrent: current, keepNew: null);
+        _logger.LogInformation(
+            "News cleanup removed {Work} work folders, {Partial} partial files, {Old} old videos, {Scratch} scratch files",
+            result.WorkFolders,
+            result.PartialFiles,
+            result.OldVideos,
+            result.ScratchFiles);
+        return new
+        {
+            removedWorkFolders = result.WorkFolders,
+            removedPartialFiles = result.PartialFiles,
+            removedOldVideos = result.OldVideos,
+            removedScratchFiles = result.ScratchFiles,
+            keptVideoPath = current,
+            bulletin = DescribeStatus()
+        };
     }
 
     internal static int ClampMin(int value) => Math.Clamp(value <= 0 ? 1 : value, 1, 30);
@@ -284,60 +353,244 @@ public sealed class NewsBulletinService
         }
 
         return Directory.GetFiles(folder, "news-*.mp4")
-            .Where(IsPlayableVideo)
+            .Where(path => path.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase) && IsPlayableVideo(path))
             .Select(path => new FileInfo(path))
             .OrderByDescending(info => info.LastWriteTimeUtc)
             .Select(info => info.FullName)
             .FirstOrDefault();
     }
 
-    private static void PruneOldVideos(string folder, string? keepPath, string? currentPath)
+    private static object DescribeLeftovers()
     {
-        if (!Directory.Exists(folder))
+        var counts = CountLeftovers();
+        return new
         {
-            return;
+            workFolders = counts.WorkFolders,
+            partialFiles = counts.PartialFiles,
+            extraVideos = counts.OldVideos,
+            scratchFiles = counts.ScratchFiles
+        };
+    }
+
+    private static NewsCleanupCounts CountLeftovers()
+    {
+        var newsRoot = FinTvRuntime.Current?.NewsFolder;
+        if (string.IsNullOrWhiteSpace(newsRoot) || !Directory.Exists(newsRoot))
+        {
+            return new NewsCleanupCounts(0, 0, 0, 0);
+        }
+
+        var bulletinDir = Path.Combine(newsRoot, "bulletins");
+        var work = CountWorkFolders(newsRoot, bulletinDir);
+        var partial = CountPartialFiles(newsRoot, bulletinDir);
+        var videos = ListBulletinVideos(bulletinDir).Count;
+        var extraVideos = Math.Max(0, videos - MaxKeptVideos);
+        var scratch = ScratchPaths(newsRoot).Count(path => File.Exists(path) || Directory.Exists(path));
+        return new NewsCleanupCounts(work, partial, extraVideos, scratch);
+    }
+
+    private static int CountWorkFolders(string newsRoot, string bulletinDir)
+    {
+        var count = 0;
+        if (Directory.Exists(newsRoot))
+        {
+            count += Directory.GetDirectories(newsRoot, "work-*").Length;
+        }
+
+        if (Directory.Exists(bulletinDir))
+        {
+            count += Directory.GetDirectories(bulletinDir, "work-*").Length;
+        }
+
+        return count;
+    }
+
+    private static int CountPartialFiles(string newsRoot, string bulletinDir)
+    {
+        var count = 0;
+        foreach (var dir in new[] { newsRoot, bulletinDir })
+        {
+            if (!Directory.Exists(dir))
+            {
+                continue;
+            }
+
+            count += Directory.GetFiles(dir, "*", SearchOption.TopDirectoryOnly)
+                .Count(path =>
+                {
+                    var name = Path.GetFileName(path);
+                    return name.Contains(".partial", StringComparison.OrdinalIgnoreCase)
+                           || name.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase);
+                });
+        }
+
+        return count;
+    }
+
+    private static List<FileInfo> ListBulletinVideos(string bulletinDir)
+    {
+        if (!Directory.Exists(bulletinDir))
+        {
+            return [];
+        }
+
+        return Directory.GetFiles(bulletinDir, "news-*.mp4")
+            .Where(path => path.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase))
+            .Select(path => new FileInfo(path))
+            .ToList();
+    }
+
+    private NewsCleanupCounts SweepFailedAndOld(string? keepCurrent, string? keepNew)
+    {
+        var newsRoot = FinTvRuntime.Current?.NewsFolder;
+        if (string.IsNullOrWhiteSpace(newsRoot))
+        {
+            return new NewsCleanupCounts(0, 0, 0, 0);
+        }
+
+        Directory.CreateDirectory(newsRoot);
+        var bulletinDir = Path.Combine(newsRoot, "bulletins");
+        Directory.CreateDirectory(bulletinDir);
+
+        // Skip files from a job still encoding so a cleanup click cannot kill the in-progress MP4.
+        var cutoff = IsRunning ? DateTime.UtcNow.AddMinutes(-30) : DateTime.UtcNow.AddMinutes(1);
+        var workFolders = 0;
+        var partialFiles = 0;
+        var oldVideos = 0;
+        var scratchFiles = 0;
+
+        foreach (var dir in Directory.GetDirectories(newsRoot, "work-*")
+                     .Concat(Directory.GetDirectories(bulletinDir, "work-*")))
+        {
+            if (Directory.GetLastWriteTimeUtc(dir) > cutoff)
+            {
+                continue;
+            }
+
+            TryDeleteDirectory(dir);
+            if (!Directory.Exists(dir))
+            {
+                workFolders++;
+            }
+        }
+
+        foreach (var dir in new[] { newsRoot, bulletinDir })
+        {
+            foreach (var file in Directory.GetFiles(dir, "*", SearchOption.TopDirectoryOnly))
+            {
+                var name = Path.GetFileName(file);
+                if (!name.Contains(".partial", StringComparison.OrdinalIgnoreCase)
+                    && !name.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (File.GetLastWriteTimeUtc(file) > cutoff)
+                {
+                    continue;
+                }
+
+                TryDeleteFile(file);
+                if (!File.Exists(file))
+                {
+                    partialFiles++;
+                }
+            }
         }
 
         var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (!string.IsNullOrWhiteSpace(keepPath))
+        if (IsPlayableVideo(keepCurrent))
         {
-            keep.Add(keepPath);
+            keep.Add(keepCurrent!);
         }
 
-        if (!string.IsNullOrWhiteSpace(currentPath))
+        if (IsPlayableVideo(keepNew))
         {
-            keep.Add(currentPath);
+            keep.Add(keepNew!);
         }
 
-        var files = Directory.GetFiles(folder, "news-*.mp4")
-            .Select(path => new FileInfo(path))
-            .Where(info => !info.Name.EndsWith(".partial", StringComparison.OrdinalIgnoreCase))
+        var videos = ListBulletinVideos(bulletinDir)
             .OrderByDescending(info => info.LastWriteTimeUtc)
             .ToList();
         var kept = 0;
-        foreach (var file in files)
+        foreach (var file in videos)
         {
-            if (keep.Contains(file.FullName) || kept < MaxKeptVideos)
+            if (file.Length > 1024 && keep.Contains(file.FullName))
             {
                 kept++;
                 continue;
             }
 
-            try
+            if (file.Length > 1024 && kept < MaxKeptVideos)
             {
-                file.Delete();
+                kept++;
+                continue;
             }
-            catch
+
+            TryDeleteFile(file.FullName);
+            if (!File.Exists(file.FullName))
             {
-                // leave extras if they are in use
+                oldVideos++;
             }
         }
 
-        foreach (var leftover in Directory.GetFiles(folder, "news-*.mp4.partial"))
+        foreach (var path in Directory.Exists(newsRoot)
+                     ? Directory.GetFiles(newsRoot, "news-*.mp4")
+                         .Where(path => path.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase))
+                     : [])
         {
-            TryDeleteFile(leftover);
+            if (keep.Contains(path))
+            {
+                continue;
+            }
+
+            TryDeleteFile(path);
+            if (!File.Exists(path))
+            {
+                oldVideos++;
+            }
         }
+
+        foreach (var path in ScratchPaths(newsRoot))
+        {
+            if (Directory.Exists(path))
+            {
+                TryDeleteDirectory(path);
+                if (!Directory.Exists(path))
+                {
+                    scratchFiles++;
+                }
+            }
+            else if (File.Exists(path))
+            {
+                TryDeleteFile(path);
+                if (!File.Exists(path))
+                {
+                    scratchFiles++;
+                }
+            }
+        }
+
+        var ledger = LoadLedger();
+        if (!string.IsNullOrWhiteSpace(ledger.LastVideoPath) && !File.Exists(ledger.LastVideoPath))
+        {
+            ledger.LastVideoPath = NewestPlayableVideo();
+            SaveLedger(ledger);
+        }
+
+        return new NewsCleanupCounts(workFolders, partialFiles, oldVideos, scratchFiles);
     }
+
+    private static IEnumerable<string> ScratchPaths(string newsRoot)
+    {
+        yield return Path.Combine(newsRoot, "speech.mp3");
+        yield return Path.Combine(newsRoot, "news.ass");
+        yield return Path.Combine(newsRoot, "images");
+        yield return Path.Combine(newsRoot, "tts");
+        yield return Path.Combine(newsRoot, "tts-ai");
+    }
+
+    private sealed record NewsCleanupCounts(int WorkFolders, int PartialFiles, int OldVideos, int ScratchFiles);
 
     private static void TryDeleteFile(string path)
     {

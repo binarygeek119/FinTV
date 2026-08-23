@@ -16,6 +16,15 @@ public sealed class NewsBulletinHostedService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        try
+        {
+            _bulletins.SweepNow();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "News leftover cleanup at startup failed");
+        }
+
         while (!stoppingToken.IsCancellationRequested)
         {
             var next = NewsBulletinService.NextSixHourMark(DateTimeOffset.Now);

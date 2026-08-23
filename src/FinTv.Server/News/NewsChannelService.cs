@@ -57,7 +57,7 @@ public sealed class NewsChannelService
         var videoPath = _bulletins.ResolvePlayableVideoPath();
         if (videoPath is null)
         {
-            _logger.LogInformation("News channel {Channel} has no bulletin yet; encoding one before playback", channel.Name);
+            _logger.LogInformation("News channel {Channel} has no bulletin yet; starting a background encode", channel.Name);
             videoPath = await _bulletins.EnsurePlayableAsync(cancellationToken);
         }
 
