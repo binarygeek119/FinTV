@@ -2749,7 +2749,7 @@
             const names = partial.map((c) => `${c.channelName} (${c.hoursCached}/24)`).join(', ');
             line += ` Partial: ${names}.`;
         } else if (status.completeChannels < status.channelCount) {
-            line += ' Click Generate Weather Guide Cache to fill today's hours from the Weather tab source.';
+            line += " Click Generate Weather Guide Cache to fill today's hours from the Weather tab source.";
         } else {
             line += ' Auto-refreshes at local midnight.';
         }
