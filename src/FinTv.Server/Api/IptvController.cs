@@ -73,6 +73,12 @@ public class IptvController : ControllerBase
             return;
         }
 
+        if (!await _stream.ChannelExistsAsync(id, cancellationToken))
+        {
+            Response.StatusCode = StatusCodes.Status404NotFound;
+            return;
+        }
+
         if (HttpMethods.IsHead(Request.Method))
         {
             Response.StatusCode = StatusCodes.Status200OK;

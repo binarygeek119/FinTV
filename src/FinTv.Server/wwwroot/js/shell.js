@@ -48,7 +48,7 @@
         emergency: 'NOAA watches and warnings on TV, movies, and music',
         ai: 'AI lineup generation and tagging',
         weather: 'WeatherStar live channels',
-        news: 'FlowWire live news',
+        news: 'FlowWire News',
         transcode: 'Hardware encoding for live MPEG-TS streams',
         general: 'Server-wide ChannelFlow-Server settings',
         tasks: 'Rebuild playouts and maintenance',

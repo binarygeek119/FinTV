@@ -26,7 +26,7 @@ public class DatabaseInitializer : IHostedService
         await CatalogSchema.EnsureEpisodesTableAsync(db, cancellationToken);
         await EnsureNewsColumnsAsync(db, cancellationToken);
         await RenameFlowWireChannelAsync(db, cancellationToken);
-        await RemoveBinaryGeek119NewsChannelAsync(db, cancellationToken);
+        await MigrateRetiredNewsChannelAsync(db, cancellationToken);
         await EnsureChannelColumnsAsync(db, cancellationToken);
         await EnsureMediaItemColumnsAsync(db, cancellationToken);
         await EnsureCatalogTablesAsync(db, cancellationToken);
@@ -110,8 +110,10 @@ public class DatabaseInitializer : IHostedService
     {
         var statements = new[]
         {
-            """UPDATE "Channels" SET "Name" = 'FlowWire News' WHERE "Name" IN ('FlowWire', 'ChannelFlow News')""",
-            """UPDATE "NewsSettings" SET "HeaderText" = 'FlowWire News' WHERE "HeaderText" IN ('ChannelFlow News', 'FlowWire', '') OR "HeaderText" IS NULL""",
+            """UPDATE "Channels" SET "Name" = 'FlowWire News' WHERE "Name" IN ('FlowWire', 'ChannelFlow News', 'ChannelFlow', 'FinTV News', 'FinTV', 'FinTV News') OR "Name" ILIKE '%fintv%'""",
+            """UPDATE "NewsSettings" SET "HeaderText" = 'FlowWire News' WHERE "HeaderText" IN ('ChannelFlow News', 'ChannelFlow', 'FlowWire', 'FinTV News', 'FinTV', 'FinTV News', '') OR "HeaderText" IS NULL OR "HeaderText" ILIKE '%fintv%' OR "HeaderText" ILIKE '%channelflow%'""",
+            """UPDATE "NewsSettings" SET "IntroText" = REGEXP_REPLACE("IntroText", 'fin[[:space:]]*tv([[:space:]]+news)?', 'FlowWire News', 'gi') WHERE "IntroText" ~* 'fintv|fin[[:space:]]*tv|channelflow'""",
+            """UPDATE "NewsSettings" SET "OutroText" = REGEXP_REPLACE("OutroText", 'fin[[:space:]]*tv([[:space:]]+news)?', 'FlowWire News', 'gi') WHERE "OutroText" ~* 'fintv|fin[[:space:]]*tv|channelflow'""",
             """UPDATE "NewsSettings" SET "IntroText" = REPLACE("IntroText", 'ChannelFlow News', 'FlowWire News') WHERE "IntroText" LIKE '%ChannelFlow News%'""",
             """UPDATE "NewsSettings" SET "OutroText" = REPLACE("OutroText", 'ChannelFlow News', 'FlowWire News') WHERE "OutroText" LIKE '%ChannelFlow News%'"""
         };
@@ -133,78 +135,44 @@ public class DatabaseInitializer : IHostedService
         }
     }
 
-    private async Task RemoveBinaryGeek119NewsChannelAsync(FinTvDbContext db, CancellationToken cancellationToken)
+    private async Task MigrateRetiredNewsChannelAsync(FinTvDbContext db, CancellationToken cancellationToken)
     {
-        List<Guid> ids;
+        List<Domain.Channel> channels;
         try
         {
-            var channels = await db.Channels
-                .AsNoTracking()
-                .Select(c => new { c.Id, c.Name, c.FilterJson })
-                .ToListAsync(cancellationToken);
-
-            ids = channels
-                .Where(c => string.Equals(c.Name, "BinaryGeek119 News", StringComparison.OrdinalIgnoreCase)
-                    || Domain.FilterDefinition.PresetIdsEqual(
-                        Domain.ChannelAiRules.ExtractLibraryTag(c.FilterJson),
-                        "channelflow-news"))
-                .Select(c => c.Id)
-                .ToList();
+            channels = await db.Channels.ToListAsync(cancellationToken);
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "BinaryGeek119 News lookup skipped");
+            _logger.LogDebug(ex, "Retired news channel lookup skipped");
             return;
         }
 
-        foreach (var id in ids)
+        var changed = 0;
+        foreach (var channel in channels)
         {
-            try
+            var tag = Domain.ChannelAiRules.ExtractLibraryTag(channel.FilterJson);
+            var retiredName = string.Equals(channel.Name, "BinaryGeek119 News", StringComparison.OrdinalIgnoreCase);
+            var retiredTag = Domain.FilterDefinition.PresetIdsEqual(tag, "channelflow-news");
+            if (!retiredName && !retiredTag)
             {
-                await db.PlayoutItems.Where(p => p.ChannelId == id).ExecuteDeleteAsync(cancellationToken);
-                await db.PlayoutHistory.Where(p => p.ChannelId == id).ExecuteDeleteAsync(cancellationToken);
-
-                var specialIds = await db.SpecialPresentations
-                    .Where(s => s.ChannelId == id)
-                    .Select(s => s.Id)
-                    .ToListAsync(cancellationToken);
-                if (specialIds.Count > 0)
-                {
-                    await db.SpecialPresentationCandidates
-                        .Where(c => specialIds.Contains(c.SpecialPresentationId))
-                        .ExecuteDeleteAsync(cancellationToken);
-                    await db.SpecialPresentations.Where(s => s.ChannelId == id).ExecuteDeleteAsync(cancellationToken);
-                }
-
-                var lineupIds = await db.Lineups
-                    .Where(l => l.ChannelId == id)
-                    .Select(l => l.Id)
-                    .ToListAsync(cancellationToken);
-                var overrideIds = await db.LineupOverrides
-                    .Where(o => o.ChannelId == id)
-                    .Select(o => o.Id)
-                    .ToListAsync(cancellationToken);
-                var slotIds = await db.LineupSlots
-                    .Where(s =>
-                        (s.LineupId != null && lineupIds.Contains(s.LineupId.Value))
-                        || (s.LineupOverrideId != null && overrideIds.Contains(s.LineupOverrideId.Value)))
-                    .Select(s => s.Id)
-                    .ToListAsync(cancellationToken);
-                if (slotIds.Count > 0)
-                {
-                    await db.SlotCandidates.Where(c => slotIds.Contains(c.LineupSlotId)).ExecuteDeleteAsync(cancellationToken);
-                    await db.LineupSlots.Where(s => slotIds.Contains(s.Id)).ExecuteDeleteAsync(cancellationToken);
-                }
-
-                await db.LineupOverrides.Where(o => o.ChannelId == id).ExecuteDeleteAsync(cancellationToken);
-                await db.Lineups.Where(l => l.ChannelId == id).ExecuteDeleteAsync(cancellationToken);
-                await db.Channels.Where(c => c.Id == id).ExecuteDeleteAsync(cancellationToken);
-                _logger.LogInformation("Removed BinaryGeek119 News channel {ChannelId}", id);
+                continue;
             }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to remove BinaryGeek119 News channel {ChannelId}", id);
-            }
+
+            channel.Name = "FlowWire News";
+            channel.ContentType = Domain.ChannelContentType.News;
+            var filter = Domain.FilterDefinition.Parse(channel.FilterJson) ?? new Domain.FilterDefinition();
+            filter.PresetId = "channelflow-live-news";
+            channel.FilterJson = Domain.FinTvJson.Serialize(filter);
+            changed++;
+            _logger.LogInformation(
+                "Kept news channel {ChannelId} and migrated it to FlowWire News so existing IPTV URLs keep working",
+                channel.Id);
+        }
+
+        if (changed > 0)
+        {
+            await db.SaveChangesAsync(cancellationToken);
         }
     }
 

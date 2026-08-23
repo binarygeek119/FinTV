@@ -14,7 +14,7 @@ public sealed class NewsBulletinTask : IScheduledTask
         _logger = logger;
     }
 
-    public string Name => "ChannelFlow News Video";
+    public string Name => "FlowWire News Video";
 
     public string Key => "ChannelFlowNewsBulletin";
 

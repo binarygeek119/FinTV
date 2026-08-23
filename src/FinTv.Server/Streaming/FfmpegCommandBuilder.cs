@@ -22,9 +22,6 @@ public class FfmpegCommandBuilder
     {
         var (width, height) = GetResolution(channel);
         var context = CreateEncodingContext(width, height, inputPath);
-        var vf = _encoding.AdaptVideoFilterForEncoder(
-            BuildVideoFilterChain(channel, width, height, bugImagePath, overlayHeadline, alertTickerPath),
-            context.Encoder);
 
         var args = new List<string>
         {
@@ -37,9 +34,9 @@ public class FfmpegCommandBuilder
         {
             "-ss", startSeconds.ToString("F3", CultureInfo.InvariantCulture),
             "-t", durationSeconds.ToString("F3", CultureInfo.InvariantCulture),
-            "-i", inputPath,
-            "-vf", vf
+            "-i", inputPath
         });
+        AppendMediaVideoGraph(args, context, channel, width, height, bugImagePath, overlayHeadline, alertTickerPath);
         AppendVideoEncoderArgs(args, context);
         args.AddRange(new[]
         {
@@ -64,9 +61,6 @@ public class FfmpegCommandBuilder
     {
         var (width, height) = GetResolution(channel);
         var context = CreateEncodingContext(width, height, inputPath);
-        var vf = _encoding.AdaptVideoFilterForEncoder(
-            BuildVideoFilterChain(channel, width, height, bugImagePath, overlayHeadline: null, alertTickerPath: null),
-            context.Encoder);
         var isRemoteInput = inputPath.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
             || inputPath.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
 
@@ -96,9 +90,9 @@ public class FfmpegCommandBuilder
         {
             "-ss", startSeconds.ToString("F3", CultureInfo.InvariantCulture),
             "-t", durationSeconds.ToString("F3", CultureInfo.InvariantCulture),
-            "-i", inputPath,
-            "-vf", vf
+            "-i", inputPath
         });
+        AppendMediaVideoGraph(args, context, channel, width, height, bugImagePath, overlayHeadline: null, alertTickerPath: null);
         AppendVideoEncoderArgs(args, context);
         args.AddRange(new[]
         {
@@ -583,11 +577,64 @@ public class FfmpegCommandBuilder
         args.AddRange(_encoding.GetVideoEncoderArguments(stillImage));
     }
 
-    private static string BuildVideoFilterChain(
+    private void AppendMediaVideoGraph(
+        List<string> args,
+        EncodingContext context,
         Channel channel,
         int width,
         int height,
         string? bugImagePath,
+        string? overlayHeadline,
+        string? alertTickerPath)
+    {
+        var linear = BuildLinearVideoFilters(channel, width, height, overlayHeadline, alertTickerPath);
+        var bug = ResolveBugFile(channel, bugImagePath);
+        if (string.IsNullOrWhiteSpace(bug))
+        {
+            args.Add("-vf");
+            args.Add(_encoding.AdaptVideoFilterForEncoder(linear, context.Encoder));
+            return;
+        }
+
+        var bugWidth = Math.Clamp(width / 8, 140, 260);
+        var position = GetBugOverlay(channel, width, height);
+        var graph =
+            $"[0:v]{linear}[base];" +
+            $"[1:v]format=rgba,scale={bugWidth}:-1:force_original_aspect_ratio=decrease[bug];" +
+            $"[base][bug]overlay={position}:format=auto:eof_action=repeat:repeatlast=1[vout]";
+
+        args.AddRange(
+        [
+            "-loop", "1",
+            "-framerate", "30",
+            "-i", bug,
+            "-filter_complex", _encoding.AdaptFilterComplexForEncoder(graph, context.Encoder),
+            "-map", "[vout]",
+            "-map", "0:a?",
+            "-shortest"
+        ]);
+    }
+
+    private static string? ResolveBugFile(Channel channel, string? bugImagePath)
+    {
+        if (channel.BugPlacement == BugPlacementMode.None)
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(bugImagePath) && File.Exists(bugImagePath))
+        {
+            return bugImagePath;
+        }
+
+        var resolved = ResolveBugPath(channel);
+        return !string.IsNullOrWhiteSpace(resolved) && File.Exists(resolved) ? resolved : null;
+    }
+
+    private static string BuildLinearVideoFilters(
+        Channel channel,
+        int width,
+        int height,
         string? overlayHeadline,
         string? alertTickerPath)
     {
@@ -602,31 +649,12 @@ public class FfmpegCommandBuilder
             filters.Add("format=yuv420p,geq=lum='if(not(mod(Y,4)),lum(X,Y)*0.82,lum(X,Y))'");
         }
 
-        var newsOverlay = PastTenseNewsCatalog.IsPastTenseNewsChannel(channel);
-        if (newsOverlay)
+        if (PastTenseNewsCatalog.IsPastTenseNewsChannel(channel))
         {
             AppendPastTenseNewsOverlay(filters, width, height, overlayHeadline);
         }
 
         AppendWeatherAlertTicker(filters, height, alertTickerPath);
-
-        var bug = channel.BugPlacement == BugPlacementMode.None
-            ? null
-            : (!string.IsNullOrWhiteSpace(bugImagePath) && File.Exists(bugImagePath)
-                ? bugImagePath
-                : ResolveBugPath(channel));
-        if (!string.IsNullOrWhiteSpace(bug) && File.Exists(bug))
-        {
-            var overlay = GetBugOverlay(channel, width, height);
-            if (newsOverlay || HasAlertTicker(alertTickerPath))
-            {
-                return $"{string.Join(',', filters)}[v];movie={EscapeMovie(bug)}[bug];[v][bug]overlay={overlay}";
-            }
-
-            filters.Add($"movie={EscapeMovie(bug)}[bug];[in][bug]overlay={overlay}[out]");
-            return string.Join(',', filters).Replace("[in]", "[0:v]").Replace("[out]", string.Empty);
-        }
-
         return string.Join(',', filters);
     }
 
@@ -691,7 +719,8 @@ public class FfmpegCommandBuilder
 
         if (!string.IsNullOrWhiteSpace(logoPath) && File.Exists(logoPath))
         {
-            baseFilter += $";{current}[2:v]scale=160:-1[logo];[tmpv][logo]overlay=W-w-40:40[vout]";
+            var logoInput = current == "[tmpv]" ? "2:v" : "1:v";
+            baseFilter += $";{current}[{logoInput}]format=rgba,scale=160:-1[logo];{current}[logo]overlay=W-w-40:40:format=auto[vout]";
         }
         else
         {
@@ -764,8 +793,6 @@ public class FfmpegCommandBuilder
 
         return null;
     }
-
-    private static string EscapeMovie(string path) => path.Replace("\\", "/").Replace(":", "\\:");
 
     private static string EscapeFilterPath(string path)
         => path.Replace('\\', '/').Replace(":", "\\:").Replace("'", "\\'");

@@ -15,6 +15,17 @@ public class PluginConfiguration
 
     public int PlayoutDaysToBuild { get; set; } = 14;
 
+    /// <summary>
+    /// Seconds to keep a channel encoder running after the last viewer disconnects.
+    /// 0 stops immediately. Maximum is 3600 (one hour).
+    /// </summary>
+    public int StreamIdleTimeoutSeconds { get; set; } = 30;
+
+    public const int MaxStreamIdleTimeoutSeconds = 3600;
+
+    public static int ClampStreamIdleTimeoutSeconds(int value) =>
+        Math.Clamp(value, 0, MaxStreamIdleTimeoutSeconds);
+
     public int HistoryDaysToConsider { get; set; } = 7;
 
     [JsonPropertyName("publicBaseUrl")]
@@ -128,6 +139,16 @@ public class TranscodeSettings
     /// VAAPI render node, typically <c>/dev/dri/renderD128</c>. Empty means follow <c>FFMPEG_VAAPI_DEVICE</c>.
     /// </summary>
     public string? VaapiDevice { get; set; }
+
+    /// <summary>
+    /// Seconds ffmpeg may encode ahead of wall clock so tuners have a buffer.
+    /// 0 paces at real time. Maximum is 120.
+    /// </summary>
+    public int RunAheadSeconds { get; set; } = 15;
+
+    public const int MaxRunAheadSeconds = 120;
+
+    public static int ClampRunAheadSeconds(int value) => Math.Clamp(value, 0, MaxRunAheadSeconds);
 }
 
 public class Ws4kpDockerSettings : IWeatherStarDockerSettings

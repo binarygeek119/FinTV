@@ -150,7 +150,7 @@ public sealed class WeatherStarDockerService
             Running = true,
             HttpReachable = true,
             HttpListeningInsideSidecar = true,
-            StatusMessage = "Native WeatherStar compositor (no Chromium).",
+            StatusMessage = "Native WeatherStar compositor.",
             ContainerName = variant == WeatherStarDockerVariant.Ws4kp ? "ws4kp" : "ws3kp",
             Image = "native",
             HostPort = port,

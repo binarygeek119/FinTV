@@ -248,7 +248,14 @@ public class ChannelPresetService
             return;
         }
 
-        channel.WeatherLocationQuery ??= WeatherStarChannelService.ResolveDefaultLocationQuery();
+        if (string.IsNullOrWhiteSpace(channel.WeatherLocationQuery))
+        {
+            var fallback = WeatherStarChannelService.ResolveDefaultLocationQuery();
+            if (!string.IsNullOrWhiteSpace(fallback))
+            {
+                channel.WeatherLocationQuery = fallback;
+            }
+        }
     }
 
     private async Task BuildWeatherPlayoutAsync(Channel channel, CancellationToken cancellationToken)

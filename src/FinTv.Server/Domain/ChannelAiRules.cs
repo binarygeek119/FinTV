@@ -434,7 +434,8 @@ public static class ChannelAiRules
     /// Library tags excluded from the AI lineup tab and bulk generate.
     /// </summary>
     public static bool IsExcludedFromAi(string? libraryTag)
-        => FilterDefinition.PresetIdsEqual(libraryTag, "channelflow-news");
+        => FilterDefinition.PresetIdsEqual(libraryTag, "channelflow-news")
+            || FilterDefinition.PresetIdsEqual(libraryTag, "channelflow-live-news");
 
     /// <summary>
     /// Optional max official rating from a preset filter (for example OpenSwim TV-PG).

@@ -56,12 +56,19 @@ public class LineupGeneratorService
             _db.PlayoutItems.RemoveRange(existing);
         }
 
+        var snapshot = await _lineupService.LoadResolutionSnapshotAsync(channel.Id, cancellationToken);
+        var slotsByDate = new Dictionary<DateOnly, IReadOnlyList<LineupSlot>>();
         var cursor = startUtc;
         while (cursor < endUtc)
         {
             var local = TimeZoneInfo.ConvertTimeFromUtc(cursor, tz);
             var date = DateOnly.FromDateTime(local);
-            var slots = await _lineupService.ResolveSlotsForDateAsync(channel.Id, date, cancellationToken);
+            if (!slotsByDate.TryGetValue(date, out var slots))
+            {
+                slots = _lineupService.ResolveSlotsForDate(snapshot, date);
+                slotsByDate[date] = slots;
+            }
+
             var slotIndex = (local.Hour * 60 + local.Minute) / 30;
 
             if (IsSlotConsumedByEarlierSpan(slots, slotIndex))

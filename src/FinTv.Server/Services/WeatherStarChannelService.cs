@@ -10,7 +10,7 @@ public class WeatherStarChannelService
 {
     public const string DefaultWeatherStarBaseUrl = "http://127.0.0.1:8080";
 
-    public const string DefaultWeatherLocationQuery = "50317, Des Moines, IA, USA";
+    public const string DefaultWeatherLocationQuery = "";
 
     public const string DefaultWeatherStarPermalinkQuery =
         "hazards=true&current-weather=true&latest-observations=true&hourly=true&hourly-graph=true&travel=true&regional-forecast=true&local-forecast=true&extended-forecast=true&almanac=true&spc-outlook=true&radar=true&stickyKiosk=true&customTextEnable=false&speed=1.00&viewMode=standard&units=us&customText=&mediaVolume=0.75&wide=false&portrait=false&enhanced=false&scanLines=false";
@@ -19,7 +19,7 @@ public class WeatherStarChannelService
     {
         var configured = FinTvRuntime.Current?.Configuration.WeatherDefaultLocationQuery;
         return string.IsNullOrWhiteSpace(configured)
-            ? DefaultWeatherLocationQuery
+            ? string.Empty
             : configured.Trim();
     }
 

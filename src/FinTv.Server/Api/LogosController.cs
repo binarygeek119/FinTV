@@ -229,14 +229,13 @@ public class LogosController : ControllerBase
         [FromServices] HolidayChannelService holidays,
         CancellationToken cancellationToken)
     {
-        var channel = await channels.GetByIdAsync(channelId, cancellationToken);
+        var channel = await channels.GetHeaderAsync(channelId, cancellationToken);
         if (channel?.LogoSetId is null)
         {
             return NotFound();
         }
 
-        var sets = await _logoSets.GetAllAsync(cancellationToken);
-        var set = sets.FirstOrDefault(s => s.Id == channel.LogoSetId);
+        var set = await _logoSets.GetByIdAsync(channel.LogoSetId.Value, cancellationToken);
         if (set is null)
         {
             return NotFound();

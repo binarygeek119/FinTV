@@ -236,32 +236,60 @@ public class LineupService
         return true;
     }
 
-    public async Task<IReadOnlyList<LineupSlot>> ResolveSlotsForDateAsync(Guid channelId, DateOnly date, CancellationToken cancellationToken = default)
+    public async Task<LineupResolutionSnapshot> LoadResolutionSnapshotAsync(
+        Guid channelId,
+        CancellationToken cancellationToken = default)
     {
-        var channel = await _db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
-        if (channel?.IsContinuousLive == true)
+        var live = await _db.Channels.AsNoTracking()
+            .Where(c => c.Id == channelId)
+            .Select(c => (bool?)(c.ContentType == ChannelContentType.Weather || c.ContentType == ChannelContentType.News))
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (live is null)
+        {
+            return LineupResolutionSnapshot.Empty;
+        }
+
+        if (live.Value)
+        {
+            return LineupResolutionSnapshot.ContinuousLive;
+        }
+
+        var overrides = await GetOverridesAsync(channelId, cancellationToken);
+        var defaultLineup = await _db.Lineups
+            .AsNoTracking()
+            .Include(l => l.Slots.OrderBy(s => s.SlotIndex))
+                .ThenInclude(s => s.Candidates.OrderBy(c => c.SortOrder))
+            .FirstOrDefaultAsync(l => l.ChannelId == channelId && l.IsDefault, cancellationToken);
+        var presentations = await _specialPresentations.GetForChannelAsync(channelId, cancellationToken);
+        return new LineupResolutionSnapshot(false, defaultLineup, overrides, presentations);
+    }
+
+    public IReadOnlyList<LineupSlot> ResolveSlotsForDate(LineupResolutionSnapshot snapshot, DateOnly date)
+    {
+        if (snapshot.IsContinuousLive)
         {
             return WeatherLineupHelper.CreateDailySlots();
         }
 
-        var overrides = await GetOverridesAsync(channelId, cancellationToken);
-        var match = overrides.FirstOrDefault(o =>
+        var match = snapshot.Overrides.FirstOrDefault(o =>
             (o.Kind == LineupOverrideKind.SpecificDate && o.SpecificDate == date)
             || (o.Kind == LineupOverrideKind.DayOfWeek && o.DayOfWeek == date.DayOfWeek));
 
-        IReadOnlyList<LineupSlot> baseSlots;
-        if (match is not null)
-        {
-            baseSlots = match.Slots.OrderBy(s => s.SlotIndex).ToList();
-        }
-        else
-        {
-            var defaultLineup = await GetDefaultLineupAsync(channelId, cancellationToken);
-            baseSlots = defaultLineup?.Slots.OrderBy(s => s.SlotIndex).ToList() ?? new List<LineupSlot>();
-        }
+        IReadOnlyList<LineupSlot> baseSlots = match is not null
+            ? match.Slots.OrderBy(s => s.SlotIndex).ToList()
+            : snapshot.DefaultLineup?.Slots.OrderBy(s => s.SlotIndex).ToList() ?? new List<LineupSlot>();
 
-        var presentations = await _specialPresentations.GetForChannelAsync(channelId, cancellationToken);
-        return _specialPresentations.MergeIntoSlots(baseSlots, presentations, date.DayOfWeek);
+        return _specialPresentations.MergeIntoSlots(baseSlots, snapshot.Presentations, date.DayOfWeek);
+    }
+
+    public async Task<IReadOnlyList<LineupSlot>> ResolveSlotsForDateAsync(
+        Guid channelId,
+        DateOnly date,
+        CancellationToken cancellationToken = default)
+    {
+        var snapshot = await LoadResolutionSnapshotAsync(channelId, cancellationToken);
+        return ResolveSlotsForDate(snapshot, date);
     }
 
     private async Task EnsureNotWeatherChannelAsync(Guid channelId, CancellationToken cancellationToken)
@@ -293,6 +321,33 @@ public class LineupService
             }).ToList()
         };
     }
+}
+
+public sealed class LineupResolutionSnapshot
+{
+    public static readonly LineupResolutionSnapshot Empty = new(false, null, [], []);
+
+    public static readonly LineupResolutionSnapshot ContinuousLive = new(true, null, [], []);
+
+    public LineupResolutionSnapshot(
+        bool isContinuousLive,
+        Lineup? defaultLineup,
+        IReadOnlyList<LineupOverride> overrides,
+        IReadOnlyList<SpecialPresentation> presentations)
+    {
+        IsContinuousLive = isContinuousLive;
+        DefaultLineup = defaultLineup;
+        Overrides = overrides;
+        Presentations = presentations;
+    }
+
+    public bool IsContinuousLive { get; }
+
+    public Lineup? DefaultLineup { get; }
+
+    public IReadOnlyList<LineupOverride> Overrides { get; }
+
+    public IReadOnlyList<SpecialPresentation> Presentations { get; }
 }
 
 public class LineupSlotDto

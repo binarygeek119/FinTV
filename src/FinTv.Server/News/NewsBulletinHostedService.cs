@@ -25,13 +25,34 @@ public sealed class NewsBulletinHostedService : BackgroundService
             _logger.LogWarning(ex, "News leftover cleanup at startup failed");
         }
 
+        try
+        {
+            if (_bulletins.ShouldRetryFailedEncode())
+            {
+                _logger.LogInformation("Retrying news video after the last FFmpeg failure");
+                var retry = await _bulletins.RunAsync(scheduled: false, required: true, stoppingToken);
+                if (retry.Created)
+                {
+                    _logger.LogInformation("Retry news video written to {Path}", retry.Path);
+                }
+                else
+                {
+                    _logger.LogWarning("Retry news video failed: {Reason}", retry.SkipReason);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "News video retry at startup failed");
+        }
+
         while (!stoppingToken.IsCancellationRequested)
         {
             var next = NewsBulletinService.NextSixHourMark(DateTimeOffset.Now);
             var delay = next - DateTimeOffset.Now;
-            if (delay < TimeSpan.FromSeconds(5))
+            if (delay < TimeSpan.Zero)
             {
-                delay = TimeSpan.FromHours(NewsBulletinService.IntervalHours);
+                delay = TimeSpan.Zero;
             }
 
             _logger.LogInformation("Next news video at {When} (in {Delay})", next, delay);

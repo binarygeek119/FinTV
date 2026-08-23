@@ -64,8 +64,9 @@ public class WeatherController : ControllerBase
             weatherStarAutoWideForSixteenNine = config?.WeatherStarAutoWideForSixteenNine ?? true,
             weatherMusicLibraryId = config?.WeatherMusicLibraryId,
             weatherMusicLibraryName = config?.WeatherMusicLibraryName,
-            weatherDefaultLocationQuery = config?.WeatherDefaultLocationQuery
-                ?? WeatherStarChannelService.ResolveDefaultLocationQuery(),
+            weatherDefaultLocationQuery = string.IsNullOrWhiteSpace(config?.WeatherDefaultLocationQuery)
+                ? string.Empty
+                : config.WeatherDefaultLocationQuery.Trim(),
             weatherAlertOverlayMode = WeatherAlertOverlayService.FormatMode(
                 WeatherAlertOverlayService.ParseMode(config?.WeatherAlertOverlayMode)),
             weatherAlertCutInIntervalMinutes = Math.Clamp(config?.WeatherAlertCutInIntervalMinutes ?? 15, 1, 180),
@@ -127,13 +128,20 @@ public class WeatherController : ControllerBase
         var defaultLocation = request.DefaultLocation ?? request.DefaultZip;
         if (defaultLocation is not null)
         {
-            try
+            if (string.IsNullOrWhiteSpace(defaultLocation))
             {
-                plugin.Configuration.WeatherDefaultLocationQuery = WeatherLocationParser.NormalizeLocation(defaultLocation);
+                plugin.Configuration.WeatherDefaultLocationQuery = null;
             }
-            catch (ArgumentException ex)
+            else
             {
-                return BadRequest(new { message = ex.Message });
+                try
+                {
+                    plugin.Configuration.WeatherDefaultLocationQuery = WeatherLocationParser.NormalizeLocation(defaultLocation);
+                }
+                catch (ArgumentException ex)
+                {
+                    return BadRequest(new { message = ex.Message });
+                }
             }
         }
 

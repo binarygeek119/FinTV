@@ -29,6 +29,7 @@ public class GeneralController : ControllerBase
                 debugLogging = config.DebugLogging,
                 scheduleTimeZone,
                 playoutDaysToBuild = config.PlayoutDaysToBuild,
+                streamIdleTimeoutSeconds = PluginConfiguration.ClampStreamIdleTimeoutSeconds(config.StreamIdleTimeoutSeconds),
                 publicBaseUrl = config.PublicBaseUrl
                     ?? ReverseProxyHosting.NormalizePublicBaseUrl(AppEnvironment.Get("PUBLIC_URL"))
                     ?? string.Empty,
@@ -105,6 +106,12 @@ public class GeneralController : ControllerBase
                 plugin.Configuration.PlayoutDaysToBuild = Math.Clamp(request.PlayoutDaysToBuild.Value, 1, 14);
             }
 
+            if (request.StreamIdleTimeoutSeconds.HasValue)
+            {
+                plugin.Configuration.StreamIdleTimeoutSeconds =
+                    PluginConfiguration.ClampStreamIdleTimeoutSeconds(request.StreamIdleTimeoutSeconds.Value);
+            }
+
             if (request.PublicBaseUrl is not null)
             {
                 plugin.Configuration.PublicBaseUrl = ReverseProxyHosting.NormalizePublicBaseUrl(request.PublicBaseUrl);
@@ -135,6 +142,8 @@ public class GeneralController : ControllerBase
                 debugLogging = plugin.Configuration.DebugLogging,
                 scheduleTimeZone = plugin.Configuration.ScheduleTimeZone,
                 playoutDaysToBuild = plugin.Configuration.PlayoutDaysToBuild,
+                streamIdleTimeoutSeconds = PluginConfiguration.ClampStreamIdleTimeoutSeconds(
+                    plugin.Configuration.StreamIdleTimeoutSeconds),
                 publicBaseUrl = plugin.Configuration.PublicBaseUrl ?? string.Empty,
                 apiKey = PluginApiKey.Resolve() ?? string.Empty
             });
@@ -165,6 +174,11 @@ public class GeneralSettingsRequest
     /// Gets or sets how many days of playout to build (1-14).
     /// </summary>
     public int? PlayoutDaysToBuild { get; set; }
+
+    /// <summary>
+    /// Seconds to keep encoding after the last viewer disconnects (0–3600).
+    /// </summary>
+    public int? StreamIdleTimeoutSeconds { get; set; }
 
     /// <summary>
     /// Public origin for M3U/XMLTV when reverse-proxied (https://channelflow.example.com).

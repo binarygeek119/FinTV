@@ -72,7 +72,7 @@ public sealed class NewsChannelService
         }
 
         var args = _ffmpeg.BuildMediaCommand(channel, videoPath, 0, duration, bugImagePath: null);
-        var exit = await RunFfmpegAsync(args, output, cancellationToken);
+        var (exit, _) = await RunFfmpegAsync(args, output, cancellationToken);
         if (exit != 0 && !cancellationToken.IsCancellationRequested)
         {
             _logger.LogWarning("News bulletin playback exited {Code} for {Channel}", exit, channel.Name);
@@ -86,7 +86,7 @@ public sealed class NewsChannelService
         await RunFfmpegAsync(args, output, cancellationToken);
     }
 
-    public async Task<bool> RenderBulletinFileAsync(
+    public async Task<(bool Ok, string? Error)> RenderBulletinFileAsync(
         NewsSettings settings,
         IReadOnlyList<NewsArticle> articles,
         string header,
@@ -100,7 +100,7 @@ public sealed class NewsChannelService
         const int height = 720;
         var presentation = await BuildPresentationAsync(
             settings,
-            header,
+            NewsShowWriter.ResolveShowName(header),
             articles,
             workDir,
             width,
@@ -110,17 +110,22 @@ public sealed class NewsChannelService
 
         var args = BuildAssEncodeArgs(width, height, presentation);
         AppendMux(args, presentation.Timeline.TotalSeconds, mpegts: false, filePath: outputMp4);
-        var exit = await RunFfmpegAsync(args, output: null, cancellationToken);
+        var (exit, stderr) = await RunFfmpegAsync(args, output: null, cancellationToken);
         if (exit != 0 && !cancellationToken.IsCancellationRequested)
         {
             _logger.LogWarning("News bulletin ASS encode exited {Code}; using drawtext fallback", exit);
             TryDeleteFile(outputMp4);
             var fallback = BuildDrawtextArgs(width, height, presentation);
             AppendMux(fallback, presentation.Timeline.TotalSeconds, mpegts: false, filePath: outputMp4);
-            exit = await RunFfmpegAsync(fallback, output: null, cancellationToken);
+            (exit, stderr) = await RunFfmpegAsync(fallback, output: null, cancellationToken);
         }
 
-        return exit == 0 && IsFinishedVideo(outputMp4);
+        if (exit == 0 && IsFinishedVideo(outputMp4))
+        {
+            return (true, null);
+        }
+
+        return (false, SummarizeFfmpegError(exit, stderr));
     }
 
     private async Task<NewsPresentation> BuildPresentationAsync(
@@ -183,12 +188,22 @@ public sealed class NewsChannelService
     private List<string> BuildAssEncodeArgs(int width, int height, NewsPresentation presentation)
     {
         var assFilter = NewsAssBuilder.EscapeAssFilterPath(presentation.AssPath);
-        return BuildEncodeArgs(
-            width,
-            height,
-            presentation,
-            $"ass='{assFilter}'");
+        var enable = StoryEnable(presentation.Timeline);
+        var filter =
+            $"drawbox=x=0:y=ih-176:w=iw:h=80:color=0xe11d48@0.92:t=fill:enable='{enable}'," +
+            $"drawbox=x=0:y=ih-88:w=iw:h=88:color=0x111827@0.94:t=fill:enable='{enable}'," +
+            $"ass='{assFilter}'";
+        var fontsDir = ResolveFontsDir();
+        if (fontsDir is not null)
+        {
+            filter += $":fontsdir='{NewsAssBuilder.EscapeAssFilterPath(fontsDir)}'";
+        }
+
+        return BuildEncodeArgs(width, height, presentation, filter);
     }
+
+    private static string StoryEnable(NewsTimeline timeline)
+        => $"gte(t\\,{Fmt(timeline.IntroSeconds)})*lt(t\\,{Fmt(timeline.OutroStart)})";
 
     private List<string> BuildEncodeArgs(
         int width,
@@ -202,17 +217,18 @@ public sealed class NewsChannelService
             "-hide_banner", "-loglevel", "warning", "-y"
         };
         args.AddRange(["-f", "lavfi", "-i", $"color=c=0x101010:s={width}x{height}:r=30"]);
+        var clipSeconds = Fmt(Math.Max(1, presentation.Timeline.TotalSeconds));
         var nextIndex = 1;
         foreach (var image in presentation.ImageWindows)
         {
-            args.AddRange(["-loop", "1", "-framerate", "30", "-i", image.Path]);
+            args.AddRange(["-loop", "1", "-framerate", "30", "-t", clipSeconds, "-i", image.Path]);
             nextIndex++;
         }
 
         int? logoIndex = null;
         if (timeline.ShowLogo)
         {
-            args.AddRange(["-loop", "1", "-framerate", "30", "-i", timeline.LogoPath!]);
+            args.AddRange(["-loop", "1", "-framerate", "30", "-t", clipSeconds, "-i", timeline.LogoPath!]);
             logoIndex = nextIndex++;
         }
 
@@ -442,7 +458,10 @@ public sealed class NewsChannelService
         }
     }
 
-    private async Task<int> RunFfmpegAsync(IReadOnlyList<string> args, Stream? output, CancellationToken cancellationToken)
+    private async Task<(int ExitCode, string Stderr)> RunFfmpegAsync(
+        IReadOnlyList<string> args,
+        Stream? output,
+        CancellationToken cancellationToken)
     {
         var stderr = new System.Text.StringBuilder();
         var command = Cli.Wrap(_ffmpegLocator.EncoderPath)
@@ -455,12 +474,52 @@ public sealed class NewsChannelService
         }
 
         var result = await command.ExecuteAsync(cancellationToken);
+        var error = stderr.ToString().Trim();
         if (result.ExitCode != 0 && !cancellationToken.IsCancellationRequested)
         {
-            _logger.LogWarning("News ffmpeg exited {Code}: {Error}", result.ExitCode, stderr.ToString().Trim());
+            _logger.LogWarning("News ffmpeg exited {Code}: {Error}", result.ExitCode, error);
         }
 
-        return result.ExitCode;
+        return (result.ExitCode, error);
+    }
+
+    private static string? ResolveFontsDir()
+    {
+        foreach (var dir in new[]
+        {
+            "/usr/share/fonts/truetype/liberation",
+            "/usr/share/fonts/truetype/dejavu",
+            "/usr/share/fonts"
+        })
+        {
+            if (Directory.Exists(dir))
+            {
+                return dir;
+            }
+        }
+
+        return null;
+    }
+
+    private static string SummarizeFfmpegError(int exitCode, string stderr)
+    {
+        var line = stderr
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .LastOrDefault(text =>
+                text.Length > 0
+                && !text.StartsWith("frame=", StringComparison.OrdinalIgnoreCase)
+                && !text.Contains("Past duration", StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return "exit code " + exitCode.ToString(CultureInfo.InvariantCulture) + ".";
+        }
+
+        if (line.Length > 220)
+        {
+            line = line[..217] + "...";
+        }
+
+        return line;
     }
 
     private List<string> BuildDrawtextArgs(int width, int height, NewsPresentation presentation)
@@ -470,23 +529,25 @@ public sealed class NewsChannelService
         var ticker = SpokenTicker(presentation.Beats, presentation.Articles);
         File.WriteAllText(tickerPath, ticker);
         var tickerFilter = NewsAssBuilder.EscapeAssFilterPath(tickerPath);
-        var intro = presentation.Timeline.IntroSeconds;
-        var outroStart = presentation.Timeline.OutroStart;
-        var storyEnable = $"gte(t\\,{Fmt(intro)})*lt(t\\,{Fmt(outroStart)})";
+        var storyEnable = StoryEnable(presentation.Timeline);
+        var headline = EscapeDraw(FirstHeadline(presentation) ?? presentation.Header);
         var vf =
-            $"drawbox=x=0:y=0:w=iw:h=90:color=0xe11d48@0.92:t=fill:enable='{storyEnable}'," +
-            $"drawtext=text='{EscapeDraw(presentation.Header)}':fontcolor=white:fontsize=36:x=40:y=28:enable='{storyEnable}'," +
-            $"drawbox=x=0:y=h-80:w=iw:h=80:color=0x202020@0.92:t=fill:enable='{storyEnable}'," +
-            $"drawtext=textfile='{tickerFilter}':fontcolor=white:fontsize=26:x=w-mod(t*70\\,w+text_w):y=h-52:enable='{storyEnable}'";
+            $"drawbox=x=0:y=h-176:w=iw:h=80:color=0xe11d48@0.92:t=fill:enable='{storyEnable}'," +
+            $"drawtext=text='{headline}':fontcolor=white:fontsize=32:x=(w-text_w)/2:y=h-160:enable='{storyEnable}'," +
+            $"drawbox=x=0:y=h-88:w=iw:h=88:color=0x111827@0.94:t=fill:enable='{storyEnable}'," +
+            $"drawtext=textfile='{tickerFilter}':fontcolor=white:fontsize=24:x=w-mod(t*90\\,w+text_w):y=h-58:enable='{storyEnable}'";
 
         return BuildEncodeArgs(width, height, presentation, vf);
     }
+
+    private static string? FirstHeadline(NewsPresentation presentation)
+        => presentation.Beats.FirstOrDefault(beat => beat.ShowOnScreen && !string.IsNullOrWhiteSpace(beat.Title))?.Title;
 
     private static string SpokenTicker(IReadOnlyList<NewsStoryBeat> beats, IReadOnlyList<NewsArticle> articles)
     {
         var parts = beats
             .Where(beat => beat.ShowOnScreen)
-            .Select(beat => string.IsNullOrWhiteSpace(beat.Body) ? beat.Title : beat.Title + ". " + beat.Body)
+            .Select(beat => string.IsNullOrWhiteSpace(beat.Body) ? beat.Title : beat.Body)
             .Where(text => !string.IsNullOrWhiteSpace(text))
             .ToList();
         if (parts.Count > 0)
@@ -585,7 +646,7 @@ public sealed class NewsChannelService
                 }
 
                 var bytes = await response.Content.ReadAsByteArrayAsync(timeoutCts.Token);
-                if (bytes.Length < 32 || bytes.Length > 8_000_000)
+                if (bytes.Length < 32 || bytes.Length > 8_000_000 || !LooksLikeImage(bytes))
                 {
                     return null;
                 }
@@ -671,6 +732,43 @@ public sealed class NewsChannelService
         }
 
         return ".jpg";
+    }
+
+    private static bool LooksLikeImage(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length < 12)
+        {
+            return false;
+        }
+
+        if (bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF)
+        {
+            return true;
+        }
+
+        if (bytes[0] == 0x89 && bytes[1] == (byte)'P' && bytes[2] == (byte)'N' && bytes[3] == (byte)'G')
+        {
+            return true;
+        }
+
+        if (bytes[0] == (byte)'G' && bytes[1] == (byte)'I' && bytes[2] == (byte)'F')
+        {
+            return true;
+        }
+
+        if (bytes[0] == (byte)'B' && bytes[1] == (byte)'M')
+        {
+            return true;
+        }
+
+        return bytes[0] == (byte)'R'
+            && bytes[1] == (byte)'I'
+            && bytes[2] == (byte)'F'
+            && bytes[3] == (byte)'F'
+            && bytes[8] == (byte)'W'
+            && bytes[9] == (byte)'E'
+            && bytes[10] == (byte)'B'
+            && bytes[11] == (byte)'P';
     }
 
     private string? ResolveNewsMusicPath(NewsSettings settings)
@@ -845,12 +943,12 @@ public sealed class NewsChannelService
     {
         if (!string.IsNullOrWhiteSpace(settings.IntroText))
         {
-            return settings.IntroText.Trim();
+            return NewsShowWriter.SanitizeSpokenBrand(settings.IntroText.Trim());
         }
 
         if (!string.IsNullOrWhiteSpace(show.Intro))
         {
-            return show.Intro.Trim();
+            return NewsShowWriter.SanitizeSpokenBrand(show.Intro.Trim());
         }
 
         return NewsShowWriter.DefaultIntro(header);
@@ -860,12 +958,12 @@ public sealed class NewsChannelService
     {
         if (!string.IsNullOrWhiteSpace(settings.OutroText))
         {
-            return settings.OutroText.Trim();
+            return NewsShowWriter.SanitizeSpokenBrand(settings.OutroText.Trim());
         }
 
         if (!string.IsNullOrWhiteSpace(show.Outro))
         {
-            return show.Outro.Trim();
+            return NewsShowWriter.SanitizeSpokenBrand(show.Outro.Trim());
         }
 
         return NewsShowWriter.DefaultOutro(header);

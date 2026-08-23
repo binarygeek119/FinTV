@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text;
 using CliWrap;
+using FinTv.Configuration;
 using FinTv.Data;
 using FinTv.Domain;
 using FinTv.News;
@@ -11,14 +12,16 @@ using Microsoft.Extensions.Logging;
 
 namespace FinTv.Services;
 
-public class StreamService
+public class StreamService : IDisposable
 {
     private readonly ConcurrentDictionary<Guid, int> _activeStreams = new();
+    private readonly ConcurrentDictionary<Guid, ChannelLiveSession> _liveSessions = new();
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly FfmpegCommandBuilder _ffmpeg;
     private readonly WeatherAlertOverlayService _weatherAlerts;
     private readonly ILogger<StreamService> _logger;
     private readonly IFfmpegLocator _mediaEncoder;
+    private int _disposed;
 
     public StreamService(
         IServiceScopeFactory scopeFactory,
@@ -34,9 +37,72 @@ public class StreamService
         _mediaEncoder = mediaEncoder;
     }
 
+    internal static int GetIdleTimeoutSeconds()
+    {
+        var configured = FinTvRuntime.Current?.Configuration.StreamIdleTimeoutSeconds ?? 30;
+        return PluginConfiguration.ClampStreamIdleTimeoutSeconds(configured);
+    }
+
+    internal static int GetRunAheadSeconds()
+    {
+        var configured = FinTvRuntime.Current?.Configuration.Transcode?.RunAheadSeconds ?? 15;
+        return TranscodeSettings.ClampRunAheadSeconds(configured);
+    }
+
+    internal const int RunAheadBytesPerSecond = 600_000;
+
+    internal static int GetRunAheadRingBytes()
+    {
+        var seconds = Math.Max(1, GetRunAheadSeconds());
+        return seconds * RunAheadBytesPerSecond;
+    }
+
     public async Task StreamChannelAsync(Guid channelId, Stream output, CancellationToken cancellationToken)
     {
         using var streamLease = TrackStream(channelId);
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var session = _liveSessions.GetOrAdd(channelId, CreateLiveSession);
+            if (await session.AttachViewerAsync(output, cancellationToken))
+            {
+                return;
+            }
+
+            _liveSessions.TryRemove(new KeyValuePair<Guid, ChannelLiveSession>(channelId, session));
+        }
+    }
+
+    public async Task<bool> ChannelExistsAsync(Guid channelId, CancellationToken cancellationToken = default)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
+        return await db.Channels.AsNoTracking().AnyAsync(c => c.Id == channelId, cancellationToken);
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
+        foreach (var session in _liveSessions.Values.ToArray())
+        {
+            session.ForceStop();
+        }
+    }
+
+    private ChannelLiveSession CreateLiveSession(Guid channelId)
+    {
+        return new ChannelLiveSession(
+            channelId,
+            (output, token) => EncodeChannelAsync(channelId, output, token),
+            session => _liveSessions.TryRemove(new KeyValuePair<Guid, ChannelLiveSession>(channelId, session)),
+            _logger);
+    }
+
+    private async Task EncodeChannelAsync(Guid channelId, Stream output, CancellationToken cancellationToken)
+    {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
         var catalog = scope.ServiceProvider.GetRequiredService<JellyfinCatalogService>();
@@ -48,6 +114,7 @@ public class StreamService
         var channel = await db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
         if (channel is null)
         {
+            _logger.LogWarning("IPTV stream requested for missing channel {ChannelId}", channelId);
             throw new InvalidOperationException("Channel not found.");
         }
 

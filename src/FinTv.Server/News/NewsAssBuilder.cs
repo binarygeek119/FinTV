@@ -37,46 +37,30 @@ public static class NewsAssBuilder
 
             var start = FormatAssTime(beat.StartSeconds);
             var stop = FormatAssTime(beat.EndSeconds);
-            if (!string.IsNullOrWhiteSpace(beat.ImagePath))
+            if (!string.IsNullOrWhiteSpace(beat.Title))
             {
-                if (!string.IsNullOrWhiteSpace(beat.Title))
-                {
-                    events.Append("Dialogue: 0,")
-                        .Append(start).Append(',').Append(stop)
-                        .Append(",Caption,,0,0,0,,")
-                        .Append(@"{\b1}").Append(Escape(beat.Title)).AppendLine(@"{\b0}");
-                }
-
-                continue;
+                events.Append("Dialogue: 0,")
+                    .Append(start).Append(',').Append(stop)
+                    .Append(",Headline,,0,0,0,,")
+                    .Append(@"{\b1}").Append(Escape(beat.Title)).AppendLine(@"{\b0}");
             }
 
-            var wrapped = BuildSpokenBlock(beat.Title, beat.Body, width);
-            var lineCount = wrapped.Split("\\N", StringSplitOptions.None).Length;
-            var shouldScroll = lineCount > 7;
-            string text;
-            if (shouldScroll)
+            var caption = CaptionLine(beat.Body, beat.Title);
+            if (!string.IsNullOrWhiteSpace(caption)
+                && !string.Equals(caption, beat.Title.Trim(), StringComparison.OrdinalIgnoreCase))
             {
-                var blockHeight = lineCount * 36 + 40;
-                var y1 = playY + 20;
-                var y2 = 70 - blockHeight;
-                var x = playX / 2;
-                text = $"{{\\move({x},{y1},{x},{y2})}}" + wrapped;
+                events.Append("Dialogue: 1,")
+                    .Append(start).Append(',').Append(stop)
+                    .Append(",Caption,,0,0,0,,")
+                    .Append(BuildCaptionCrawl(caption, playX, playY))
+                    .AppendLine();
             }
-            else
-            {
-                text = wrapped;
-            }
-
-            events.Append("Dialogue: 0,")
-                .Append(start).Append(',').Append(stop)
-                .Append(shouldScroll ? ",Scroll,,0,0,0,," : ",Story,,0,0,0,,")
-                .AppendLine(text);
         }
 
         if (!string.IsNullOrWhiteSpace(presenter))
         {
             var presenterEnd = presenterEndSeconds ?? (beats.Count == 0 ? 1 : beats[^1].EndSeconds);
-            events.Append("Dialogue: 1,")
+            events.Append("Dialogue: 2,")
                 .Append(FormatAssTime(presenterStartSeconds)).Append(',')
                 .Append(FormatAssTime(presenterEnd))
                 .Append(",Presenter,,0,0,0,,")
@@ -87,7 +71,7 @@ public static class NewsAssBuilder
         if (events.Length == 0)
         {
             events.Append("Dialogue: 0,0:00:00.00,").Append(end)
-                .AppendLine(",Story,,0,0,0,,{\\b1}Add RSS feeds on the News tab.");
+                .AppendLine(",Headline,,0,0,0,,{\\b1}Add RSS feeds on the News tab.");
         }
 
         var sb = new StringBuilder();
@@ -100,10 +84,9 @@ public static class NewsAssBuilder
         sb.AppendLine();
         sb.AppendLine("[V4+ Styles]");
         sb.AppendLine("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding");
-        sb.AppendLine("Style: Story, Arial, 28, &H00FFFFFF, &H000000FF, &H00000000, &H80000000, 0, 0, 0, 0, 100, 100, 0, 0, 1, 2, 0, 5, 48, 48, 40, 1");
-        sb.AppendLine("Style: Scroll, Arial, 28, &H00FFFFFF, &H000000FF, &H00000000, &H80000000, 0, 0, 0, 0, 100, 100, 0, 0, 1, 2, 0, 8, 48, 48, 36, 1");
-        sb.AppendLine("Style: Caption, Arial, 26, &H00FFFFFF, &H000000FF, &H00000000, &H80000000, 0, 0, 0, 0, 100, 100, 0, 0, 1, 2, 1, 2, 36, 36, 28, 1");
-        sb.AppendLine("Style: Presenter, Arial, 18, &H00FFFFFF, &H000000FF, &H00000000, &H80000000, 0, 0, 0, 0, 100, 100, 0, 0, 1, 2, 1, 1, 36, 36, 24, 1");
+        sb.AppendLine("Style: Headline, Liberation Sans, 32, &H00FFFFFF, &H000000FF, &H00000000, &H80000000, 0, 0, 0, 0, 100, 100, 0, 0, 1, 2, 0, 2, 36, 36, 108, 1");
+        sb.AppendLine("Style: Caption, Liberation Sans, 24, &H00FFFFFF, &H000000FF, &H00000000, &H80000000, 0, 0, 0, 0, 100, 100, 0, 0, 1, 2, 0, 7, 0, 0, 0, 1");
+        sb.AppendLine("Style: Presenter, Liberation Sans, 18, &H00FFFFFF, &H000000FF, &H00000000, &H80000000, 0, 0, 0, 0, 100, 100, 0, 0, 1, 2, 0, 9, 24, 24, 16, 1");
         sb.AppendLine();
         sb.AppendLine("[Events]");
         sb.AppendLine("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text");
@@ -114,63 +97,22 @@ public static class NewsAssBuilder
     public static string EscapeAssFilterPath(string path)
         => path.Replace('\\', '/').Replace(":", "\\:").Replace("'", "\\'");
 
-    private static string BuildSpokenBlock(string title, string body, int width)
+    private static string CaptionLine(string body, string title)
     {
-        var maxChars = width > 700 ? 44 : 30;
-        var sb = new StringBuilder();
-        if (!string.IsNullOrWhiteSpace(title))
-        {
-            sb.Append(@"{\b1\c&HFFFFFF&}").Append(Escape(title)).Append(@"{\b0}");
-        }
-
-        if (!string.IsNullOrWhiteSpace(body))
-        {
-            if (sb.Length > 0)
-            {
-                sb.Append(@"\N\N");
-            }
-
-            sb.Append(@"{\c&HCCCCCC&}");
-            var first = true;
-            foreach (var line in Wrap(body, maxChars))
-            {
-                if (!first)
-                {
-                    sb.Append(@"\N");
-                }
-
-                sb.Append(Escape(line));
-                first = false;
-            }
-        }
-
-        return sb.Length == 0 ? @"{\b1}FlowWire News" : sb.ToString();
+        var text = string.IsNullOrWhiteSpace(body) ? title : body;
+        return string.IsNullOrWhiteSpace(text)
+            ? string.Empty
+            : string.Join(' ', text.Split([' ', '\r', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries));
     }
 
-    private static IEnumerable<string> Wrap(string text, int maxChars)
+    private static string BuildCaptionCrawl(string text, int playX, int playY)
     {
-        var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        var line = new StringBuilder();
-        foreach (var word in words)
-        {
-            if (line.Length > 0 && line.Length + 1 + word.Length > maxChars)
-            {
-                yield return line.ToString();
-                line.Clear();
-            }
-
-            if (line.Length > 0)
-            {
-                line.Append(' ');
-            }
-
-            line.Append(word);
-        }
-
-        if (line.Length > 0)
-        {
-            yield return line.ToString();
-        }
+        var line = Escape(text);
+        var width = Math.Max(playX, line.Length * 14);
+        var y = Math.Max(24, playY - 54);
+        var x1 = playX + 48;
+        var x2 = -width;
+        return $"{{\\move({x1},{y},{x2},{y})}}" + line;
     }
 
     private static string Escape(string text)

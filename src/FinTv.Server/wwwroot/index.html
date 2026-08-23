@@ -734,7 +734,7 @@
             <section id="tab-weather" class="tab-panel hidden" hidden>
                 <div class="card section-card">
                     <h3>WeatherStar live channels</h3>
-                    <p class="hint">Weather channels are a native MPEG-TS loop (Star fonts and screens). No Chromium. The look below switches live WeatherStar 4000 channels to 3000. A WeatherStar3000 preset channel always uses 3000. Location can be a US ZIP, a city, or latitude,longitude.</p>
+                    <p class="hint">Weather channels are a native MPEG-TS loop (Star fonts and screens). The look below switches live WeatherStar 4000 channels to 3000. A WeatherStar3000 preset channel always uses 3000. Location can be a US ZIP, a city, or latitude,longitude.</p>
                     <div id="weather-renderer-status" class="status-card"></div>
                     <label class="field">
                         <span>WeatherStar look</span>
@@ -882,6 +882,11 @@
                         </select>
                     </label>
                     <p class="hint">Auto picks <code>h264_vaapi</code>, <code>h264_nvenc</code>, or <code>libx264</code> from the acceleration setting. If the VAAPI device is missing, ChannelFlow falls back to software encode.</p>
+                    <label class="field">
+                        <span>Run-ahead buffer (seconds)</span>
+                        <input id="transcode-runahead" type="number" min="0" max="120" step="1" value="15" class="emby-input">
+                    </label>
+                    <p class="hint">Lets ffmpeg encode ahead of the tuner and hold that video so a network hitch does not freeze the picture. New tuners also start from this buffer. 0 stays live (real time). 15–30 is typical. Maximum is 120.</p>
                     <div class="actions">
                         <button type="button" id="btn-save-transcode" class="raised button-submit emby-button">Save Transcode Settings</button>
                         <button type="button" id="btn-test-transcode" class="emby-button">Test Encode</button>
@@ -919,6 +924,11 @@
                         <span>Playout days to build (1–14)</span>
                         <input id="general-playout-days" type="number" min="1" max="14" step="1" class="emby-input">
                     </label>
+                    <label class="field">
+                        <span>Keep stream running after last viewer (seconds)</span>
+                        <input id="general-stream-idle-timeout" type="number" min="0" max="3600" step="1" class="emby-input">
+                    </label>
+                    <p class="hint">After nobody is watching, ffmpeg keeps running for this many seconds so a returning viewer does not wait for a new encode. 0 stops immediately. Maximum is 3600 (one hour).</p>
                     <label class="field">
                         <span>Public base URL</span>
                         <input id="general-public-url" type="text" class="emby-input" placeholder="https://channelflow.example.duckdns.org" autocomplete="off" spellcheck="false" inputmode="url">
@@ -1051,8 +1061,8 @@
         
             <section id="tab-news" class="tab-panel hidden" hidden>
                 <div class="card section-card">
-                    <div class="section-header"><h3>FlowWire</h3></div>
-                    <p class="hint">Apply the <strong>FlowWire</strong> preset (or set a channel to content type News). ChannelFlow-Server fetches RSS, scrolls headlines with an ASS overlay, shows story photos when the feed includes them, and optionally reads them with TTS. Intro music plays with the channel logo before Catherine speaks; after her sign-off, outro audio plays with the logo again.</p>
+                    <div class="section-header"><h3>FlowWire News</h3></div>
+                    <p class="hint">Apply the <strong>FlowWire News</strong> preset (or set a channel to content type News). ChannelFlow-Server fetches RSS, scrolls headlines with an ASS overlay, shows story photos when the feed includes them, and optionally reads them with TTS. Intro music plays with the channel logo before Catherine speaks; after her sign-off, outro audio plays with the logo again.</p>
                     <label class="field"><span>Header text</span><input id="news-header" type="text" class="emby-input" placeholder="FlowWire News"></label>
                     <label class="field"><span>Article count</span><input id="news-count" type="number" min="1" max="30" value="8" class="emby-input"></label>
                     <label class="field"><span>Refresh interval (minutes)</span><input id="news-refresh" type="number" min="2" max="120" value="10" class="emby-input"></label>
@@ -1084,7 +1094,7 @@
                     </label>
                     <p class="hint">AI TTS uses the provider, API key, and <strong>AI voice</strong> on the AI tab. If AI speech fails, ChannelFlow falls back to Google TTS.</p>
                     <label class="field checkbox-field"><input id="news-ai-rewrite" type="checkbox"><span class="channelflow-check-box"></span><span>AI rewrite as one news show</span></label>
-                    <p class="hint">Uses the AI tab provider to merge RSS into a single newscast presented by FlowWire anchor <strong>Catherine Wolfe</strong>, dropping duplicate coverage of the same event. Custom anchor intro/outro still override her open and sign-off if you fill them in.</p>
+                    <p class="hint">Uses the AI tab provider to merge RSS into a single newscast presented by FlowWire News anchor <strong>Catherine Wolfe</strong>, dropping duplicate coverage of the same event. Custom anchor intro/outro still override her open and sign-off if you fill them in. She will call the show FlowWire News, not FinTV News.</p>
                     <label class="field checkbox-field"><input id="news-show-header" type="checkbox" checked><span class="channelflow-check-box"></span><span>Show header on screen</span></label>
                     <label class="field checkbox-field"><input id="news-headlines-only" type="checkbox"><span class="channelflow-check-box"></span><span>Read headlines only (skip descriptions)</span></label>
                     <label class="field checkbox-field"><input id="news-no-music" type="checkbox"><span class="channelflow-check-box"></span><span>Play no music at all</span></label>

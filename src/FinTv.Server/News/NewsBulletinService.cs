@@ -108,6 +108,41 @@ public sealed class NewsBulletinService
     public async Task<NewsBulletinRunResult> RunAsync(bool scheduled, CancellationToken cancellationToken)
         => await RunAsync(scheduled, required: false, cancellationToken);
 
+    public async Task<NewsBulletinRunResult> RunAsync(bool scheduled, bool required, CancellationToken cancellationToken)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        Interlocked.Exchange(ref _busy, 1);
+        try
+        {
+            return await RunCoreAsync(scheduled, required, cancellationToken);
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _busy, 0);
+            _gate.Release();
+            try
+            {
+                SweepFailedAndOld(keepCurrent: ResolvePlayableVideoPath(), keepNew: null);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "News leftover cleanup after a run failed");
+            }
+        }
+    }
+
+    public bool ShouldRetryFailedEncode()
+    {
+        if (ResolvePlayableVideoPath() is not null)
+        {
+            return false;
+        }
+
+        var reason = LoadLedger().LastSkipReason;
+        return !string.IsNullOrWhiteSpace(reason)
+            && reason.Contains("FFmpeg", StringComparison.OrdinalIgnoreCase);
+    }
+
     public async Task<string?> EnsurePlayableAsync(CancellationToken cancellationToken)
     {
         var existing = ResolvePlayableVideoPath();
@@ -129,29 +164,6 @@ public sealed class NewsBulletinService
         }
 
         return NewestPlayableVideo();
-    }
-
-    private async Task<NewsBulletinRunResult> RunAsync(bool scheduled, bool required, CancellationToken cancellationToken)
-    {
-        await _gate.WaitAsync(cancellationToken);
-        Interlocked.Exchange(ref _busy, 1);
-        try
-        {
-            return await RunCoreAsync(scheduled, required, cancellationToken);
-        }
-        finally
-        {
-            Interlocked.Exchange(ref _busy, 0);
-            _gate.Release();
-            try
-            {
-                SweepFailedAndOld(keepCurrent: ResolvePlayableVideoPath(), keepNew: null);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "News leftover cleanup after a run failed");
-            }
-        }
     }
 
     private async Task<NewsBulletinRunResult> RunCoreAsync(bool scheduled, bool required, CancellationToken cancellationToken)
@@ -199,12 +211,13 @@ public sealed class NewsBulletinService
         var workDir = Path.Combine(newsRoot, "bulletins", "work-" + stamp);
         var outputMp4 = Path.Combine(newsRoot, "bulletins", $"news-{stamp}.mp4");
         var stagingMp4 = outputMp4 + ".partial";
-        var header = string.IsNullOrWhiteSpace(settings.HeaderText) ? "FlowWire News" : settings.HeaderText.Trim();
+        var header = NewsShowWriter.ResolveShowName(settings.HeaderText);
 
         var ok = false;
+        string? encodeError = null;
         try
         {
-            ok = await renderer.RenderBulletinFileAsync(
+            (ok, encodeError) = await renderer.RenderBulletinFileAsync(
                 settings,
                 encoded,
                 header,
@@ -220,7 +233,10 @@ public sealed class NewsBulletinService
         if (!ok || !IsFinishedVideo(stagingMp4))
         {
             TryDeleteFile(stagingMp4);
-            return SaveSkip(ledger, ranAt, "FFmpeg failed to create the news video.", encoded.Count);
+            var reason = string.IsNullOrWhiteSpace(encodeError)
+                ? "FFmpeg failed to create the news video."
+                : "FFmpeg failed to create the news video. " + encodeError;
+            return SaveSkip(ledger, ranAt, reason, encoded.Count);
         }
 
         try

@@ -1545,7 +1545,7 @@
             const location = channel?.weatherLocationQuery;
             const coords = location && String(location).trim()
                 ? String(location).trim()
-                : '50317, Des Moines, IA, USA';
+                : 'not set';
 
             if (hint) {
                 hint.textContent = 'Weather channels use 24 one-hour Local Weather blocks that play back-to-back all day.';
@@ -3392,7 +3392,7 @@
         const source = status?.weatherSource === 'us' ? 'United States (NOAA)'
             : status?.weatherSource === 'world' ? 'World (Open-Meteo)'
             : 'Auto (NOAA in the US, Open-Meteo worldwide)';
-        el.innerHTML = `<div>${escapeHtml(label)} native live stream</div><div class="meta">${escapeHtml(source)} · live MPEG-TS uses this look</div>`;
+        el.innerHTML = `<div>${escapeHtml(label)} native live stream</div><div class="meta">${escapeHtml(source)}</div>`;
         const variantSelect = $('weather-star-variant');
         if (variantSelect) {
             variantSelect.value = variant;
@@ -3631,8 +3631,8 @@
         const musicSelect = $('weather-music-library');
         const selected = musicSelect?.selectedOptions?.[0];
         try {
-            const defaultRaw = $('weather-default-zip')?.value.trim();
-            const defaultLocation = defaultRaw ? readWeatherLocation(defaultRaw, 'Default location') : null;
+            const defaultRaw = $('weather-default-zip')?.value.trim() || '';
+            const defaultLocation = defaultRaw ? readWeatherLocation(defaultRaw, 'Default location') : '';
             const channelZips = Array.from(qa('.weather-channel-zip'))
                 .filter((input) => (input.value || '').trim().length >= 2)
                 .map((input) => ({
@@ -4197,6 +4197,10 @@
         if (settings.environment) {
             lines.push(`Container default: ${settings.environment.hardwareAcceleration || 'none'} / ${settings.environment.videoEncoder || 'libx264'}`);
         }
+        const runAhead = Number(settings.runAheadSeconds ?? 15);
+        lines.push(runAhead > 0
+            ? `Run-ahead buffer: ${runAhead}s`
+            : 'Run-ahead buffer: off (real time)');
         el.textContent = lines.join('\n');
     }
 
@@ -4220,6 +4224,9 @@
             if ($('transcode-vaapi-device')) {
                 $('transcode-vaapi-device').value = settings.vaapiDevice || '/dev/dri/renderD128';
             }
+            if ($('transcode-runahead')) {
+                $('transcode-runahead').value = String(settings.runAheadSeconds ?? 15);
+            }
             renderTranscodeStatus(settings);
             syncTranscodeUi();
         } catch (err) {
@@ -4233,7 +4240,8 @@
             body: JSON.stringify({
                 hardwareAcceleration: $('transcode-hwaccel')?.value || 'none',
                 videoEncoder: $('transcode-encoder')?.value || 'auto',
-                vaapiDevice: ($('transcode-vaapi-device')?.value || '').trim()
+                vaapiDevice: ($('transcode-vaapi-device')?.value || '').trim(),
+                runAheadSeconds: Number($('transcode-runahead')?.value || '15')
             })
         });
         toast('Transcode settings saved. New streams use these settings immediately.', 'success');
@@ -4246,6 +4254,9 @@
         }
         if ($('transcode-vaapi-device')) {
             $('transcode-vaapi-device').value = saved.vaapiDevice || '/dev/dri/renderD128';
+        }
+        if ($('transcode-runahead')) {
+            $('transcode-runahead').value = String(saved.runAheadSeconds ?? 15);
         }
         syncTranscodeUi();
         const result = $('transcode-test-result');
@@ -4327,6 +4338,9 @@
             if ($('general-playout-days')) {
                 $('general-playout-days').value = String(settings.playoutDaysToBuild ?? 14);
             }
+            if ($('general-stream-idle-timeout')) {
+                $('general-stream-idle-timeout').value = String(settings.streamIdleTimeoutSeconds ?? 30);
+            }
             if ($('general-public-url')) {
                 $('general-public-url').value = settings.publicBaseUrl || '';
             }
@@ -4351,6 +4365,7 @@
                     debugLogging: !!$('general-debug-logging')?.checked,
                     scheduleTimeZone: $('general-schedule-tz')?.value || 'America/New_York',
                     playoutDaysToBuild: Number($('general-playout-days')?.value || '14'),
+                    streamIdleTimeoutSeconds: Number($('general-stream-idle-timeout')?.value || '30'),
                     publicBaseUrl: ($('general-public-url')?.value || '').trim(),
                     apiKey: ($('general-api-key')?.value || '').trim() || null
                 })
@@ -5243,7 +5258,7 @@
         emergency: 'NOAA watches and warnings on TV, movies, and music',
         ai: 'AI lineup generation and tagging',
         weather: 'WeatherStar live channels',
-        news: 'FlowWire live news',
+        news: 'FlowWire News',
         transcode: 'Hardware encoding for live MPEG-TS streams',
         general: 'Server-wide ChannelFlow-Server settings',
         tasks: 'Rebuild playouts and maintenance',

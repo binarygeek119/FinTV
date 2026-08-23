@@ -335,7 +335,7 @@ public class NewsController : ControllerBase
             ?? new NewsSettings();
         return Ok(new
         {
-            settings.HeaderText,
+            HeaderText = NewsShowWriter.ResolveShowName(settings.HeaderText),
             settings.ArticleCount,
             settings.TtsEnabled,
             settings.TtsEngine,
@@ -365,9 +365,7 @@ public class NewsController : ControllerBase
             _db.NewsSettings.Add(row);
         }
 
-        row.HeaderText = string.IsNullOrWhiteSpace(settings.HeaderText)
-            ? "FlowWire News"
-            : settings.HeaderText.Trim();
+        row.HeaderText = NewsShowWriter.ResolveShowName(settings.HeaderText);
         row.ArticleCount = Math.Clamp(settings.ArticleCount, 1, 30);
         row.TtsEnabled = settings.TtsEnabled;
         row.TtsEngine = string.Equals(settings.TtsEngine?.Trim(), "ai", StringComparison.OrdinalIgnoreCase)

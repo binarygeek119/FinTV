@@ -67,6 +67,11 @@ public class TranscodeController : ControllerBase
                 plugin.Configuration.Transcode.VaapiDevice = string.IsNullOrWhiteSpace(request.VaapiDevice)
                     ? null
                     : request.VaapiDevice.Trim();
+                if (request.RunAheadSeconds.HasValue)
+                {
+                    plugin.Configuration.Transcode.RunAheadSeconds =
+                        TranscodeSettings.ClampRunAheadSeconds(request.RunAheadSeconds.Value);
+                }
             }
 
             plugin.SaveConfiguration();
@@ -135,6 +140,7 @@ public class TranscodeController : ControllerBase
                 : _encoding.EnvironmentHardwareAcceleration,
             videoEncoder = string.IsNullOrWhiteSpace(saved.VideoEncoder) ? "auto" : saved.VideoEncoder,
             vaapiDevice = FirstNonEmpty(saved.VaapiDevice, status.VaapiDevice, _encoding.EnvironmentVaapiDevice),
+            runAheadSeconds = TranscodeSettings.ClampRunAheadSeconds(saved.RunAheadSeconds),
             effectiveEncoder = status.Encoder,
             useVaapi = status.UseVaapi,
             vaapiRequested = status.VaapiRequested,
@@ -181,6 +187,8 @@ public class TranscodeSettingsRequest
     public string? VideoEncoder { get; set; }
 
     public string? VaapiDevice { get; set; }
+
+    public int? RunAheadSeconds { get; set; }
 
     public bool? ResetToEnvironment { get; set; }
 }

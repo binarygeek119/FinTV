@@ -33,6 +33,14 @@ public class ChannelService
                 .ThenInclude(o => o.Slots)
                 .ThenInclude(s => s.Candidates)
             .Include(c => c.LogoSet)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
+    }
+
+    public async Task<Channel?> GetHeaderAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        return await _db.Channels
+            .AsNoTracking()
             .FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
     }
 
