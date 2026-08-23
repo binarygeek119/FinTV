@@ -21,7 +21,8 @@ public sealed class WeatherStarCompositor
         int height,
         bool scanlines,
         int radarIndex,
-        int screenRepeat = 0)
+        int screenRepeat = 0,
+        TimeSpan elapsed = default)
     {
         using var surface = SKSurface.Create(new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Premul));
         var canvas = surface.Canvas;
@@ -35,7 +36,9 @@ public sealed class WeatherStarCompositor
         }
 
         var font = _assets.Font(skin);
-        var large = _assets.Font(skin, large: true);
+        var large = _assets.Font(skin, StarFontFace.Large);
+        var extended = _assets.Font(skin, StarFontFace.Extended);
+        var small = _assets.Font(skin, StarFontFace.Small);
         using var white = new SKPaint { Color = SKColors.White, IsAntialias = true };
         using var yellow = new SKPaint { Color = new SKColor(0xFF, 0xE1, 0x4A), IsAntialias = true };
 
@@ -45,34 +48,31 @@ public sealed class WeatherStarCompositor
         }
         else if (screen != WeatherStarScreen.Hazards)
         {
-            var originX = ContentOriginX(width);
-            DrawText(canvas, snap.Place.DisplayName.ToUpperInvariant(), font, 16, originX + 10, BaselineBelow(font, 16, 8), yellow);
-            DrawText(canvas, PlaceNow(snap).ToString("h:mm tt", CultureInfo.InvariantCulture), font, 16, originX + 585, BaselineBelow(font, 16, 8), white, SKTextAlign.Right);
-            DrawText(canvas, Title(screen), font, 24, originX + 170, BaselineBelow(font, 24, 36), white);
+            DrawHeader(canvas, snap, screen, font, small, width, white, yellow);
         }
 
         switch (screen)
         {
             case WeatherStarScreen.Current:
-                DrawCurrent(canvas, snap, font, large, width, white, yellow);
+                DrawCurrent(canvas, snap, font, large, extended, width, white, yellow, elapsed);
                 break;
             case WeatherStarScreen.Observations:
-                DrawObservations(canvas, snap, font, width, white, yellow);
+                DrawObservations(canvas, snap, font, small, width, white, yellow);
                 break;
             case WeatherStarScreen.Hourly:
-                DrawHourly(canvas, snap, font, large, width, height, radarIndex, white, yellow);
+                DrawHourly(canvas, snap, font, large, width, height, radarIndex, white, yellow, elapsed);
                 break;
             case WeatherStarScreen.HourlyGraph:
-                DrawHourlyGraph(canvas, snap, font, width, height, white, yellow);
+                DrawHourlyGraph(canvas, snap, font, small, width, height, white, yellow);
                 break;
             case WeatherStarScreen.LocalForecast:
                 DrawLocalForecast(canvas, snap, font, width, height, radarIndex, screenRepeat, white, yellow);
                 break;
             case WeatherStarScreen.ExtendedForecast:
-                DrawForecast(canvas, snap, font, 6, width, white, yellow);
+                DrawExtendedForecast(canvas, snap, font, large, width, screenRepeat, white, yellow, elapsed);
                 break;
             case WeatherStarScreen.Regional:
-                DrawRegional(canvas, snap, font, width, height, white, yellow);
+                DrawRegional(canvas, snap, font, large, width, height, white, yellow, elapsed);
                 break;
             case WeatherStarScreen.Hazards:
                 DrawHazards(canvas, snap, font, width, height, radarIndex, white, yellow);
@@ -81,13 +81,13 @@ public sealed class WeatherStarCompositor
                 DrawRadar(canvas, snap, font, width, height, radarIndex, white);
                 break;
             case WeatherStarScreen.Almanac:
-                DrawForecast(canvas, snap, font, 4, width, white, yellow);
+                DrawForecast(canvas, snap, font, 4, width, white, yellow, elapsed);
                 break;
             case WeatherStarScreen.SpcOutlook:
                 DrawSpcOutlook(canvas, snap, font, width, white, yellow);
                 break;
             case WeatherStarScreen.Travel:
-                DrawTravel(canvas, snap, font, width, radarIndex, white, yellow);
+                DrawTravel(canvas, snap, font, large, small, width, radarIndex, white, yellow, elapsed);
                 break;
         }
 
@@ -110,7 +110,74 @@ public sealed class WeatherStarCompositor
         return data.ToArray();
     }
 
-    private void DrawCurrent(SKCanvas canvas, WeatherSnapshot snap, SKTypeface font, SKTypeface large, int width, SKPaint white, SKPaint yellow)
+    private static void DrawHeader(
+        SKCanvas canvas,
+        WeatherSnapshot snap,
+        WeatherStarScreen screen,
+        SKTypeface font,
+        SKTypeface small,
+        int width,
+        SKPaint white,
+        SKPaint yellow)
+    {
+        var ox = ContentOriginX(width);
+        DrawText(canvas, snap.Place.DisplayName.ToUpperInvariant(), small, 16, ox + 10, BaselineBelow(small, 16, 6), yellow);
+        if (screen != WeatherStarScreen.HourlyGraph)
+        {
+            DrawText(
+                canvas,
+                PlaceNow(snap).ToString("h:mm tt", CultureInfo.InvariantCulture),
+                small,
+                22,
+                ox + 624,
+                BaselineBelow(small, 22, 38),
+                yellow,
+                SKTextAlign.Right);
+        }
+
+        if (screen == WeatherStarScreen.Current)
+        {
+            DrawText(canvas, "Current", font, 28, ox + 170, BaselineBelow(font, 28, 28), white);
+            DrawText(canvas, "Conditions", font, 28, ox + 170, BaselineBelow(font, 28, 56), white);
+            return;
+        }
+
+        if (screen == WeatherStarScreen.HourlyGraph)
+        {
+            DrawText(canvas, "Hourly", font, 28, ox + 170, BaselineBelow(font, 28, 28), white);
+            DrawText(canvas, "Graph", font, 28, ox + 170, BaselineBelow(font, 28, 56), white);
+            return;
+        }
+
+        if (screen == WeatherStarScreen.Travel)
+        {
+            DrawText(canvas, "Travel", font, 28, ox + 170, BaselineBelow(font, 28, 28), white);
+            DrawText(canvas, "Cities", font, 28, ox + 170, BaselineBelow(font, 28, 56), white);
+            return;
+        }
+
+        var title = Title(screen);
+        if (title.Contains(' ', StringComparison.Ordinal) && title.Length > 14)
+        {
+            var split = title.LastIndexOf(' ');
+            DrawText(canvas, title[..split], font, 26, ox + 170, BaselineBelow(font, 26, 28), white);
+            DrawText(canvas, title[(split + 1)..], font, 26, ox + 170, BaselineBelow(font, 26, 56), white);
+            return;
+        }
+
+        DrawText(canvas, title, font, 28, ox + 170, BaselineBelow(font, 28, 40), white);
+    }
+
+    private void DrawCurrent(
+        SKCanvas canvas,
+        WeatherSnapshot snap,
+        SKTypeface font,
+        SKTypeface large,
+        SKTypeface extended,
+        int width,
+        SKPaint white,
+        SKPaint yellow,
+        TimeSpan elapsed)
     {
         var cur = snap.Current;
         if (cur is null)
@@ -119,21 +186,18 @@ public sealed class WeatherStarCompositor
             return;
         }
 
-        var unit = snap.UseMetric ? "C" : "F";
         var ox = ContentOriginX(width);
         const float boxMargin = 64f;
         const float colW = 255f;
-        var leftCol = ox + boxMargin;
-        var rightCol = leftCol + colW;
-        var leftCenter = leftCol + colW / 2f;
-        var rightCenter = rightCol + colW / 2f;
-        var rightLabelX = rightCol + 20f;
-        var rightValueX = rightCol + colW - 12f;
-        var windLeft = leftCol + 12f;
-        var windRight = leftCol + colW - 12f;
+        var left = ox + boxMargin;
+        var right = left + colW;
+        var leftCenter = left + colW / 2f;
+        var rightLabelX = right + 20f;
+        var rightValueX = right + colW - 14f;
+        var windLabelX = left + 12f;
 
         var condition = string.IsNullOrWhiteSpace(cur.ConditionText) ? "-" : cur.ConditionText.Trim();
-        if (condition.Length > 15)
+        if (Measure(extended, 24, condition) > colW - 16)
         {
             condition = ShortenWeather(condition);
         }
@@ -144,30 +208,47 @@ public sealed class WeatherStarCompositor
             large,
             32,
             leftCenter,
-            118,
+            BaselineBelow(large, 32, 112),
             white,
             SKTextAlign.Center);
-        DrawText(canvas, condition, font, 20, leftCenter, 150, yellow, SKTextAlign.Center);
+        DrawText(canvas, condition, extended, 24, leftCenter, BaselineBelow(extended, 24, 148), yellow, SKTextAlign.Center);
 
-        var icon = _assets.Icon(cur.IconKey);
+        var icon = WeatherIcon(cur.IconKey, elapsed);
+        var iconBottom = 186f;
         if (icon is not null)
         {
-            const float iconSize = 108f;
-            var iconX = leftCenter - iconSize / 2f;
-            DrawBitmap(canvas, icon, new SKRect(iconX, 164, iconX + iconSize, 164 + iconSize));
+            const float maxW = 128f;
+            const float maxH = 108f;
+            var scale = Math.Min(maxW / Math.Max(1, icon.Width), maxH / Math.Max(1, icon.Height));
+            var iconW = icon.Width * scale;
+            var iconH = icon.Height * scale;
+            var iconX = leftCenter - iconW / 2f;
+            const float iconTop = 186f;
+            DrawBitmap(canvas, icon, new SKRect(iconX, iconTop, iconX + iconW, iconTop + iconH));
+            iconBottom = iconTop + iconH;
         }
 
-        DrawText(canvas, "Wind:", font, 20, windLeft, 318, white);
-        DrawText(canvas, FormatCurrentWind(cur), font, 20, windRight, 318, white, SKTextAlign.Right);
+        var windY = Math.Max(BaselineBelow(extended, 24, 328), iconBottom + 36);
+        var windLabel = "Wind:";
+        var windValue = FormatCurrentWind(cur);
+        DrawText(canvas, windLabel, extended, 24, windLabelX, windY, white);
+        DrawText(
+            canvas,
+            windValue,
+            extended,
+            24,
+            windLabelX + Measure(extended, 24, windLabel) + 14,
+            windY,
+            white);
         if (cur.WindGust is double gust && gust > (cur.WindSpeed ?? 0) + 0.5)
         {
             DrawText(
                 canvas,
                 "Gusts to " + Math.Round(gust).ToString("0", CultureInfo.InvariantCulture),
-                font,
+                extended,
                 20,
-                windRight,
-                346,
+                left + colW - 12f,
+                windY + 30,
                 white,
                 SKTextAlign.Right);
         }
@@ -175,30 +256,31 @@ public sealed class WeatherStarCompositor
         DrawText(
             canvas,
             Truncate(cur.StationName ?? snap.Place.DisplayName, 16).ToUpperInvariant(),
-            font,
+            large,
             18,
-            rightCenter,
-            118,
+            right + colW / 2f,
+            BaselineBelow(large, 18, 114),
             yellow,
             SKTextAlign.Center);
 
-        var y = 154f;
-        DrawCurrentRow(canvas, font, "Humidity:", cur.Humidity is int humidity ? humidity + "%" : "-", rightLabelX, rightValueX, y, white);
-        y += 36;
+        var y = BaselineBelow(large, 18, 154);
+        var rowStep = 32f;
+        DrawCurrentRow(canvas, large, "Humidity:", cur.Humidity is int humidity ? humidity + "%" : "-", rightLabelX, rightValueX, y, white);
+        y += rowStep;
         DrawCurrentRow(
             canvas,
-            font,
+            large,
             "Dewpoint:",
             cur.Dewpoint is double dew ? Math.Round(dew).ToString("0", CultureInfo.InvariantCulture) + "°" : "-",
             rightLabelX,
             rightValueX,
             y,
             white);
-        y += 36;
-        DrawCurrentRow(canvas, font, "Ceiling:", FormatCeiling(cur.Ceiling, snap.UseMetric), rightLabelX, rightValueX, y, white);
-        y += 36;
-        DrawCurrentRow(canvas, font, "Visibility:", FormatVisibility(cur.Visibility, snap.UseMetric), rightLabelX, rightValueX, y, white);
-        y += 36;
+        y += rowStep;
+        DrawCurrentRow(canvas, large, "Ceiling:", FormatCeiling(cur.Ceiling, snap.UseMetric), rightLabelX, rightValueX, y, white);
+        y += rowStep;
+        DrawCurrentRow(canvas, large, "Visibility:", FormatVisibility(cur.Visibility, snap.UseMetric), rightLabelX, rightValueX, y, white);
+        y += rowStep;
         if (cur.Pressure is double pressure)
         {
             var pressureText = snap.UseMetric
@@ -209,17 +291,17 @@ public sealed class WeatherStarCompositor
                 pressureText += " " + cur.PressureDirection;
             }
 
-            DrawCurrentRow(canvas, font, "Pressure:", pressureText, rightLabelX, rightValueX, y, white);
-            y += 36;
+            DrawCurrentRow(canvas, large, "Pressure:", pressureText, rightLabelX, rightValueX, y, white);
+            y += rowStep;
         }
 
         if (!string.IsNullOrWhiteSpace(cur.ApparentLabel) && cur.FeelsLike is double feels)
         {
             DrawCurrentRow(
                 canvas,
-                font,
+                large,
                 cur.ApparentLabel.TrimEnd(':') + ":",
-                Math.Round(feels).ToString("0", CultureInfo.InvariantCulture) + "°" + unit,
+                Math.Round(feels).ToString("0", CultureInfo.InvariantCulture) + "°",
                 rightLabelX,
                 rightValueX,
                 y,
@@ -273,7 +355,7 @@ public sealed class WeatherStarCompositor
         return Math.Round(visibility.Value).ToString("0", CultureInfo.InvariantCulture) + (metric ? " km." : " mi.");
     }
 
-    private static void DrawObservations(SKCanvas canvas, WeatherSnapshot snap, SKTypeface font, int width, SKPaint white, SKPaint yellow)
+    private static void DrawObservations(SKCanvas canvas, WeatherSnapshot snap, SKTypeface font, SKTypeface small, int width, SKPaint white, SKPaint yellow)
     {
         var rows = snap.Observations;
         if (rows.Count == 0 && snap.Current is { } cur)
@@ -282,7 +364,7 @@ public sealed class WeatherStarCompositor
             [
                 new WeatherStationObservation
                 {
-                    Location = Truncate(cur.StationName ?? snap.Place.DisplayName, 14),
+                    Location = ObservationLocation(cur.StationName ?? snap.Place.DisplayName),
                     Temperature = cur.Temperature,
                     Weather = ShortenWeather(cur.ConditionText),
                     Wind = FormatWind(cur.WindDirection, cur.WindSpeed, snap.UseMetric)
@@ -290,17 +372,17 @@ public sealed class WeatherStarCompositor
             ];
         }
 
-        // has-box main starts at x=64 on the 640 canvas (latest-observations.scss).
+        // latest-observations.scss: has-box at x=64; temp 230, weather 280, wind 430.
         var ox = ContentOriginX(width);
-        var locX = ox + 72f;
-        var tempX = ox + 294f;
-        var weatherX = ox + 344f;
-        var windRight = ox + 568f;
-        var y = 92f;
-        DrawText(canvas, "LOCATION", font, 16, locX, y, yellow);
-        DrawText(canvas, snap.UseMetric ? "°C" : "°F", font, 16, tempX, y, yellow);
-        DrawText(canvas, "WEATHER", font, 16, weatherX, y, yellow);
-        DrawText(canvas, "WIND", font, 16, windRight, y, yellow, SKTextAlign.Right);
+        var box = ox + 64f;
+        var locX = box + 8f;
+        var tempX = box + 230f;
+        var weatherX = box + 280f;
+        var windX = box + 430f;
+        var headerY = BaselineBelow(small, 18, 96);
+        DrawText(canvas, snap.UseMetric ? "°C" : "°F", small, 18, tempX, headerY, yellow);
+        DrawText(canvas, "WEATHER", small, 18, weatherX, headerY, yellow);
+        DrawText(canvas, "WIND", small, 18, windX, headerY, yellow);
 
         if (rows.Count == 0)
         {
@@ -308,13 +390,13 @@ public sealed class WeatherStarCompositor
             return;
         }
 
-        y = 128f;
+        var y = BaselineBelow(font, 22, 128);
         foreach (var row in rows.Take(7))
         {
-            DrawText(canvas, ObservationLocation(row.Location), font, 18, locX, y, yellow);
-            DrawText(canvas, Math.Round(row.Temperature).ToString("0", CultureInfo.InvariantCulture), font, 18, tempX, y, white);
-            DrawText(canvas, Truncate(row.Weather, 9), font, 18, weatherX, y, white);
-            DrawText(canvas, row.Wind, font, 18, windRight, y, white, SKTextAlign.Right);
+            DrawText(canvas, ObservationLocation(row.Location), font, 22, locX, y, yellow);
+            DrawText(canvas, Math.Round(row.Temperature).ToString("0", CultureInfo.InvariantCulture), font, 22, tempX, y, white);
+            DrawText(canvas, Truncate(row.Weather, 9), font, 22, weatherX, y, white);
+            DrawText(canvas, row.Wind, font, 22, windX, y, white);
             y += 36;
         }
     }
@@ -357,14 +439,37 @@ public sealed class WeatherStarCompositor
 
     private static string ObservationLocation(string? name)
     {
-        var text = (name ?? "").Split(',')[0].Trim();
+        var text = CleanCityName(name);
+        return Truncate(text.ToUpperInvariant(), 14);
+    }
+
+    private static string CleanCityName(string? name)
+    {
+        var text = (name ?? "").Trim();
+        if (text.Length == 0)
+        {
+            return "";
+        }
+
+        var slash = text.IndexOf('/');
+        if (slash >= 0 && slash < text.Length - 1)
+        {
+            text = text[(slash + 1)..].Trim();
+        }
+
+        text = text.Split(',')[0].Trim();
         foreach (var strip in new[]
                  {
                      " International Airport",
                      " Regional Airport",
                      " Municipal Airport",
+                     " Municipal Arpt",
                      " Municipal",
+                     " Muni",
                      " Airport",
+                     " Airpark",
+                     " Heliport",
+                     " Field",
                      " Weather Forecast Office",
                      " Weather Station"
                  })
@@ -375,12 +480,28 @@ public sealed class WeatherStarCompositor
             }
         }
 
-        if (text.Length == 0)
+        foreach (var cut in new[] { " Municipal", " Muni", " Airport" })
         {
-            text = name ?? "";
+            var at = text.IndexOf(cut, StringComparison.OrdinalIgnoreCase);
+            if (at > 0)
+            {
+                text = text[..at].Trim();
+            }
         }
 
-        return Truncate(text.ToUpperInvariant(), 14);
+        return text;
+    }
+
+    private static int ScrollStep(int radarIndex, int maxOffset, int millisecondsPerStep = 2000)
+    {
+        if (maxOffset <= 0)
+        {
+            return 0;
+        }
+
+        const int radarMs = 400;
+        var ticks = Math.Max(1, millisecondsPerStep / radarMs);
+        return Math.Min(maxOffset, radarIndex / ticks);
     }
 
     private void DrawHourly(
@@ -392,7 +513,8 @@ public sealed class WeatherStarCompositor
         int height,
         int radarIndex,
         SKPaint white,
-        SKPaint gold)
+        SKPaint gold,
+        TimeSpan elapsed)
     {
         var hours = UpcomingHours(snap);
         var originX = ContentOriginX(width);
@@ -404,7 +526,7 @@ public sealed class WeatherStarCompositor
 
         const int pageSize = 4;
         var maxOffset = Math.Max(0, hours.Count - pageSize);
-        var offset = maxOffset == 0 ? 0 : Math.Min(maxOffset, radarIndex * Math.Max(1, maxOffset) / 20);
+        var offset = ScrollStep(radarIndex, maxOffset);
         var page = hours.Skip(offset).Take(pageSize).ToList();
 
         // hourly.scss left positions on the 640 canvas; keep every column inside the 1.png box (x≈52–583).
@@ -429,7 +551,7 @@ public sealed class WeatherStarCompositor
         {
             var local = InPlace(hour.Time, snap);
             DrawText(canvas, local.ToString("ddd h tt", CultureInfo.InvariantCulture), large, 22, hourX, y, gold);
-            var icon = _assets.Icon(hour.IconKey);
+            var icon = WeatherIcon(hour.IconKey, elapsed);
             if (icon is not null)
             {
                 DrawBitmap(canvas, icon, new SKRect(iconX, y - 46, iconX + iconSize, y + 18));
@@ -464,7 +586,15 @@ public sealed class WeatherStarCompositor
         }
     }
 
-    private static void DrawHourlyGraph(SKCanvas canvas, WeatherSnapshot snap, SKTypeface font, int width, int height, SKPaint white, SKPaint gold)
+    private static void DrawHourlyGraph(
+        SKCanvas canvas,
+        WeatherSnapshot snap,
+        SKTypeface font,
+        SKTypeface small,
+        int width,
+        int height,
+        SKPaint white,
+        SKPaint gold)
     {
         var cutoff = DateTimeOffset.UtcNow.AddMinutes(-20);
         var wide = width > 700;
@@ -483,19 +613,32 @@ public sealed class WeatherStarCompositor
         using var tempFill = new SKPaint { Color = tempPaint.Color, IsAntialias = true };
         using var dewFill = new SKPaint { Color = dewPaint.Color, IsAntialias = true };
         using var precipFill = new SKPaint { Color = precipPaint.Color, IsAntialias = true };
+        using var cloudFill = new SKPaint { Color = cloudPaint.Color, IsAntialias = true };
         using var grid = new SKPaint { Color = new SKColor(255, 255, 255, 40), StrokeWidth = 1, Style = SKPaintStyle.Stroke };
 
-        // 1-chart.png box is x≈52–583; 1-chart-wide.png is x≈52–797. Chart is 532×285 (746 wide).
-        var chartX = 50f;
-        var chartY = 95f;
+        // 1-chart.png: y-axis x=0–50, chart 50×90 at 532×285, x-axis under the plot.
+        var ox = wide ? 0f : ContentOriginX(width);
+        var chartX = ox + 50f;
+        var chartY = 90f;
         var chartW = wide ? 746f : 532f;
         var chartH = 285f;
         var plotTop = chartY + 10f;
         var plotBottom = chartY + chartH - 10f;
-        var ox = ContentOriginX(width);
-        DrawText(canvas, "Temp", font, 14, ox + 400, 58, tempFill);
-        DrawText(canvas, "Dew", font, 14, ox + 470, 58, dewFill);
-        DrawText(canvas, "Precip%", font, 14, ox + 580, 58, precipFill, SKTextAlign.Right);
+        var axisRight = chartX - 4f;
+        var legendRight = ox + (wide ? 800f : 612f);
+        var legendY = BaselineBelow(small, 16, 32);
+        const float legendStep = 16f;
+        DrawText(canvas, "Temperature", small, 16, legendRight, legendY, tempFill, SKTextAlign.Right);
+        DrawText(canvas, "Dewpoint", small, 16, legendRight, legendY + legendStep, dewFill, SKTextAlign.Right);
+        if (hours.Any(h => h.CloudCover.HasValue))
+        {
+            DrawText(canvas, "Cloud %", small, 16, legendRight, legendY + legendStep * 2, cloudFill, SKTextAlign.Right);
+            DrawText(canvas, "Precip %", small, 16, legendRight, legendY + legendStep * 3, precipFill, SKTextAlign.Right);
+        }
+        else
+        {
+            DrawText(canvas, "Precip %", small, 16, legendRight, legendY + legendStep * 2, precipFill, SKTextAlign.Right);
+        }
 
         var temps = hours.Select(h => h.Temperature).ToList();
         var dews = hours.Select(h => h.Dewpoint ?? h.Temperature).ToList();
@@ -516,15 +659,10 @@ public sealed class WeatherStarCompositor
         {
             var y = YTemp(yLabels[i]);
             canvas.DrawLine(chartX, y, chartX + chartW, y, grid);
-            DrawText(
-                canvas,
-                Math.Round(yLabels[i]).ToString("0", CultureInfo.InvariantCulture) + "°",
-                font,
-                14,
-                chartX - 6,
-                y + 5,
-                gold,
-                SKTextAlign.Right);
+            var rounded = Math.Round(yLabels[i]).ToString("0", CultureInfo.InvariantCulture);
+            var label = rounded.Length >= 3 ? rounded : rounded + "°";
+            var labelTop = i == 0 ? chartY : i == yLabels.Length - 1 ? chartY + chartH - 18 : y - 8;
+            DrawText(canvas, label, small, 16, axisRight, BaselineBelow(small, 16, labelTop), gold, SKTextAlign.Right);
         }
 
         canvas.Save();
@@ -545,6 +683,7 @@ public sealed class WeatherStarCompositor
 
         var xTicks = wide ? 6 : 4;
         DateTimeOffset? prev = null;
+        var xAxisTop = chartY + chartH + 2;
         for (var t = 0; t <= xTicks; t++)
         {
             var i = (int)Math.Round(t * (hours.Count - 1) / (double)xTicks);
@@ -552,7 +691,7 @@ public sealed class WeatherStarCompositor
             var local = InPlace(hours[i].Time, snap);
             var label = GraphHourLabel(local, prev);
             prev = local;
-            DrawText(canvas, label, font, 14, XAt(i), chartY + chartH + 18, gold, SKTextAlign.Center);
+            DrawText(canvas, label, small, 16, XAt(i), BaselineBelow(small, 16, xAxisTop), gold, SKTextAlign.Center);
         }
     }
 
@@ -628,7 +767,183 @@ public sealed class WeatherStarCompositor
         return time;
     }
 
-    private void DrawForecast(SKCanvas canvas, WeatherSnapshot snap, SKTypeface font, int count, int width, SKPaint white, SKPaint gold)
+    private void DrawExtendedForecast(
+        SKCanvas canvas,
+        WeatherSnapshot snap,
+        SKTypeface font,
+        SKTypeface large,
+        int width,
+        int screenRepeat,
+        SKPaint white,
+        SKPaint gold,
+        TimeSpan elapsed)
+    {
+        var days = snap.Daily
+            .Where(day => day.High is not null
+                && !day.Name.Equals("Tonight", StringComparison.OrdinalIgnoreCase)
+                && !day.Name.Equals("Overnight", StringComparison.OrdinalIgnoreCase))
+            .Take(6)
+            .ToList();
+        if (days.Count == 0)
+        {
+            days = snap.Periods
+                .Where(period => period.IsDaytime)
+                .Take(6)
+                .Select(period => new WeatherDaily
+                {
+                    Name = period.Name,
+                    Narrative = period.Narrative,
+                    Condition = period.Narrative,
+                    IconKey = period.IconKey,
+                    High = period.Temperature
+                })
+                .ToList();
+        }
+
+        if (days.Count == 0)
+        {
+            DrawText(canvas, "NO FORECAST DATA", font, 22, 72, 180, white);
+            return;
+        }
+
+        const int pageSize = 3;
+        var page = days.Count <= pageSize ? 0 : Math.Clamp(screenRepeat, 0, 1);
+        var pageDays = days.Skip(page * pageSize).Take(pageSize).ToList();
+        const float cardW = 155f;
+        const float gap = 15f;
+        var startX = 42f + Math.Max(0, (3 - pageDays.Count) * (cardW + gap) / 2f);
+        using var loLabel = new SKPaint { Color = new SKColor(0x80, 0x80, 0xFF), IsAntialias = true };
+
+        for (var i = 0; i < pageDays.Count; i++)
+        {
+            var day = pageDays[i];
+            var x = startX + i * (cardW + gap);
+            var center = x + cardW / 2f;
+            DrawText(
+                canvas,
+                ExtendedDayName(day.Name),
+                font,
+                22,
+                center,
+                BaselineBelow(font, 22, 118),
+                gold,
+                SKTextAlign.Center);
+
+            var icon = WeatherIcon(day.IconKey, elapsed);
+            if (icon is not null)
+            {
+                const float iconSize = 72f;
+                DrawBitmap(canvas, icon, new SKRect(center - iconSize / 2f, 148, center + iconSize / 2f, 148 + iconSize));
+            }
+
+            var condition = ShortenExtendedCondition(string.IsNullOrWhiteSpace(day.Condition) ? day.Narrative : day.Condition);
+            var lines = WrapText(condition, font, 16, cardW - 8);
+            var textY = BaselineBelow(font, 16, 230);
+            foreach (var line in lines.Take(2))
+            {
+                DrawText(canvas, line, font, 16, center, textY, white, SKTextAlign.Center);
+                textY += 20;
+            }
+
+            var loX = x + 36f;
+            var hiX = x + cardW - 36f;
+            DrawText(canvas, "Lo", font, 16, loX, BaselineBelow(font, 16, 290), loLabel, SKTextAlign.Center);
+            DrawText(canvas, "Hi", font, 16, hiX, BaselineBelow(font, 16, 290), gold, SKTextAlign.Center);
+            if (day.Low is double low)
+            {
+                DrawText(
+                    canvas,
+                    Math.Round(low).ToString("0", CultureInfo.InvariantCulture),
+                    large,
+                    24,
+                    loX,
+                    BaselineBelow(large, 24, 314),
+                    white,
+                    SKTextAlign.Center);
+            }
+
+            if (day.High is double high)
+            {
+                DrawText(
+                    canvas,
+                    Math.Round(high).ToString("0", CultureInfo.InvariantCulture),
+                    large,
+                    24,
+                    hiX,
+                    BaselineBelow(large, 24, 314),
+                    white,
+                    SKTextAlign.Center);
+            }
+        }
+    }
+
+    private static string ExtendedDayName(string name)
+    {
+        var text = name.Trim();
+        if (text.Equals("Today", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("This Afternoon", StringComparison.OrdinalIgnoreCase))
+        {
+            return "TODAY";
+        }
+
+        if (DateTime.TryParseExact(
+                text,
+                ["dddd", "ddd"],
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var date))
+        {
+            return date.ToString("ddd", CultureInfo.InvariantCulture).ToUpperInvariant();
+        }
+
+        return Truncate(text.ToUpperInvariant(), 8);
+    }
+
+    private static string ShortenExtendedCondition(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return "-";
+        }
+
+        var shortText = text.Split('.')[0]
+            .Replace(" and ", " ", StringComparison.OrdinalIgnoreCase)
+            .Replace("slight ", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("chance ", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("very ", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("patchy ", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("Areas Of ", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("areas ", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("dense ", "", StringComparison.OrdinalIgnoreCase)
+            .Replace("Thunderstorm", "T'Storm", StringComparison.OrdinalIgnoreCase)
+            .Trim();
+        if (shortText.Contains(" then ", StringComparison.OrdinalIgnoreCase))
+        {
+            shortText = shortText.Split(" then ", StringSplitOptions.RemoveEmptyEntries).Last().Trim();
+        }
+
+        var words = shortText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length == 0)
+        {
+            return "-";
+        }
+
+        var first = Truncate(words[0].TrimEnd('.'), 10);
+        if (words.Length == 1 || first.EndsWith('.'))
+        {
+            return first;
+        }
+
+        var second = words[1];
+        if (second.Equals("Blowing", StringComparison.OrdinalIgnoreCase))
+        {
+            return first;
+        }
+
+        return (first + " " + Truncate(second.TrimEnd('.'), 10)).Trim();
+    }
+
+    private void DrawForecast(SKCanvas canvas, WeatherSnapshot snap, SKTypeface font, int count, int width, SKPaint white, SKPaint gold, TimeSpan elapsed)
     {
         var days = snap.Daily.Take(count).ToList();
         if (days.Count == 0 && snap.Periods.Count > 0)
@@ -670,17 +985,18 @@ public sealed class WeatherStarCompositor
                 DrawText(canvas, temps, font, 18, tempRight, y, white, SKTextAlign.Right);
             }
 
-            var icon = _assets.Icon(day.IconKey);
+            var icon = WeatherIcon(day.IconKey, elapsed);
             if (icon is not null)
             {
                 DrawBitmap(canvas, icon, new SKRect(iconRight - 40, y - 18, iconRight, y + 22));
             }
 
             var lines = WrapText(day.Narrative, font, 14, wrapWidth);
-            if (lines.Count > 2)
+            var maxLines = Math.Max(1, (int)Math.Floor((rowHeight - 26) / 18));
+            if (lines.Count > maxLines)
             {
-                lines[1] = TrimToWidth(lines[1], font, 14, wrapWidth - 18) + "...";
-                lines = lines.Take(2).ToList();
+                lines[maxLines - 1] = TrimToWidth(lines[maxLines - 1], font, 14, wrapWidth - 18) + "...";
+                lines = lines.Take(maxLines).ToList();
             }
 
             var textY = y + 22;
@@ -709,7 +1025,7 @@ public sealed class WeatherStarCompositor
         return text;
     }
 
-    private void DrawRegional(SKCanvas canvas, WeatherSnapshot snap, SKTypeface font, int width, int height, SKPaint white, SKPaint gold)
+    private void DrawRegional(SKCanvas canvas, WeatherSnapshot snap, SKTypeface font, SKTypeface large, int width, int height, SKPaint white, SKPaint gold, TimeSpan elapsed)
     {
         var cities = snap.Regional;
         if (cities.Count == 0)
@@ -743,26 +1059,59 @@ public sealed class WeatherStarCompositor
             return;
         }
 
-        var columns = 3;
-        var colWidth = (width - 48f) / columns;
-        var rows = (int)Math.Ceiling(Math.Min(6, cities.Count) / (double)columns);
-        var rowHeight = Math.Min(150f, (height - 120f) / Math.Max(1, rows));
+        // 2.png: three vertical boxes at x 46–204, 240–398, 434–592; inner y 112–384.
+        var scaleX = width / 640f;
+        var panels = new (float Left, float Right)[]
+        {
+            (46f * scaleX, 204f * scaleX),
+            (240f * scaleX, 398f * scaleX),
+            (434f * scaleX, 592f * scaleX)
+        };
+        const float panelTop = 112f;
+        const float panelBottom = 384f;
+        var midY = (panelTop + panelBottom) / 2f;
+
         for (var i = 0; i < Math.Min(6, cities.Count); i++)
         {
             var city = cities[i];
-            var col = i % columns;
-            var row = i / columns;
-            var x = 24f + col * colWidth;
-            var y = 100f + row * rowHeight;
-            DrawText(canvas, Truncate(city.Name, 14).ToUpperInvariant(), font, 16, x, y, gold);
-            var icon = _assets.Icon(city.IconKey);
+            var col = i % 3;
+            var row = i / 3;
+            var cx = (panels[col].Left + panels[col].Right) / 2f;
+            var cellTop = row == 0 ? panelTop : midY;
+            DrawText(
+                canvas,
+                ObservationLocation(city.Name),
+                font,
+                18,
+                cx,
+                BaselineBelow(font, 18, cellTop + 12),
+                gold,
+                SKTextAlign.Center);
+
+            var icon = WeatherIcon(city.IconKey, elapsed);
             if (icon is not null)
             {
-                DrawBitmap(canvas, icon, new SKRect(x + 36, y + 8, x + 108, y + 80));
+                const float maxSize = 56f;
+                var scale = Math.Min(maxSize / Math.Max(1, icon.Width), maxSize / Math.Max(1, icon.Height));
+                var iconW = icon.Width * scale;
+                var iconH = icon.Height * scale;
+                var iconTop = cellTop + 40f;
+                DrawBitmap(canvas, icon, new SKRect(cx - iconW / 2f, iconTop, cx + iconW / 2f, iconTop + iconH));
             }
 
             var temps = FormatRegionalTemps(city);
-            DrawText(canvas, temps, font, 22, x + 20, y + 102, white);
+            if (temps.Length > 0)
+            {
+                DrawText(
+                    canvas,
+                    temps,
+                    large,
+                    22,
+                    cx,
+                    BaselineBelow(large, 22, cellTop + 108),
+                    white,
+                    SKTextAlign.Center);
+            }
         }
     }
 
@@ -788,7 +1137,17 @@ public sealed class WeatherStarCompositor
         return "";
     }
 
-    private void DrawTravel(SKCanvas canvas, WeatherSnapshot snap, SKTypeface font, int width, int radarIndex, SKPaint white, SKPaint gold)
+    private void DrawTravel(
+        SKCanvas canvas,
+        WeatherSnapshot snap,
+        SKTypeface font,
+        SKTypeface large,
+        SKTypeface small,
+        int width,
+        int radarIndex,
+        SKPaint white,
+        SKPaint gold,
+        TimeSpan elapsed)
     {
         var cities = snap.Travel;
         if (cities.Count == 0)
@@ -797,44 +1156,65 @@ public sealed class WeatherStarCompositor
             return;
         }
 
-        var boxRight = width > 700 ? 770f : 555f;
-        var cityX = 80f;
-        var iconX = width > 700 ? 360f : 318f;
-        var lowRight = boxRight - 88f;
-        var highRight = boxRight - 28f;
-        const float iconSize = 40f;
+        // travel.scss on the 640 canvas: city 80, icon 330, low 455×50, high 510×60, row 72.
+        var ox = ContentOriginX(width);
+        var cityX = ox + 80f;
+        var iconCol = ox + 330f;
+        var lowCenter = ox + 480f;
+        var highCenter = ox + 540f;
         const int pageSize = 4;
-        const float headerY = 112f;
-        const float firstRow = 148f;
-        const float lastRow = 348f;
-        var rowHeight = (lastRow - firstRow) / (pageSize - 1);
+        const float rowHeight = 72f;
+        const float headerTop = 90f;
+        var firstRowTop = headerTop + 28f;
 
         using var headerBar = new SKPaint { Color = new SKColor(32, 0, 87) };
-        canvas.DrawRect(52, 90, boxRight - 52, 22, headerBar);
-        DrawText(canvas, "LOW", font, 16, lowRight, headerY, gold, SKTextAlign.Right);
-        DrawText(canvas, "HIGH", font, 16, highRight, headerY, gold, SKTextAlign.Right);
+        canvas.DrawRect(ox + 52, headerTop, 532, 20, headerBar);
+        DrawText(canvas, "LOW", small, 16, lowCenter, BaselineBelow(small, 16, headerTop - 2), gold, SKTextAlign.Center);
+        DrawText(canvas, "HIGH", small, 16, highCenter, BaselineBelow(small, 16, headerTop - 2), gold, SKTextAlign.Center);
 
-        var maxOffset = Math.Max(0, cities.Count - pageSize);
-        var offset = maxOffset == 0 ? 0 : Math.Min(maxOffset, radarIndex * Math.Max(1, maxOffset) / 16);
-        var y = firstRow;
-        foreach (var city in cities.Skip(offset).Take(pageSize))
+        var pages = Math.Max(0, (int)Math.Ceiling(cities.Count / (double)pageSize) - 1);
+        var page = ScrollStep(radarIndex, pages, millisecondsPerStep: 8000);
+        var y = firstRowTop;
+        foreach (var city in cities.Skip(page * pageSize).Take(pageSize))
         {
-            DrawText(canvas, Truncate(city.Name, 16).ToUpperInvariant(), font, 18, cityX, y, gold);
-            var icon = _assets.Icon(city.IconKey);
+            var baseline = BaselineBelow(large, 22, y + 8);
+            DrawText(canvas, Truncate(city.Name, 16).ToUpperInvariant(), large, 22, cityX, baseline, gold);
+            var icon = WeatherIcon(city.IconKey, elapsed);
             if (icon is not null)
             {
-                var iconTop = y - iconSize + 8;
-                DrawBitmap(canvas, icon, new SKRect(iconX, iconTop, iconX + iconSize, iconTop + iconSize));
+                const float maxIcon = 47f;
+                var scale = Math.Min(maxIcon / Math.Max(1, icon.Width), maxIcon / Math.Max(1, icon.Height));
+                var iconW = icon.Width * scale;
+                var iconH = icon.Height * scale;
+                var iconX = iconCol + (70f - iconW) / 2f;
+                var iconTop = y + (rowHeight - iconH) / 2f - 4f;
+                DrawBitmap(canvas, icon, new SKRect(iconX, iconTop, iconX + iconW, iconTop + iconH));
             }
 
             if (city.Low is double low)
             {
-                DrawText(canvas, Math.Round(low).ToString("0", CultureInfo.InvariantCulture), font, 20, lowRight, y, white, SKTextAlign.Right);
+                DrawText(
+                    canvas,
+                    Math.Round(low).ToString("0", CultureInfo.InvariantCulture),
+                    large,
+                    24,
+                    lowCenter,
+                    baseline,
+                    white,
+                    SKTextAlign.Center);
             }
 
             if (city.High is double high)
             {
-                DrawText(canvas, Math.Round(high).ToString("0", CultureInfo.InvariantCulture), font, 20, highRight, y, white, SKTextAlign.Right);
+                DrawText(
+                    canvas,
+                    Math.Round(high).ToString("0", CultureInfo.InvariantCulture),
+                    large,
+                    24,
+                    highCenter,
+                    baseline,
+                    white,
+                    SKTextAlign.Center);
             }
 
             y += rowHeight;
@@ -1016,7 +1396,7 @@ public sealed class WeatherStarCompositor
         lines = BalanceWrappedLines(lines, font, fontSize, maxWidth);
         const int visible = 7;
         var maxOffset = Math.Max(0, lines.Count - visible);
-        var offset = maxOffset == 0 ? 0 : Math.Min(maxOffset, radarIndex * Math.Max(1, maxOffset) / 20);
+        var offset = ScrollStep(radarIndex, maxOffset, millisecondsPerStep: 3200);
         foreach (var line in lines.Skip(offset).Take(visible))
         {
             DrawText(canvas, line, font, fontSize, left, y, white);
@@ -1173,7 +1553,7 @@ public sealed class WeatherStarCompositor
 
         var visible = width >= 1200 ? 16 : 12;
         var maxOffset = Math.Max(0, lines.Count - visible);
-        var offset = maxOffset == 0 ? 0 : Math.Min(maxOffset, radarIndex * Math.Max(1, maxOffset) / 18);
+        var offset = ScrollStep(radarIndex, maxOffset, millisecondsPerStep: 2500);
         var y = width >= 1200 ? 90f : 70f;
         var step = fs + 12;
         foreach (var line in lines.Skip(offset).Take(visible))
@@ -1254,10 +1634,19 @@ public sealed class WeatherStarCompositor
             _ => "WEATHER"
         };
 
+    private SKBitmap? WeatherIcon(string? iconKey, TimeSpan elapsed)
+        => string.IsNullOrWhiteSpace(iconKey) ? null : _assets.Icon(iconKey, elapsed);
+
     private static readonly SKSamplingOptions BitmapSampling = new(SKFilterMode.Linear);
 
     private static void DrawBitmap(SKCanvas canvas, SKBitmap bitmap, SKRect dest)
         => canvas.DrawBitmap(bitmap, dest, BitmapSampling);
+
+    private static float Measure(SKTypeface typeface, float size, string text)
+    {
+        using var font = new SKFont(typeface, size);
+        return font.MeasureText(text);
+    }
 
     private static void DrawText(
         SKCanvas canvas,

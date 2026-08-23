@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using FinTv;
 using FinTv.Configuration;
 using FinTv.Domain;
 
@@ -399,25 +400,86 @@ public class JellyfinCatalogService
 
     public IReadOnlyList<BaseItem> QueryMusicAudioFromLibrary(string? libraryId, string? libraryName)
     {
+        var parsedId = Guid.Empty;
+        var hasId = !string.IsNullOrWhiteSpace(libraryId) && Guid.TryParse(libraryId, out parsedId) && parsedId != Guid.Empty;
         var library = ResolveMusicLibrary(libraryId, libraryName);
-        if (library is null)
+        var parentId = library?.Id ?? (hasId ? parsedId : Guid.Empty);
+        if (parentId == Guid.Empty && string.IsNullOrWhiteSpace(libraryName))
         {
             return Array.Empty<BaseItem>();
         }
 
-        return GetCachedMusicAudio(library.Id.ToString("N"), () =>
+        var cacheKey = parentId != Guid.Empty
+            ? parentId.ToString("N")
+            : "name:" + libraryName!.Trim();
+        return GetCachedMusicAudio(cacheKey, () =>
         {
             var query = new InternalItemsQuery
             {
-                ParentId = library.Id,
+                ParentId = parentId,
                 Recursive = true,
                 IsVirtualItem = false,
                 IncludeItemTypes = new[] { BaseItemKind.Audio },
                 OrderBy = new[] { (ItemSortBy.SortName, SortOrder.Ascending) }
             };
 
-            return _libraryManager.GetItemsResult(query).Items.ToList();
+            var items = parentId == Guid.Empty
+                ? new List<BaseItem>()
+                : _libraryManager.GetItemsResult(query).Items.ToList();
+            if (items.Count == 0 && !string.IsNullOrWhiteSpace(libraryName))
+            {
+                items = QueryAllMusicAudio()
+                    .Where(track => string.Equals(track.LibraryName, libraryName, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+            }
+
+            return items;
         });
+    }
+
+    public string? PickPlayableMusicPath(string? libraryId, string? libraryName, bool fallbackToAllMusic)
+    {
+        foreach (var track in Shuffle(QueryMusicAudioFromLibrary(libraryId, libraryName)))
+        {
+            var path = GetMediaPath(track);
+            if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+            {
+                return path;
+            }
+        }
+
+        if (!fallbackToAllMusic)
+        {
+            return null;
+        }
+
+        foreach (var track in Shuffle(QueryAllMusicAudio()))
+        {
+            var path = GetMediaPath(track);
+            if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+            {
+                return path;
+            }
+        }
+
+        return null;
+    }
+
+    private static IReadOnlyList<BaseItem> Shuffle(IReadOnlyList<BaseItem> tracks)
+    {
+        if (tracks.Count <= 1)
+        {
+            return tracks;
+        }
+
+        var copy = tracks.ToList();
+        for (var i = copy.Count - 1; i > 0; i--)
+        {
+            var j = Random.Shared.Next(i + 1);
+            (copy[i], copy[j]) = (copy[j], copy[i]);
+        }
+
+        return copy;
     }
 
     private static IReadOnlyList<BaseItem> GetCachedMusicAudio(string key, Func<IReadOnlyList<BaseItem>> load)
@@ -468,10 +530,15 @@ public class JellyfinCatalogService
     private IEnumerable<CollectionFolder> EnumerateMusicLibraries()
     {
         var seen = new HashSet<Guid>();
+        var configuredMusic = FinTvRuntime.Current?.Configuration.JellyfinLibraries.MusicLibraryIds
+            ?? [];
 
         foreach (var virtualFolder in _libraryManager.GetVirtualFolders())
         {
-            if (virtualFolder.CollectionType != CollectionTypeOptions.music)
+            Guid.TryParse(virtualFolder.ItemId, out var folderId);
+            var typedMusic = IsMusicCollectionType(virtualFolder.CollectionType);
+            var selectedMusic = folderId != Guid.Empty && configuredMusic.Contains(folderId);
+            if (!typedMusic && !selectedMusic)
             {
                 continue;
             }
@@ -488,7 +555,7 @@ public class JellyfinCatalogService
         foreach (var child in root.Children)
         {
             if (child is CollectionFolder folder
-                && IsMusicLibrary(folder)
+                && (IsMusicLibrary(folder) || configuredMusic.Contains(folder.Id))
                 && seen.Add(folder.Id))
             {
                 yield return folder;
@@ -532,8 +599,13 @@ public class JellyfinCatalogService
         return null;
     }
 
+    private static bool IsMusicCollectionType(string? type)
+        => string.Equals(type, CollectionType.music, StringComparison.OrdinalIgnoreCase)
+           || string.Equals(type, CollectionTypeOptions.music, StringComparison.OrdinalIgnoreCase)
+           || string.Equals(type, "audio", StringComparison.OrdinalIgnoreCase);
+
     private static bool IsMusicLibrary(CollectionFolder folder)
-        => folder.CollectionType == CollectionType.music;
+        => IsMusicCollectionType(folder.CollectionType);
 
     public TimeSpan GetRuntime(BaseItem item)
     {

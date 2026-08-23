@@ -9,7 +9,9 @@ namespace FinTv.Weather;
 public sealed class WeatherStarAssets : IDisposable
 {
     private readonly Dictionary<string, SKBitmap> _bitmaps = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, AnimatedIcon?> _icons = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, SKTypeface> _typefaces = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _iconLock = new();
     private readonly string _ws4Root;
     private readonly string _ws3Root;
 
@@ -37,20 +39,17 @@ public sealed class WeatherStarAssets : IDisposable
     }
 
     public SKTypeface Font(WeatherStarDockerVariant skin, bool large = false)
+        => Font(skin, large ? StarFontFace.Large : StarFontFace.Regular);
+
+    public SKTypeface Font(WeatherStarDockerVariant skin, StarFontFace face)
     {
-        var key = (skin == WeatherStarDockerVariant.Ws3kp ? "3000" : "4000") + (large ? "-lg" : "");
+        var key = (skin == WeatherStarDockerVariant.Ws3kp ? "3000" : "4000") + "-" + face;
         if (_typefaces.TryGetValue(key, out var cached))
         {
             return cached;
         }
 
-        var names = skin == WeatherStarDockerVariant.Ws3kp
-            ? (large
-                ? new[] { "Star3000 Large.ttf", "Star3000.ttf" }
-                : new[] { "Star3000.ttf", "Star3000 Small.ttf" })
-            : (large
-                ? new[] { "Star4000 Large.ttf", "Star4000 Large.woff", "Star4000.woff" }
-                : new[] { "Star4000.ttf", "Star4000.woff", "Star4000 Small.woff" });
+        var names = FontFileNames(skin, face);
         var root = skin == WeatherStarDockerVariant.Ws3kp ? _ws3Root : _ws4Root;
         foreach (var name in names)
         {
@@ -60,17 +59,43 @@ public sealed class WeatherStarAssets : IDisposable
                 continue;
             }
 
-            var face = LoadTypeface(path);
-            if (face is not null)
+            var loaded = LoadTypeface(path);
+            if (loaded is not null)
             {
-                _typefaces[key] = face;
-                return face;
+                _typefaces[key] = loaded;
+                return loaded;
             }
+        }
+
+        if (face is StarFontFace.Extended or StarFontFace.Small)
+        {
+            return Font(skin, StarFontFace.Regular);
         }
 
         var fallback = SKTypeface.FromFamilyName("DejaVu Sans", SKFontStyle.Bold);
         _typefaces[key] = fallback;
         return fallback;
+    }
+
+    private static string[] FontFileNames(WeatherStarDockerVariant skin, StarFontFace face)
+    {
+        if (skin == WeatherStarDockerVariant.Ws3kp)
+        {
+            return face switch
+            {
+                StarFontFace.Large => ["Star3000 Large.ttf", "Star3000.ttf"],
+                StarFontFace.Small => ["Star3000 Small.ttf", "Star3000.ttf"],
+                _ => ["Star3000.ttf", "Star3000 Small.ttf"]
+            };
+        }
+
+        return face switch
+        {
+            StarFontFace.Large => ["Star4000 Large.ttf", "Star4000 Large.woff", "Star4000.woff"],
+            StarFontFace.Extended => ["Star4000 Extended.woff", "Star4000 Extended.ttf", "Star4000.woff"],
+            StarFontFace.Small => ["Star4000 Small.woff", "Star4000 Small.ttf", "Star4000.woff"],
+            _ => ["Star4000.ttf", "Star4000.woff", "Star4000 Small.woff"]
+        };
     }
 
     public SKBitmap? Background(WeatherStarDockerVariant skin, bool wide, WeatherStarScreen screen)
@@ -80,8 +105,8 @@ public sealed class WeatherStarAssets : IDisposable
             WeatherStarScreen.HourlyGraph or WeatherStarScreen.Travel => wide ? "1-chart-wide.png" : "1-chart.png",
             WeatherStarScreen.Hazards => wide ? "7-wide.png" : "7.png",
             WeatherStarScreen.Radar => wide ? "4-wide.png" : "4.png",
-            WeatherStarScreen.ExtendedForecast or WeatherStarScreen.LocalForecast => wide ? "4-wide.png" : "4.png",
-            WeatherStarScreen.Regional => "2.png",
+            WeatherStarScreen.LocalForecast => wide ? "4-wide.png" : "4.png",
+            WeatherStarScreen.ExtendedForecast or WeatherStarScreen.Regional => "2.png",
             WeatherStarScreen.SpcOutlook => "6.png",
             _ => wide ? "1-wide.png" : "1.png"
         };
@@ -89,11 +114,33 @@ public sealed class WeatherStarAssets : IDisposable
         return Bitmap(FindFile(root, file) ?? FindFile(root, "1.png") ?? FindFile(root, "1-wide.png"));
     }
 
-    public SKBitmap? Icon(string iconKey)
+    public SKBitmap? Icon(string iconKey) => Icon(iconKey, TimeSpan.Zero);
+
+    public SKBitmap? Icon(string iconKey, TimeSpan elapsed)
     {
+        if (string.IsNullOrWhiteSpace(iconKey))
+        {
+            return null;
+        }
+
         var name = iconKey.EndsWith(".gif", StringComparison.OrdinalIgnoreCase) ? iconKey : iconKey + ".gif";
         var path = FindFile(_ws4Root, name) ?? FindFile(_ws3Root, name);
-        return Bitmap(path);
+        if (path is null)
+        {
+            return null;
+        }
+
+        AnimatedIcon? cached;
+        lock (_iconLock)
+        {
+            if (!_icons.TryGetValue(path, out cached))
+            {
+                cached = DecodeAnimatedIcon(path);
+                _icons[path] = cached;
+            }
+        }
+
+        return cached?.FrameAt(elapsed);
     }
 
     public (SKBitmap? Map, SKBitmap? Overlay) RadarBaseMap(double latitude, double longitude)
@@ -198,9 +245,141 @@ public sealed class WeatherStarAssets : IDisposable
             bmp.Dispose();
         }
 
+        foreach (var icon in _icons.Values)
+        {
+            icon?.Dispose();
+        }
+
         foreach (var face in _typefaces.Values)
         {
             face.Dispose();
+        }
+    }
+
+    private static AnimatedIcon? DecodeAnimatedIcon(string path)
+    {
+        try
+        {
+            using var codec = SKCodec.Create(path);
+            if (codec is null)
+            {
+                return StillOrNull(path);
+            }
+
+            var frameCount = codec.FrameCount;
+            if (frameCount <= 1)
+            {
+                var still = SKBitmap.Decode(path);
+                return still is null ? null : new AnimatedIcon([still], [100]);
+            }
+
+            var info = codec.Info.WithColorType(SKColorType.Bgra8888).WithAlphaType(SKAlphaType.Unpremul);
+            var frames = new SKBitmap[frameCount];
+            var durations = new int[frameCount];
+            var frameInfo = codec.FrameInfo;
+            for (var i = 0; i < frameCount; i++)
+            {
+                var bitmap = new SKBitmap(info);
+                bitmap.Erase(SKColors.Transparent);
+                var required = i < frameInfo.Length ? frameInfo[i].RequiredFrame : -1;
+                SKCodecOptions options;
+                if (required >= 0 && required < i && frames[required] is not null)
+                {
+                    frames[required].CopyTo(bitmap);
+                    options = new SKCodecOptions(i, required);
+                }
+                else
+                {
+                    options = new SKCodecOptions(i);
+                }
+
+                var result = codec.GetPixels(bitmap.Info, bitmap.GetPixels(), options);
+                if (result is not SKCodecResult.Success and not SKCodecResult.IncompleteInput)
+                {
+                    bitmap.Dispose();
+                    if (i == 0)
+                    {
+                        foreach (var prior in frames)
+                        {
+                            prior?.Dispose();
+                        }
+
+                        return StillOrNull(path);
+                    }
+
+                    frames[i] = frames[i - 1];
+                    durations[i] = durations[i - 1];
+                    continue;
+                }
+
+                frames[i] = bitmap;
+                var duration = i < frameInfo.Length ? frameInfo[i].Duration : 0;
+                durations[i] = duration > 0 ? duration : 100;
+            }
+
+            return new AnimatedIcon(frames, durations);
+        }
+        catch
+        {
+            return StillOrNull(path);
+        }
+    }
+
+    private static AnimatedIcon? StillOrNull(string path)
+    {
+        var still = SKBitmap.Decode(path);
+        return still is null ? null : new AnimatedIcon([still], [100]);
+    }
+
+    private sealed class AnimatedIcon : IDisposable
+    {
+        private readonly SKBitmap[] _frames;
+        private readonly int[] _durations;
+        private readonly int _loopMs;
+
+        public AnimatedIcon(SKBitmap[] frames, int[] durations)
+        {
+            _frames = frames;
+            _durations = durations;
+            _loopMs = Math.Max(1, durations.Sum());
+        }
+
+        public SKBitmap FrameAt(TimeSpan elapsed)
+        {
+            if (_frames.Length == 1)
+            {
+                return _frames[0];
+            }
+
+            var ms = (int)(elapsed.TotalMilliseconds % _loopMs);
+            if (ms < 0)
+            {
+                ms += _loopMs;
+            }
+
+            var acc = 0;
+            for (var i = 0; i < _frames.Length; i++)
+            {
+                acc += _durations[i];
+                if (ms < acc)
+                {
+                    return _frames[i];
+                }
+            }
+
+            return _frames[^1];
+        }
+
+        public void Dispose()
+        {
+            var seen = new HashSet<SKBitmap>();
+            foreach (var frame in _frames)
+            {
+                if (seen.Add(frame))
+                {
+                    frame.Dispose();
+                }
+            }
         }
     }
 

@@ -23,6 +23,14 @@ public enum WeatherStarScreen
     Radar
 }
 
+public enum StarFontFace
+{
+    Regular,
+    Large,
+    Extended,
+    Small
+}
+
 public sealed record GeoPlace
 {
     public required string Query { get; init; }
@@ -105,6 +113,8 @@ public sealed class WeatherDaily
     public string IconKey { get; init; } = "No-Data";
 
     public string Narrative { get; init; } = "";
+
+    public string Condition { get; init; } = "";
 
     public double? High { get; init; }
 

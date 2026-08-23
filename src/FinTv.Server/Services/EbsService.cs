@@ -192,8 +192,18 @@ public class EbsService
 
     public string? ResolveBackgroundMusicPath()
     {
-        var track = PickBackgroundMusicTrack();
-        return track is null ? null : _catalog.GetMediaPath(track);
+        var config = FinTvRuntime.Current?.Configuration;
+        if (config is null)
+        {
+            return _catalog.PickPlayableMusicPath(null, null, fallbackToAllMusic: true);
+        }
+
+        return config.EbsBackgroundMusicSource == EbsBackgroundMusicSource.AllMusicLibraries
+            ? _catalog.PickPlayableMusicPath(null, null, fallbackToAllMusic: true)
+            : _catalog.PickPlayableMusicPath(
+                config.EbsBackgroundMusicLibraryId,
+                config.EbsBackgroundMusicLibraryName,
+                fallbackToAllMusic: true);
     }
 
     private object? DescribeCustomSlate(EbsSlateVariant variant)

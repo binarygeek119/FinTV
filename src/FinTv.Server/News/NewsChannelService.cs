@@ -19,6 +19,8 @@ public sealed class NewsChannelService
     private readonly NewsHeadlineService _headlines;
     private readonly NewsTtsService _tts;
     private readonly NewsShowWriter _writer;
+    private readonly NewsBulletinService _bulletins;
+    private readonly FfmpegCommandBuilder _ffmpeg;
     private readonly IHttpClientFactory _http;
     private readonly ILogger<NewsChannelService> _logger;
 
@@ -31,6 +33,8 @@ public sealed class NewsChannelService
         NewsHeadlineService headlines,
         NewsTtsService tts,
         NewsShowWriter writer,
+        NewsBulletinService bulletins,
+        FfmpegCommandBuilder ffmpeg,
         IHttpClientFactory http,
         ILogger<NewsChannelService> logger)
     {
@@ -42,37 +46,47 @@ public sealed class NewsChannelService
         _headlines = headlines;
         _tts = tts;
         _writer = writer;
+        _bulletins = bulletins;
+        _ffmpeg = ffmpeg;
         _http = http;
         _logger = logger;
     }
 
     public async Task StreamAsync(Channel channel, Stream output, CancellationToken cancellationToken)
     {
-        var settings = await _db.NewsSettings.AsNoTracking().FirstOrDefaultAsync(cancellationToken) ?? new NewsSettings();
-        var header = string.IsNullOrWhiteSpace(settings.HeaderText) ? "FlowWire News" : settings.HeaderText.Trim();
-        var newsDir = FinTvRuntime.Current.NewsFolder;
-        Directory.CreateDirectory(newsDir);
-        var (width, height) = channel.AspectRatio == AspectRatioMode.FourThree ? (640, 480) : (1280, 720);
-        var presentation = await BuildPresentationAsync(
-            settings,
-            header,
-            await _headlines.GetAsync(force: false, cancellationToken),
-            newsDir,
-            width,
-            height,
-            channel,
-            cancellationToken);
-
-        var args = BuildAssEncodeArgs(width, height, presentation);
-        AppendMux(args, presentation.Timeline.TotalSeconds, mpegts: true, filePath: null);
-        var result = await RunFfmpegAsync(args, output, cancellationToken);
-        if (result != 0 && !cancellationToken.IsCancellationRequested)
+        var videoPath = _bulletins.ResolvePlayableVideoPath();
+        if (videoPath is null)
         {
-            _logger.LogWarning("News ffmpeg with ASS overlay exited {Code}; using drawtext fallback", result);
-            var fallback = BuildDrawtextArgs(width, height, presentation);
-            AppendMux(fallback, presentation.Timeline.TotalSeconds, mpegts: true, filePath: null);
-            await RunFfmpegAsync(fallback, output, cancellationToken);
+            _logger.LogInformation("News channel {Channel} has no bulletin yet; encoding one before playback", channel.Name);
+            videoPath = await _bulletins.EnsurePlayableAsync(cancellationToken);
         }
+
+        if (videoPath is null)
+        {
+            _logger.LogWarning("News bulletin is not ready for {Channel}; using Off Air slate", channel.Name);
+            await WriteEbsFallbackAsync(channel, output, cancellationToken);
+            return;
+        }
+
+        var duration = await _tts.ProbeDurationSecondsAsync(videoPath, cancellationToken);
+        if (duration < 1)
+        {
+            duration = 60;
+        }
+
+        var args = _ffmpeg.BuildMediaCommand(channel, videoPath, 0, duration, bugImagePath: null);
+        var exit = await RunFfmpegAsync(args, output, cancellationToken);
+        if (exit != 0 && !cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning("News bulletin playback exited {Code} for {Channel}", exit, channel.Name);
+        }
+    }
+
+    private async Task WriteEbsFallbackAsync(Channel channel, Stream output, CancellationToken cancellationToken)
+    {
+        var plan = _ebs.CreatePlaybackPlan(channel, durationSeconds: 30);
+        var args = _ffmpeg.BuildEbsCommand(channel, plan);
+        await RunFfmpegAsync(args, output, cancellationToken);
     }
 
     public async Task<bool> RenderBulletinFileAsync(
@@ -581,15 +595,10 @@ public sealed class NewsChannelService
             return null;
         }
 
-        var tracks = !string.IsNullOrWhiteSpace(settings.MusicLibraryId) || !string.IsNullOrWhiteSpace(settings.MusicLibraryName)
-            ? _catalog.QueryMusicAudioFromLibrary(settings.MusicLibraryId, settings.MusicLibraryName)
-            : [];
-        if (tracks.Count == 0)
-        {
-            return _ebs.ResolveBackgroundMusicPath();
-        }
-
-        return _catalog.GetMediaPath(tracks[Random.Shared.Next(tracks.Count)]);
+        var fromLibrary = !string.IsNullOrWhiteSpace(settings.MusicLibraryId) || !string.IsNullOrWhiteSpace(settings.MusicLibraryName)
+            ? _catalog.PickPlayableMusicPath(settings.MusicLibraryId, settings.MusicLibraryName, fallbackToAllMusic: true)
+            : null;
+        return fromLibrary ?? _ebs.ResolveBackgroundMusicPath();
     }
 
     private async Task<NewsBumperClip?> ResolveBumperAsync(

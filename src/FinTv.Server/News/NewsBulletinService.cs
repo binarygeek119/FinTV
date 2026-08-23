@@ -75,11 +75,37 @@ public sealed class NewsBulletinService
     }
 
     public async Task<NewsBulletinRunResult> RunAsync(bool scheduled, CancellationToken cancellationToken)
+        => await RunAsync(scheduled, required: false, cancellationToken);
+
+    public async Task<string?> EnsurePlayableAsync(CancellationToken cancellationToken)
+    {
+        var existing = ResolvePlayableVideoPath();
+        if (existing is not null)
+        {
+            return existing;
+        }
+
+        await RunAsync(scheduled: false, required: true, cancellationToken);
+        return ResolvePlayableVideoPath();
+    }
+
+    public string? ResolvePlayableVideoPath()
+    {
+        var ledger = LoadLedger();
+        if (IsPlayableVideo(ledger.LastVideoPath))
+        {
+            return ledger.LastVideoPath;
+        }
+
+        return NewestPlayableVideo();
+    }
+
+    private async Task<NewsBulletinRunResult> RunAsync(bool scheduled, bool required, CancellationToken cancellationToken)
     {
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            return await RunCoreAsync(scheduled, cancellationToken);
+            return await RunCoreAsync(scheduled, required, cancellationToken);
         }
         finally
         {
@@ -87,7 +113,7 @@ public sealed class NewsBulletinService
         }
     }
 
-    private async Task<NewsBulletinRunResult> RunCoreAsync(bool scheduled, CancellationToken cancellationToken)
+    private async Task<NewsBulletinRunResult> RunCoreAsync(bool scheduled, bool required, CancellationToken cancellationToken)
     {
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
@@ -97,6 +123,7 @@ public sealed class NewsBulletinService
         var ledger = LoadLedger();
         var ranAt = DateTimeOffset.Now;
         var min = ClampMin(settings.MinNewStories);
+        var currentVideo = ResolvePlayableVideoPath();
 
         if (scheduled && !settings.BulletinVideosEnabled)
         {
@@ -106,13 +133,18 @@ public sealed class NewsBulletinService
         var articles = await _headlines.GetAsync(force: true, cancellationToken);
         var used = new HashSet<string>(ledger.Keys, StringComparer.Ordinal);
         var newStories = articles.Where(article => !used.Contains(StoryKey(article))).ToList();
+        var encoded = newStories.Take(Math.Clamp(settings.ArticleCount, 1, 30)).ToList();
+        if (encoded.Count == 0 && required)
+        {
+            encoded = articles.Take(Math.Clamp(settings.ArticleCount, 1, 30)).ToList();
+        }
 
-        if (newStories.Count == 0)
+        if (encoded.Count == 0)
         {
             return SaveSkip(ledger, ranAt, "No new stories.", 0);
         }
 
-        if (newStories.Count < min)
+        if (!required && newStories.Count < min)
         {
             return SaveSkip(
                 ledger,
@@ -121,11 +153,11 @@ public sealed class NewsBulletinService
                 newStories.Count);
         }
 
-        var encoded = newStories.Take(Math.Clamp(settings.ArticleCount, 1, 30)).ToList();
         var newsRoot = FinTvRuntime.Current.NewsFolder;
-        var stamp = ranAt.ToLocalTime().ToString("yyyyMMdd-HHmm");
+        var stamp = ranAt.ToLocalTime().ToString("yyyyMMdd-HHmmss");
         var workDir = Path.Combine(newsRoot, "bulletins", "work-" + stamp);
         var outputMp4 = Path.Combine(newsRoot, "bulletins", $"news-{stamp}.mp4");
+        var stagingMp4 = outputMp4 + ".partial";
         var header = string.IsNullOrWhiteSpace(settings.HeaderText) ? "FlowWire News" : settings.HeaderText.Trim();
 
         var ok = await renderer.RenderBulletinFileAsync(
@@ -133,19 +165,35 @@ public sealed class NewsBulletinService
             encoded,
             header,
             workDir,
-            outputMp4,
+            stagingMp4,
             cancellationToken);
 
         TryDeleteDirectory(workDir);
 
-        if (!ok)
+        if (!ok || !IsPlayableVideo(stagingMp4))
         {
+            TryDeleteFile(stagingMp4);
             return SaveSkip(ledger, ranAt, "FFmpeg failed to create the news video.", encoded.Count);
+        }
+
+        try
+        {
+            File.Move(stagingMp4, outputMp4, overwrite: false);
+        }
+        catch (Exception ex)
+        {
+            TryDeleteFile(stagingMp4);
+            _logger.LogWarning(ex, "Could not publish news video {Path}", outputMp4);
+            return SaveSkip(ledger, ranAt, "Could not publish the news video.", encoded.Count);
         }
 
         foreach (var story in encoded)
         {
-            ledger.Keys.Add(StoryKey(story));
+            var key = StoryKey(story);
+            if (!used.Contains(key))
+            {
+                ledger.Keys.Add(key);
+            }
         }
 
         if (ledger.Keys.Count > MaxTrackedStories)
@@ -160,7 +208,7 @@ public sealed class NewsBulletinService
         ledger.LastNewStoryCount = newStories.Count;
         ledger.LastEncodedStoryCount = encoded.Count;
         SaveLedger(ledger);
-        PruneOldVideos(Path.Combine(newsRoot, "bulletins"));
+        PruneOldVideos(Path.Combine(newsRoot, "bulletins"), keepPath: currentVideo, currentPath: outputMp4);
 
         _logger.LogInformation(
             "News bulletin created {Path} with {Encoded} of {New} new stories",
@@ -221,20 +269,60 @@ public sealed class NewsBulletinService
         File.WriteAllText(path, JsonSerializer.Serialize(ledger, JsonOptions));
     }
 
-    private static void PruneOldVideos(string folder)
+    private static bool IsPlayableVideo(string? path)
+        => !string.IsNullOrWhiteSpace(path)
+           && !path.EndsWith(".partial", StringComparison.OrdinalIgnoreCase)
+           && File.Exists(path)
+           && new FileInfo(path).Length > 1024;
+
+    private static string? NewestPlayableVideo()
+    {
+        var folder = Path.Combine(FinTvRuntime.Current.NewsFolder, "bulletins");
+        if (!Directory.Exists(folder))
+        {
+            return null;
+        }
+
+        return Directory.GetFiles(folder, "news-*.mp4")
+            .Where(IsPlayableVideo)
+            .Select(path => new FileInfo(path))
+            .OrderByDescending(info => info.LastWriteTimeUtc)
+            .Select(info => info.FullName)
+            .FirstOrDefault();
+    }
+
+    private static void PruneOldVideos(string folder, string? keepPath, string? currentPath)
     {
         if (!Directory.Exists(folder))
         {
             return;
         }
 
+        var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(keepPath))
+        {
+            keep.Add(keepPath);
+        }
+
+        if (!string.IsNullOrWhiteSpace(currentPath))
+        {
+            keep.Add(currentPath);
+        }
+
         var files = Directory.GetFiles(folder, "news-*.mp4")
             .Select(path => new FileInfo(path))
+            .Where(info => !info.Name.EndsWith(".partial", StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(info => info.LastWriteTimeUtc)
-            .Skip(MaxKeptVideos)
             .ToList();
+        var kept = 0;
         foreach (var file in files)
         {
+            if (keep.Contains(file.FullName) || kept < MaxKeptVideos)
+            {
+                kept++;
+                continue;
+            }
+
             try
             {
                 file.Delete();
@@ -243,6 +331,26 @@ public sealed class NewsBulletinService
             {
                 // leave extras if they are in use
             }
+        }
+
+        foreach (var leftover in Directory.GetFiles(folder, "news-*.mp4.partial"))
+        {
+            TryDeleteFile(leftover);
+        }
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // staging files are replaced on the next successful run
         }
     }
 

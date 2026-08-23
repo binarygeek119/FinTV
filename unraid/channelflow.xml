@@ -26,6 +26,7 @@
   <Config Name="Postgres Database" Target="POSTGRES_DB" Default="fintv" Mode="" Description="Database name" Type="Variable" Display="advanced" Required="false" Mask="false">fintv</Config>
   <Config Name="Postgres User" Target="POSTGRES_USER" Default="fintv" Mode="" Description="Database user" Type="Variable" Display="advanced" Required="false" Mask="false">fintv</Config>
   <Config Name="Postgres Password" Target="POSTGRES_PASSWORD" Default="" Mode="" Description="Database password" Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  <Config Name="FFmpeg path" Target="FFMPEG_PATH" Default="/usr/bin/ffmpeg" Mode="" Description="Path to ffmpeg inside the container" Type="Variable" Display="advanced" Required="false" Mask="false">/usr/bin/ffmpeg</Config>
   <Config Name="FFmpeg HWAccel" Target="FFMPEG_HWACCEL" Default="vaapi" Mode="" Description="Set vaapi for Intel Quick Sync encode/decode, or leave empty for software" Type="Variable" Display="advanced" Required="false" Mask="false">vaapi</Config>
   <Config Name="Public URL" Target="CHANNELFLOW_PUBLIC_URL" Default="" Mode="" Description="Public origin for M3U/XMLTV when reverse-proxied, e.g. https://channelflow.example.duckdns.org" Type="Variable" Display="always" Required="false" Mask="false"></Config>
   <Config Name="Path base" Target="CHANNELFLOW_PATH_BASE" Default="" Mode="" Description="Only if the UI is under a subpath, e.g. /channelflow" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>

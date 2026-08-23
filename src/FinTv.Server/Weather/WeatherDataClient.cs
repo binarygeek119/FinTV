@@ -168,6 +168,7 @@ public sealed class WeatherDataClient
                     Name = i == 0 ? "Today" : date.ToDateTime(TimeOnly.MinValue).ToString("dddd"),
                     IconKey = WeatherIconMap.FromWmo(codes[i].GetInt32()),
                     Narrative = WeatherIconMap.FromWmoText(codes[i].GetInt32()),
+                    Condition = WeatherIconMap.FromWmoText(codes[i].GetInt32()),
                     High = max[i].GetDouble(),
                     Low = min[i].GetDouble()
                 });
@@ -285,9 +286,9 @@ public sealed class WeatherDataClient
                 var iconKey = WeatherIconMap.FromNwsIcon(
                     period.TryGetProperty("icon", out var icon) ? icon.GetString() : null,
                     period.GetProperty("shortForecast").GetString());
+                var shortForecast = period.GetProperty("shortForecast").GetString() ?? "";
                 var narrative = period.GetProperty("detailedForecast").GetString()
-                    ?? period.GetProperty("shortForecast").GetString()
-                    ?? "";
+                    ?? shortForecast;
                 periods.Add(new WeatherForecastPeriod
                 {
                     Name = name,
@@ -306,6 +307,7 @@ public sealed class WeatherDataClient
                         Name = dayName,
                         IconKey = iconKey,
                         Narrative = narrative,
+                        Condition = shortForecast,
                         High = isDay ? temp : null,
                         Low = isDay ? null : temp
                     };
@@ -318,6 +320,7 @@ public sealed class WeatherDataClient
                         Name = existing.Name,
                         IconKey = iconKey,
                         Narrative = narrative,
+                        Condition = shortForecast,
                         High = temp,
                         Low = existing.Low
                     };
@@ -330,6 +333,7 @@ public sealed class WeatherDataClient
                         Name = existing.Name,
                         IconKey = existing.IconKey,
                         Narrative = existing.Narrative,
+                        Condition = existing.Condition,
                         High = existing.High,
                         Low = temp
                     };
@@ -1050,13 +1054,24 @@ public sealed class WeatherDataClient
         }
 
         var city = name.Split(',')[0].Trim();
+        var slash = city.IndexOf('/');
+        if (slash >= 0 && slash < city.Length - 1)
+        {
+            city = city[(slash + 1)..].Trim();
+        }
+
         foreach (var strip in new[]
                  {
                      " International Airport",
                      " Regional Airport",
                      " Municipal Airport",
+                     " Municipal Arpt",
                      " Municipal",
+                     " Muni",
                      " Airport",
+                     " Airpark",
+                     " Heliport",
+                     " Field",
                      " Weather Forecast Office",
                      " Weather Station"
                  })
@@ -1064,6 +1079,15 @@ public sealed class WeatherDataClient
             if (city.EndsWith(strip, StringComparison.OrdinalIgnoreCase))
             {
                 city = city[..^strip.Length].Trim();
+            }
+        }
+
+        foreach (var cut in new[] { " Municipal", " Muni", " Airport" })
+        {
+            var at = city.IndexOf(cut, StringComparison.OrdinalIgnoreCase);
+            if (at > 0)
+            {
+                city = city[..at].Trim();
             }
         }
 

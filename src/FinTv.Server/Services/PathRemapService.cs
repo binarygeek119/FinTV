@@ -181,10 +181,55 @@ public sealed class FfmpegLocator : IFfmpegLocator
 
     public FfmpegLocator(IConfiguration configuration)
     {
-        EncoderPath = configuration["FFMPEG_PATH"]
-            ?? Environment.GetEnvironmentVariable("FFMPEG_PATH")
-            ?? FindOnPath("ffmpeg")
-            ?? "ffmpeg";
+        EncoderPath = Resolve(FirstNonBlank(
+            configuration["FFMPEG_PATH"],
+            Environment.GetEnvironmentVariable("FFMPEG_PATH"),
+            AppEnvironment.Get("FFMPEG_PATH")));
+    }
+
+    private static string Resolve(string? configured)
+    {
+        foreach (var candidate in EnumerateCandidates(configured))
+        {
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return string.IsNullOrWhiteSpace(configured) ? "ffmpeg" : configured.Trim();
+    }
+
+    private static IEnumerable<string> EnumerateCandidates(string? configured)
+    {
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            yield return configured.Trim();
+        }
+
+        var onPath = FindOnPath("ffmpeg");
+        if (!string.IsNullOrWhiteSpace(onPath))
+        {
+            yield return onPath;
+        }
+
+        foreach (var wellKnown in new[] { "/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg" })
+        {
+            yield return wellKnown;
+        }
+    }
+
+    private static string? FirstNonBlank(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                return value.Trim();
+            }
+        }
+
+        return null;
     }
 
     private static string? FindOnPath(string name)

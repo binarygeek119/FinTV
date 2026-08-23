@@ -267,18 +267,14 @@ public class WeatherStarChannelService
             return _ebs.ResolveBackgroundMusicPath();
         }
 
-        var libraryId = config.WeatherMusicLibraryId ?? config.EbsBackgroundMusicLibraryId;
-        var libraryName = config.WeatherMusicLibraryName ?? config.EbsBackgroundMusicLibraryName;
-        var tracks = string.IsNullOrWhiteSpace(libraryId) && string.IsNullOrWhiteSpace(libraryName)
-            ? _catalog.QueryAllMusicAudio()
-            : _catalog.QueryMusicAudioFromLibrary(libraryId, libraryName);
-        if (tracks.Count == 0)
-        {
-            return _ebs.ResolveBackgroundMusicPath();
-        }
-
-        var track = tracks[Random.Shared.Next(tracks.Count)];
-        return _catalog.GetMediaPath(track);
+        var selectedId = string.IsNullOrWhiteSpace(config.WeatherMusicLibraryId) ? null : config.WeatherMusicLibraryId;
+        var selectedName = string.IsNullOrWhiteSpace(config.WeatherMusicLibraryName) ? null : config.WeatherMusicLibraryName;
+        var libraryId = selectedId ?? config.EbsBackgroundMusicLibraryId;
+        var libraryName = selectedName ?? config.EbsBackgroundMusicLibraryName;
+        var fromLibrary = string.IsNullOrWhiteSpace(libraryId) && string.IsNullOrWhiteSpace(libraryName)
+            ? _catalog.PickPlayableMusicPath(null, null, fallbackToAllMusic: true)
+            : _catalog.PickPlayableMusicPath(libraryId, libraryName, fallbackToAllMusic: true);
+        return fromLibrary ?? _ebs.ResolveBackgroundMusicPath();
     }
 
     internal static string BuildWeatherPageUrl(
@@ -449,8 +445,9 @@ public class WeatherStarChannelService
                 }
             }
 
-            var (screen, radarIndex, screenRepeat) = sequencer.At(DateTime.UtcNow - started);
-            var jpeg = _compositor.RenderJpeg(current, screen, sequencer.Skin, width, height, sequencer.Scanlines, radarIndex, screenRepeat);
+            var elapsed = DateTime.UtcNow - started;
+            var (screen, radarIndex, screenRepeat) = sequencer.At(elapsed);
+            var jpeg = _compositor.RenderJpeg(current, screen, sequencer.Skin, width, height, sequencer.Scanlines, radarIndex, screenRepeat, elapsed);
             await frameStream.WriteFrameAsync(jpeg, cancellationToken);
             await Task.Delay(frameDelay, cancellationToken);
         }
@@ -472,7 +469,7 @@ public class WeatherStarChannelService
         while (!cancellationToken.IsCancellationRequested
             && (DateTime.UtcNow - started).TotalSeconds < durationSeconds)
         {
-            var jpeg = _compositor.RenderJpeg(snap, WeatherStarScreen.Hazards, skin, width, height, scanlines, frame / 10);
+            var jpeg = _compositor.RenderJpeg(snap, WeatherStarScreen.Hazards, skin, width, height, scanlines, frame / 10, elapsed: DateTime.UtcNow - started);
             await frameStream.WriteFrameAsync(jpeg, cancellationToken);
             frame++;
             await Task.Delay(frameDelay, cancellationToken);

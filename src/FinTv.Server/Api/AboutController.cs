@@ -1,8 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
-using System.Text;
-using CliWrap;
 using FinTv.Domain;
 using FinTv.Services;
 using FinTv.Streaming;
@@ -24,17 +22,20 @@ public class AboutController : ControllerBase
     private readonly FfmpegEncodingService _encoding;
     private readonly IFfmpegLocator _ffmpeg;
     private readonly StreamService _streams;
+    private readonly ILogger<AboutController> _logger;
 
     public AboutController(
         IWebHostEnvironment env,
         FfmpegEncodingService encoding,
         IFfmpegLocator ffmpeg,
-        StreamService streams)
+        StreamService streams,
+        ILogger<AboutController> logger)
     {
         _env = env;
         _encoding = encoding;
         _ffmpeg = ffmpeg;
         _streams = streams;
+        _logger = logger;
     }
 
     [HttpGet]
@@ -146,27 +147,96 @@ public class AboutController : ControllerBase
         return (informational[..plus], informational[(plus + 1)..]);
     }
 
-    private static async Task<string> ReadFfmpegVersionAsync(string path, CancellationToken cancellationToken)
+    private async Task<string> ReadFfmpegVersionAsync(string path, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return "Not found";
+        }
+
+        try
+        {
+            using var process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = path,
+                    ArgumentList = { "-nostdin", "-hide_banner", "-version" },
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    RedirectStandardInput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                }
+            };
+
+            if (!process.Start())
+            {
+                return "Unavailable";
+            }
+
+            process.StandardInput.Close();
+
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(12));
+            var stdoutTask = process.StandardOutput.ReadToEndAsync(timeout.Token);
+            var stderrTask = process.StandardError.ReadToEndAsync(timeout.Token);
+            try
+            {
+                await process.WaitForExitAsync(timeout.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                TryKill(process);
+                try
+                {
+                    await Task.WhenAll(stdoutTask, stderrTask);
+                }
+                catch (Exception)
+                {
+                    // Streams may already be cancelled with the process.
+                }
+
+                _logger.LogWarning("FFmpeg version probe timed out at {Path}", path);
+                return "Unavailable";
+            }
+
+            var text = string.Concat(await stdoutTask, Environment.NewLine, await stderrTask);
+            var line = text
+                .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+                .Select(item => item.Trim())
+                .FirstOrDefault(item => item.Contains("ffmpeg version", StringComparison.OrdinalIgnoreCase))
+                ?? text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+                    .Select(item => item.Trim())
+                    .FirstOrDefault();
+
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                return "Unknown";
+            }
+
+            var copyright = line.IndexOf(" Copyright", StringComparison.OrdinalIgnoreCase);
+            return copyright > 0 ? line[..copyright].Trim() : line;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "FFmpeg version probe failed at {Path}", path);
+            return System.IO.File.Exists(path) ? "Installed (version unknown)" : "Not found";
+        }
+    }
+
+    private static void TryKill(Process process)
     {
         try
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromSeconds(4));
-            var stdout = new StringBuilder();
-            await Cli.Wrap(path)
-                .WithArguments("-version")
-                .WithValidation(CommandResultValidation.None)
-                .WithStandardOutputPipe(PipeTarget.ToStringBuilder(stdout))
-                .WithStandardErrorPipe(PipeTarget.ToStringBuilder(new StringBuilder()))
-                .ExecuteAsync(timeout.Token);
-            var line = stdout.ToString()
-                .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
-                .FirstOrDefault();
-            return string.IsNullOrWhiteSpace(line) ? "Unknown" : line.Trim();
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
         }
-        catch (Exception)
+        catch
         {
-            return "Unavailable";
+            // Best-effort; the About page should still render.
         }
     }
 

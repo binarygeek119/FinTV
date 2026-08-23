@@ -938,7 +938,7 @@
                 </div>
                 <div class="card section-card">
                     <h2>News video</h2>
-                    <p class="hint">Encodes an MP4 from unused RSS headlines at 00:00, 06:00, 12:00, and 18:00 local time. Skips when there are no new stories, or fewer than the minimum on the News tab.</p>
+                    <p class="hint">Builds the MP4 the news channel plays (intro, speech, story pictures, and outro) at 00:00, 06:00, 12:00, and 18:00 local time. The current video is not replaced until the new file succeeds. Skips when there are no new stories, or fewer than the minimum on the News tab.</p>
                     <p id="task-news-bulletin-status" class="hint">Loading news video status…</p>
                     <button type="button" id="btn-run-news-bulletin-task" class="raised button-submit emby-button">Create News Video</button>
                 </div>
@@ -991,9 +991,9 @@
                 <div class="card section-card">
                     <h3>Authors</h3>
                     <ul class="credits-list">
-                        <li><a href="https://github.com/binarygeek119" target="_blank" rel="noopener">binarygeek119</a> — author of ChannelFlow</li>
-                        <li><a href="https://github.com/netbymatt" target="_blank" rel="noopener">netbymatt</a> — WeatherStar 4000+ and WeatherStar 3000+</li>
-                        <li><a href="https://github.com/liam8888999/ErsatzTV-Filler" target="_blank" rel="noopener">liam8888999</a> — ErsatzTV-Filler</li>
+                        <li><a href="https://github.com/binarygeek119" target="_blank" rel="noopener">binarygeek119</a> — author of <a href="https://github.com/FlowMeadow01/ChannelFlow" target="_blank" rel="noopener">ChannelFlow</a></li>
+                        <li><a href="https://github.com/netbymatt" target="_blank" rel="noopener">netbymatt</a> — <a href="https://github.com/netbymatt/ws4kp" target="_blank" rel="noopener">WeatherStar 4000+</a> and <a href="https://github.com/netbymatt/ws3kp" target="_blank" rel="noopener">WeatherStar 3000+</a></li>
+                        <li><a href="https://github.com/liam8888999" target="_blank" rel="noopener">liam8888999</a> — <a href="https://github.com/liam8888999/ErsatzTV-Filler" target="_blank" rel="noopener">ErsatzTV-Filler</a></li>
                         <li><a href="https://github.com/jasongdove" target="_blank" rel="noopener">jasongdove</a> — <a href="https://ersatztv.org" target="_blank" rel="noopener">ErsatzTV</a></li>
                     </ul>
                 </div>
@@ -1018,7 +1018,6 @@
                         <li><a href="https://github.com/vbguyny/ws4kp" target="_blank" rel="noopener">Original WeatherStar 4000+</a> by Mike Battaglia</li>
                         <li><a href="https://twcclassics.com/" target="_blank" rel="noopener">TWCClassics</a> — WeatherStar fonts and icon references</li>
                         <li><a href="https://www.weather.gov/documentation/services-web-api" target="_blank" rel="noopener">NOAA / National Weather Service</a> — forecasts, observations, and alerts</li>
-                        <li><a href="https://mesonet.agron.iastate.edu/" target="_blank" rel="noopener">Iowa Environmental Mesonet</a> — NEXRAD radar imagery</li>
                     </ul>
                 </div>
                 <div class="card section-card">
@@ -1098,7 +1097,7 @@
                 </div>
                 <div class="card section-card">
                     <div class="section-header"><h3>News videos</h3></div>
-                    <p class="hint">Every 6 hours (00:00, 06:00, 12:00, 18:00 local) ChannelFlow encodes an MP4 of unused RSS headlines. If there are no new stories, or fewer than the minimum, the run is skipped. Videos are saved under the server news/bulletins folder.</p>
+                    <p class="hint">The news channel plays a premade MP4 (intro + speech + story images/text + outro). ChannelFlow builds that file every 6 hours (00:00, 06:00, 12:00, 18:00 local) from unused RSS headlines. The previous video stays on air until the new file is finished and verified. If there are no new stories, or fewer than the minimum, the run is skipped.</p>
                     <label class="field checkbox-field"><input id="news-bulletin-enabled" type="checkbox" checked><span class="channelflow-check-box"></span><span>Create a news video every 6 hours</span></label>
                     <label class="field"><span>Minimum new stories</span><input id="news-min-new" type="number" min="1" max="30" value="1" class="emby-input"></label>
                     <p id="news-bulletin-status" class="hint">No bulletin has run yet.</p>

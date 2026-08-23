@@ -4,8 +4,7 @@ namespace FinTv.Weather;
 
 public sealed class WeatherStarSequencer
 {
-    private readonly IReadOnlyList<WeatherStarScreen> _screens;
-    private readonly TimeSpan _screenDuration;
+    private readonly IReadOnlyList<Slot> _slots;
     private readonly bool _scanlines;
     public readonly WeatherStarDockerVariant Skin;
     public readonly bool Wide;
@@ -28,72 +27,100 @@ public sealed class WeatherStarSequencer
             speed = Math.Clamp(parsed, 0.5, 2.0);
         }
 
-        _screenDuration = TimeSpan.FromSeconds(10 * speed);
-        var screens = new List<WeatherStarScreen>();
+        var screen = TimeSpan.FromSeconds(16 * speed);
+        var week = TimeSpan.FromSeconds(22 * speed);
+        var travel = TimeSpan.FromSeconds(40 * speed);
+        var slots = new List<Slot>();
         if (hasAlerts)
         {
-            Add(screens, flags, "hazards", WeatherStarScreen.Hazards);
+            Add(slots, flags, "hazards", WeatherStarScreen.Hazards, screen);
         }
 
-        Add(screens, flags, "current-weather", WeatherStarScreen.Current);
-        Add(screens, flags, "latest-observations", WeatherStarScreen.Observations);
-        Add(screens, flags, "hourly", WeatherStarScreen.Hourly);
-        Add(screens, flags, "hourly-graph", WeatherStarScreen.HourlyGraph);
+        Add(slots, flags, "current-weather", WeatherStarScreen.Current, screen);
+        Add(slots, flags, "latest-observations", WeatherStarScreen.Observations, screen);
+        Add(slots, flags, "hourly", WeatherStarScreen.Hourly, screen);
+        Add(slots, flags, "hourly-graph", WeatherStarScreen.HourlyGraph, screen);
         if (Flag(flags, "local-forecast", true))
         {
             var pages = Math.Clamp(localForecastPages, 1, 6);
             for (var i = 0; i < pages; i++)
             {
-                screens.Add(WeatherStarScreen.LocalForecast);
+                slots.Add(new Slot(WeatherStarScreen.LocalForecast, week));
             }
         }
 
-        Add(screens, flags, "extended-forecast", WeatherStarScreen.ExtendedForecast);
-        Add(screens, flags, "regional-forecast", WeatherStarScreen.Regional);
-        Add(screens, flags, "travel", WeatherStarScreen.Travel);
-        Add(screens, flags, "almanac", WeatherStarScreen.Almanac);
-        Add(screens, flags, "spc-outlook", WeatherStarScreen.SpcOutlook);
-        Add(screens, flags, "radar", WeatherStarScreen.Radar);
-        _screens = screens.Count == 0 ? [WeatherStarScreen.Current, WeatherStarScreen.LocalForecast] : screens;
+        if (Flag(flags, "extended-forecast", true))
+        {
+            slots.Add(new Slot(WeatherStarScreen.ExtendedForecast, week));
+            slots.Add(new Slot(WeatherStarScreen.ExtendedForecast, week));
+        }
+        Add(slots, flags, "regional-forecast", WeatherStarScreen.Regional, screen);
+        Add(slots, flags, "travel", WeatherStarScreen.Travel, travel);
+        Add(slots, flags, "almanac", WeatherStarScreen.Almanac, screen);
+        Add(slots, flags, "spc-outlook", WeatherStarScreen.SpcOutlook, screen);
+        Add(slots, flags, "radar", WeatherStarScreen.Radar, screen);
+        _slots = slots.Count == 0
+            ? [new Slot(WeatherStarScreen.Current, screen), new Slot(WeatherStarScreen.LocalForecast, week)]
+            : slots;
     }
 
     public bool Scanlines => _scanlines;
 
     public (WeatherStarScreen Screen, int RadarIndex, int Repeat) At(TimeSpan elapsed)
     {
-        if (_screens.Count == 0)
+        if (_slots.Count == 0)
         {
             return (WeatherStarScreen.Current, 0, 0);
         }
 
-        var cycle = _screenDuration.TotalMilliseconds * _screens.Count;
+        var cycle = 0.0;
+        foreach (var slot in _slots)
+        {
+            cycle += slot.Duration.TotalMilliseconds;
+        }
+
         var pos = elapsed.TotalMilliseconds % cycle;
         if (pos < 0)
         {
             pos += cycle;
         }
 
-        var index = Math.Min(_screens.Count - 1, (int)(pos / _screenDuration.TotalMilliseconds));
-        var screen = _screens[index];
-        var within = pos - index * _screenDuration.TotalMilliseconds;
-        var radarIndex = (int)(within / 400);
-        var repeat = 0;
-        for (var i = 0; i < index; i++)
+        var acc = 0.0;
+        for (var i = 0; i < _slots.Count; i++)
         {
-            if (_screens[i] == screen)
+            var next = acc + _slots[i].Duration.TotalMilliseconds;
+            if (pos < next || i == _slots.Count - 1)
             {
-                repeat++;
+                var within = Math.Max(0, pos - acc);
+                var radarIndex = (int)(within / 400);
+                var repeat = 0;
+                for (var j = 0; j < i; j++)
+                {
+                    if (_slots[j].Screen == _slots[i].Screen)
+                    {
+                        repeat++;
+                    }
+                }
+
+                return (_slots[i].Screen, radarIndex, repeat);
             }
+
+            acc = next;
         }
 
-        return (screen, radarIndex, repeat);
+        return (_slots[0].Screen, 0, 0);
     }
 
-    private static void Add(List<WeatherStarScreen> screens, Dictionary<string, string> flags, string key, WeatherStarScreen screen)
+    private static void Add(
+        List<Slot> slots,
+        Dictionary<string, string> flags,
+        string key,
+        WeatherStarScreen screen,
+        TimeSpan duration)
     {
         if (Flag(flags, key, true))
         {
-            screens.Add(screen);
+            slots.Add(new Slot(screen, duration));
         }
     }
 
@@ -130,4 +157,6 @@ public sealed class WeatherStarSequencer
 
         return result;
     }
+
+    private readonly record struct Slot(WeatherStarScreen Screen, TimeSpan Duration);
 }

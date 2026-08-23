@@ -14,6 +14,7 @@ services:
       CHANNELFLOW_CONFIG: /config
       JELLYFIN_URL: ${JELLYFIN_URL:-http://jellyfin:8096}
       TZ: ${TZ:-America/Chicago}
+      FFMPEG_PATH: ${FFMPEG_PATH:-/usr/bin/ffmpeg}
       FFMPEG_HWACCEL: ${FFMPEG_HWACCEL:-vaapi}
       FFMPEG_VAAPI_DEVICE: ${FFMPEG_VAAPI_DEVICE:-/dev/dri/renderD128}
       CHANNELFLOW_PUBLIC_URL: ${CHANNELFLOW_PUBLIC_URL:-${FINTV_PUBLIC_URL:-}}
