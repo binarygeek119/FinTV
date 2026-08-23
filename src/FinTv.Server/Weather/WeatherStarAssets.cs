@@ -78,7 +78,8 @@ public sealed class WeatherStarAssets : IDisposable
         var file = screen switch
         {
             WeatherStarScreen.HourlyGraph or WeatherStarScreen.Travel => wide ? "1-chart-wide.png" : "1-chart.png",
-            WeatherStarScreen.Radar or WeatherStarScreen.Hazards => wide ? "7-wide.png" : "7.png",
+            WeatherStarScreen.Hazards => wide ? "7-wide.png" : "7.png",
+            WeatherStarScreen.Radar => wide ? "4-wide.png" : "4.png",
             WeatherStarScreen.ExtendedForecast or WeatherStarScreen.LocalForecast => wide ? "4-wide.png" : "4.png",
             WeatherStarScreen.Regional => "2.png",
             WeatherStarScreen.SpcOutlook => "6.png",
@@ -93,6 +94,101 @@ public sealed class WeatherStarAssets : IDisposable
         var name = iconKey.EndsWith(".gif", StringComparison.OrdinalIgnoreCase) ? iconKey : iconKey + ".gif";
         var path = FindFile(_ws4Root, name) ?? FindFile(_ws3Root, name);
         return Bitmap(path);
+    }
+
+    public (SKBitmap? Map, SKBitmap? Overlay) RadarBaseMap(double latitude, double longitude)
+    {
+        var key = $"radar-map:{latitude:F2}:{longitude:F2}";
+        var overlayKey = $"radar-overlay:{latitude:F2}:{longitude:F2}";
+        if (_bitmaps.TryGetValue(key, out var mapHit))
+        {
+            _bitmaps.TryGetValue(overlayKey, out var overlayHit);
+            return (mapHit, overlayHit);
+        }
+
+        var origin = WeatherStarRadar.MapOrigin(latitude, longitude);
+        var map = StitchRadarTiles("map", origin.X, origin.Y);
+        var overlay = StitchRadarTiles("overlay", origin.X, origin.Y);
+        if (overlay is not null)
+        {
+            WeatherStarRadar.PunchBlack(overlay);
+        }
+
+        if (map is not null)
+        {
+            _bitmaps[key] = map;
+        }
+
+        if (overlay is not null)
+        {
+            _bitmaps[overlayKey] = overlay;
+        }
+
+        return (map, overlay);
+    }
+
+    private SKBitmap? StitchRadarTiles(string kind, float originX, float originY)
+    {
+        var shiftX = originX % WeatherStarRadar.TileWidth;
+        if (shiftX < 0)
+        {
+            shiftX += WeatherStarRadar.TileWidth;
+        }
+
+        var shiftY = originY % WeatherStarRadar.TileHeight;
+        if (shiftY < 0)
+        {
+            shiftY += WeatherStarRadar.TileHeight;
+        }
+
+        var tileX0 = (int)Math.Floor(originX / WeatherStarRadar.TileWidth);
+        var tileY0 = (int)Math.Floor(originY / WeatherStarRadar.TileHeight);
+        var info = new SKImageInfo(
+            WeatherStarRadar.ViewWidth,
+            WeatherStarRadar.ViewHeight,
+            SKColorType.Bgra8888,
+            SKAlphaType.Unpremul);
+        var dest = new SKBitmap(info);
+        using var canvas = new SKCanvas(dest);
+        canvas.Clear(kind == "map" ? new SKColor(0x5A, 0x6A, 0x7A) : SKColors.Transparent);
+
+        var drew = false;
+        for (var row = 0; row <= 3; row++)
+        {
+            for (var col = 0; col <= 2; col++)
+            {
+                var tile = RadarTileBitmap(kind, tileY0 + row, tileX0 + col);
+                if (tile is null)
+                {
+                    continue;
+                }
+
+                var x = col * WeatherStarRadar.TileWidth - shiftX;
+                var y = row * WeatherStarRadar.TileHeight - shiftY;
+                canvas.DrawBitmap(tile, x, y, new SKSamplingOptions(SKFilterMode.Nearest));
+                drew = true;
+            }
+        }
+
+        if (!drew)
+        {
+            dest.Dispose();
+            return null;
+        }
+
+        return dest;
+    }
+
+    private SKBitmap? RadarTileBitmap(string kind, int tileY, int tileX)
+    {
+        if (tileX < 0 || tileY < 0 || tileX > WeatherStarRadar.TileCountX || tileY > WeatherStarRadar.TileCountY)
+        {
+            return null;
+        }
+
+        var name = $"{kind}-{tileY}-{tileX}.webp";
+        var path = Path.Combine(_ws4Root, "images", "maps", "radar", name);
+        return Bitmap(File.Exists(path) ? path : FindFile(_ws4Root, name));
     }
 
     public void Dispose()
@@ -156,7 +252,15 @@ public sealed class WeatherStarAssets : IDisposable
             return direct;
         }
 
-        foreach (var folder in new[] { "fonts", "images/backgrounds", "images/icons/current-conditions", "backgrounds", "icons" })
+        foreach (var folder in new[]
+                 {
+                     "fonts",
+                     "images/backgrounds",
+                     "images/icons/current-conditions",
+                     "images/maps/radar",
+                     "backgrounds",
+                     "icons"
+                 })
         {
             var candidate = Path.Combine(root, folder.Replace('/', Path.DirectorySeparatorChar), fileName);
             if (File.Exists(candidate))

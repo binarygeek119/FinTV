@@ -1504,7 +1504,7 @@
                 banner.classList.remove('hidden');
                 if (itemCount > 0 && h.earliestStartUtc) {
                     const nextStart = new Date(h.earliestStartUtc).toLocaleString();
-                    banner.textContent = `Nothing on air right now. Next programme starts ${nextStart}. Live TV will show EBS until then.`;
+                    banner.textContent = `Nothing on air right now. Next programme starts ${nextStart}. Live TV will show Off Air until then.`;
                 } else {
                     banner.textContent = 'Live TV guide has no playout for this channel yet. Fill lineup slots (AI Generate or manual), then click Rebuild Playout.';
                 }
@@ -2370,272 +2370,6 @@
         }
     }
 
-    async function loadLogos() {
-        try {
-            const sets = await api('/logos/sets') || [];
-            logoSets = sets;
-            if (!sets.length) {
-                $('logo-set-info').innerHTML = '<div class="empty-state">No logo sets yet. Import Binarygeek119 or create a custom set.</div>';
-                return;
-            }
-
-            $('logo-set-info').innerHTML = sets.map((s) => {
-            const files = (s.entries || []).slice(0, 48).map((e) =>
-                `<span class="badge badge-type" style="margin:.15rem">${escapeHtml(e.displayName || e.fileName)}</span>`).join('');
-            const customBadge = s.isCustom ? '<span class="badge badge-on" style="margin-left:.35rem">Custom</span>' : '';
-            const actions = s.isCustom
-                ? `<div class="actions" style="margin-top:.65rem">
-                        <button type="button" class="emby-button btn-manage-logo-set" data-set-id="${escapeHtml(s.id)}">Manage Logos</button>
-                        <button type="button" class="emby-button btn-delete-logo-set" data-set-id="${escapeHtml(s.id)}">Delete Set</button>
-                   </div>`
-                : '';
-            return `<div class="card"><h3>${escapeHtml(s.name)}${customBadge}</h3><p class="hint">${(s.entries || []).length} logos indexed · assign per channel in the Channels editor</p><div>${files || '<span class="hint">No files found</span>'}</div>${actions}</div>`;
-        }).join('');
-
-        qa('.btn-manage-logo-set').forEach((btn) => {
-            btn.onclick = () => openCustomLogoSetModal(btn.dataset.setId);
-        });
-        qa('.btn-delete-logo-set').forEach((btn) => {
-            btn.onclick = () => deleteCustomLogoSet(btn.dataset.setId);
-        });
-        } catch (err) {
-            reportApiError(err, 'Could not load logo sets.');
-        }
-    }
-
-    async function repairChannelLogos() {
-        try {
-            const result = await api('/logos/repair-channels', { method: 'POST' });
-            const status = $('logo-repair-status');
-            if (status) {
-                status.classList.remove('hidden');
-                const repaired = result.repaired || result.Repaired || [];
-                const missing = result.missing || result.Missing || [];
-                status.textContent = [
-                    `Repaired ${repaired.length} channel(s).`,
-                    repaired.length ? `Updated: ${repaired.join(', ')}` : '',
-                    missing.length ? `Still missing artwork: ${missing.join(', ')}` : 'All channels now have logo assignments.'
-                ].filter(Boolean).join('\n');
-            }
-            toast(`Applied logos to ${(result.repaired || result.Repaired || []).length} channel(s).`, 'success');
-        } catch (err) {
-            toast(err.message, 'error');
-        }
-    }
-
-    function openCreateLogoSetModal() {
-        openModal(
-            'Create Custom Logo Set',
-            `<label class="field"><span>Set name</span><input id="new-logo-set-name" type="text" class="emby-input" placeholder="My Channel Logos"></label>
-             <p class="hint">After creating the set, you can upload named PNG/JPG/WEBP logos and assign them to channels.</p>`,
-            `<button type="button" class="emby-button" id="modal-cancel-logo-set">Cancel</button>
-             <button type="button" class="raised button-submit emby-button" id="modal-save-logo-set">Create Set</button>`
-        );
-
-        $('modal-cancel-logo-set').onclick = closeModal;
-        $('modal-save-logo-set').onclick = () => createCustomLogoSet();
-    }
-
-    async function createCustomLogoSet() {
-        const name = ($('new-logo-set-name')?.value || '').trim();
-        if (!name) {
-            toast('Set name is required.', 'error');
-            return;
-        }
-
-        try {
-            const set = await api('/logos/sets/custom', { method: 'POST', body: { name: name } });
-            closeModal();
-            toast(`Created logo set "${name}".`, 'success');
-            await loadLogos();
-            if (set && set.id) {
-                openCustomLogoSetModal(set.id);
-            }
-        } catch (err) {
-            toast(err.message, 'error');
-        }
-    }
-
-    async function deleteCustomLogoSet(setId) {
-        const set = logoSets.find((s) => s.id === setId);
-        if (!set) {
-            return;
-        }
-
-        if (!confirm(`Delete custom logo set "${set.name}"? This cannot be undone.`)) {
-            return;
-        }
-
-        try {
-            await api('/logos/sets/' + setId, { method: 'DELETE' });
-            toast('Logo set deleted.', 'success');
-            await loadLogos();
-        } catch (err) {
-            toast(err.message, 'error');
-        }
-    }
-
-    async function openCustomLogoSetModal(setId) {
-        const set = await api('/logos/sets/' + setId);
-        if (!set) {
-            toast('Logo set not found.', 'error');
-            return;
-        }
-
-        const modal = document.querySelector('#modal-backdrop .modal');
-        if (modal) {
-            modal.classList.add('modal-wide');
-        }
-
-        const rows = (set.entries || []).map((entry) => `
-            <div class="logo-entry-row" data-entry-id="${escapeHtml(entry.id)}">
-                <label><span>Logo name</span><input type="text" class="emby-input logo-entry-name" value="${escapeHtml(entry.displayName || entry.fileName)}"></label>
-                <label><span>File</span><input type="text" class="emby-input" value="${escapeHtml(entry.fileName)}" readonly></label>
-                <label><span>Replace image</span><input type="file" class="logo-entry-file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"></label>
-                <div class="logo-entry-actions">
-                    <button type="button" class="emby-button btn-save-logo-entry">Save Name</button>
-                    <button type="button" class="emby-button btn-upload-logo-entry">Upload</button>
-                    <button type="button" class="emby-button btn-danger btn-delete-logo-entry">Delete</button>
-                </div>
-            </div>`).join('');
-
-        openModal(
-            `Manage Logos · ${set.name}`,
-            `<div class="logo-upload-row">
-                <label><span>Logo name</span><input id="new-logo-display-name" type="text" class="emby-input" placeholder="FlashBack TV"></label>
-                <label><span>Image file</span><input id="new-logo-file" type="file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"></label>
-                <button type="button" class="raised button-submit emby-button" id="btn-add-custom-logo">Add Logo</button>
-            </div>
-            <div id="custom-logo-entries">${rows || '<div class="empty-state">No logos uploaded yet.</div>'}</div>`,
-            `<button type="button" class="emby-button" id="modal-close-logo-manager">Close</button>`
-        );
-
-        $('modal-close-logo-manager').onclick = () => {
-            if (modal) {
-                modal.classList.remove('modal-wide');
-            }
-            closeModal();
-            loadLogos();
-        };
-
-        $('btn-add-custom-logo').onclick = () => uploadCustomLogo(setId, {
-            displayNameInput: $('new-logo-display-name'),
-            fileInput: $('new-logo-file'),
-            refresh: () => openCustomLogoSetModal(setId)
-        });
-
-        qa('.logo-entry-row').forEach((row) => {
-            const entryId = row.dataset.entryId;
-            row.querySelector('.btn-save-logo-entry').onclick = () => saveCustomLogoName(setId, entryId, row.querySelector('.logo-entry-name').value, setId);
-            row.querySelector('.btn-upload-logo-entry').onclick = () => {
-                const fileInput = row.querySelector('.logo-entry-file');
-                if (!fileInput.files || !fileInput.files[0]) {
-                    toast('Choose a replacement image first.', 'error');
-                    return;
-                }
-
-                replaceCustomLogo(setId, entryId, row.querySelector('.logo-entry-name').value, fileInput.files[0], setId);
-            };
-            row.querySelector('.btn-delete-logo-entry').onclick = () => deleteCustomLogoEntry(setId, entryId, setId);
-        });
-    }
-
-    async function uploadCustomLogo(setId, options) {
-        const displayName = (options.displayNameInput?.value || '').trim();
-        const file = options.fileInput?.files && options.fileInput.files[0];
-        if (!displayName) {
-            toast('Logo name is required.', 'error');
-            return;
-        }
-
-        if (!file) {
-            toast('Choose an image file.', 'error');
-            return;
-        }
-
-        const formData = new FormData();
-        formData.append('displayName', displayName);
-        formData.append('file', file);
-
-        try {
-            await apiForm('/logos/sets/' + setId + '/logos', formData, 'POST');
-            toast('Logo uploaded.', 'success');
-            if (options.displayNameInput) {
-                options.displayNameInput.value = '';
-            }
-            if (options.fileInput) {
-                options.fileInput.value = '';
-            }
-            if (options.refresh) {
-                await options.refresh();
-            } else {
-                await loadLogos();
-            }
-        } catch (err) {
-            toast(err.message, 'error');
-        }
-    }
-
-    async function saveCustomLogoName(setId, entryId, displayName, refreshSetId) {
-        try {
-            await api('/logos/sets/' + setId + '/entries/' + entryId, {
-                method: 'PUT',
-                body: { displayName: displayName }
-            });
-            toast('Logo name saved.', 'success');
-            if (refreshSetId) {
-                await openCustomLogoSetModal(refreshSetId);
-            } else {
-                await loadLogos();
-            }
-        } catch (err) {
-            toast(err.message, 'error');
-        }
-    }
-
-    async function replaceCustomLogo(setId, entryId, displayName, file, refreshSetId) {
-        try {
-            await api('/logos/sets/' + setId + '/entries/' + entryId, { method: 'DELETE' });
-        } catch (err) {
-            toast(err.message, 'error');
-            return;
-        }
-
-        const formData = new FormData();
-        formData.append('displayName', displayName);
-        formData.append('file', file);
-
-        try {
-            await apiForm('/logos/sets/' + setId + '/logos', formData, 'POST');
-            toast('Logo replaced.', 'success');
-            if (refreshSetId) {
-                await openCustomLogoSetModal(refreshSetId);
-            } else {
-                await loadLogos();
-            }
-        } catch (err) {
-            toast(err.message, 'error');
-        }
-    }
-
-    async function deleteCustomLogoEntry(setId, entryId, refreshSetId) {
-        if (!confirm('Delete this logo?')) {
-            return;
-        }
-
-        try {
-            await api('/logos/sets/' + setId + '/entries/' + entryId, { method: 'DELETE' });
-            toast('Logo deleted.', 'success');
-            if (refreshSetId) {
-                await openCustomLogoSetModal(refreshSetId);
-            } else {
-                await loadLogos();
-            }
-        } catch (err) {
-            toast(err.message, 'error');
-        }
-    }
-
     async function loadPresets() {
         try {
             presetNumberingMode = parseInt($('preset-numbering-mode').value, 10) || 0;
@@ -2759,6 +2493,84 @@
             musicLibraryField.style.display = audioMode !== 0 ? 'none' : '';
         }
         updateEbsLibraryFieldVisibility();
+        refreshEbsPreviews();
+    }
+
+    function setEbsPreviewImage(img, url) {
+        if (!img) return;
+        const wrap = img.closest('.ebs-upload-preview-wrap');
+        img.onload = () => {
+            img.classList.remove('hidden');
+            wrap?.classList.remove('hidden');
+        };
+        img.onerror = () => {
+            img.classList.add('hidden');
+            img.removeAttribute('src');
+            wrap?.classList.add('hidden');
+        };
+        img.classList.add('hidden');
+        img.src = url;
+    }
+
+    function refreshEbsPreviews() {
+        const displayMode = Number($('ebs-display-mode')?.value || '0');
+        const variant = Number($('ebs-slate-variant')?.value || '0');
+        const bust = Date.now();
+        const liveImg = $('ebs-live-preview-image');
+        const liveCaption = $('ebs-live-preview-caption');
+        const bars = $('ebs-live-preview-bars');
+        const snow = $('ebs-live-preview-static');
+        const missing = $('ebs-live-preview-missing');
+
+        bars?.classList.toggle('hidden', displayMode !== 1);
+        snow?.classList.toggle('hidden', displayMode !== 2);
+        if (bars) bars.hidden = displayMode !== 1;
+        if (snow) snow.hidden = displayMode !== 2;
+
+        if (displayMode === 0) {
+            if (liveCaption) {
+                liveCaption.textContent = 'Shown during dead air and playback errors.';
+            }
+            if (missing) {
+                missing.classList.add('hidden');
+                missing.hidden = true;
+            }
+            if (liveImg) {
+                liveImg.onload = () => {
+                    liveImg.classList.remove('hidden');
+                    if (missing) {
+                        missing.classList.add('hidden');
+                        missing.hidden = true;
+                    }
+                };
+                liveImg.onerror = () => {
+                    liveImg.classList.add('hidden');
+                    liveImg.removeAttribute('src');
+                    if (missing) {
+                        missing.classList.remove('hidden');
+                        missing.hidden = false;
+                    }
+                };
+                liveImg.src = withAppBase('/api/ebs/preview?variant=' + variant + '&t=' + bust);
+            }
+        } else {
+            if (liveImg) {
+                liveImg.classList.add('hidden');
+                liveImg.removeAttribute('src');
+            }
+            if (missing) {
+                missing.classList.add('hidden');
+                missing.hidden = true;
+            }
+            if (liveCaption) {
+                liveCaption.textContent = displayMode === 1
+                    ? 'Viewers see generated color bars during dead air and playback errors.'
+                    : 'Viewers see generated TV static during dead air and playback errors.';
+            }
+        }
+
+        setEbsPreviewImage($('ebs-usa-preview'), withAppBase('/api/ebs/slates/usa/image?t=' + bust));
+        setEbsPreviewImage($('ebs-international-preview'), withAppBase('/api/ebs/slates/international/image?t=' + bust));
     }
 
     function populateEbsMusicLibraries(libraries, selectedId, selectedName, selectId) {
@@ -2838,8 +2650,6 @@
         if ($('btn-ai-generate-all')) $('btn-ai-generate-all').disabled = !enabled;
         if ($('ai-auto-apply-channel-add')) $('ai-auto-apply-channel-add').disabled = !enabled;
         if ($('ai-auto-apply-all-on-save')) $('ai-auto-apply-all-on-save').disabled = !enabled;
-        if ($('btn-weather-guide-cache-generate')) $('btn-weather-guide-cache-generate').disabled = !enabled;
-        if ($('btn-weather-guide-cache-clear')) $('btn-weather-guide-cache-clear').disabled = !enabled;
     }
 
     function readAiSettingsFromForm() {
@@ -2850,6 +2660,7 @@
             defaultProvider: Number($('ai-default-provider')?.value || '0'),
             openAiModel: $('ai-openai-model')?.value?.trim() || 'gpt-4o-mini',
             veniceModel: $('ai-venice-model')?.value?.trim() || 'gpt-4o-mini',
+            ttsVoice: $('ai-tts-voice')?.value?.trim() || 'nova',
             openAiApiKey: normalizeApiKeyInput($('ai-openai-key')?.value) || null,
             veniceApiKey: normalizeApiKeyInput($('ai-venice-key')?.value) || null
         };
@@ -2868,6 +2679,7 @@
             if ($('ai-default-provider')) $('ai-default-provider').value = String(aiSettings.defaultProvider ?? 0);
             if ($('ai-openai-model')) $('ai-openai-model').value = aiSettings.openAiModel || 'gpt-4o-mini';
             if ($('ai-venice-model')) $('ai-venice-model').value = aiSettings.veniceModel || 'gpt-4o-mini';
+            if ($('ai-tts-voice')) $('ai-tts-voice').value = aiSettings.ttsVoice || 'nova';
             if ($('ai-openai-key')) $('ai-openai-key').value = '';
             if ($('ai-venice-key')) $('ai-venice-key').value = '';
             const keyStatus = $('ai-key-status');
@@ -2913,11 +2725,11 @@
         }
 
         if (genBtn) {
-            genBtn.disabled = !($('ai-enabled')?.checked);
+            genBtn.disabled = false;
             genBtn.textContent = 'Generate Weather Guide Cache';
         }
         if (clearBtn) {
-            clearBtn.disabled = !($('ai-enabled')?.checked);
+            clearBtn.disabled = false;
         }
 
         if (!status.channelCount) {
@@ -2925,14 +2737,21 @@
             return;
         }
 
+        const dateLabel = status.forecastDate ? ` for ${status.forecastDate}` : '';
+        const source = status.weatherSource ? ` Source: ${status.weatherSource}.` : '';
+        const generated = status.lastGeneratedAt
+            ? ` Last built ${new Date(status.lastGeneratedAt).toLocaleString()}.`
+            : '';
         let line =
-            `${status.completeChannels}/${status.channelCount} weather channel(s) fully cached (24 hours each) · ${status.entryCount} total cache entries.`;
+            `${status.completeChannels}/${status.channelCount} weather channel(s) have today's forecast${dateLabel} · ${status.entryCount} cached hour(s).${source}${generated}`;
         const partial = (status.channels || []).filter((c) => c.hoursCached > 0 && !c.isComplete);
         if (partial.length) {
             const names = partial.map((c) => `${c.channelName} (${c.hoursCached}/24)`).join(', ');
             line += ` Partial: ${names}.`;
         } else if (status.completeChannels < status.channelCount) {
-            line += ' Click Generate Weather Guide Cache to fill missing hour slots.';
+            line += ' Click Generate Weather Guide Cache to fill today's hours from the Weather tab source.';
+        } else {
+            line += ' Auto-refreshes at local midnight.';
         }
 
         el.textContent = line;
@@ -2981,12 +2800,7 @@
         }
     }
 
-    async function generateWeatherGuideCache(force = false) {
-        if (!$('ai-enabled')?.checked) {
-            toast('Enable AI lineup generation first.', 'error');
-            return;
-        }
-
+    async function generateWeatherGuideCache(force = true) {
         const result = await api('/ai/weather-guide-cache/generate', {
             method: 'POST',
             body: JSON.stringify({ force })
@@ -3512,7 +3326,7 @@
             renderEbsCustomSlateStatus(settings.customSlates);
             updateEbsFieldVisibility();
         } catch (err) {
-            reportApiError(err, 'Could not load EBS settings.');
+            reportApiError(err, 'Could not load Off Air settings.');
         }
     }
 
@@ -3531,7 +3345,7 @@
                     ebsBackgroundMusicLibraryName: selectedOption?.textContent?.trim() || 'Background Music'
                 })
             });
-            toast('EBS settings saved.', 'success');
+            toast('Off Air settings saved.', 'success');
             await loadEbs();
         } catch (err) {
             toast(err.message, 'error');
@@ -3551,8 +3365,9 @@
         try {
             const data = await apiForm('/ebs/slates/' + variant, formData, 'POST');
             renderEbsCustomSlateStatus(data.customSlates);
+            refreshEbsPreviews();
             if (input) input.value = '';
-            toast('Custom EBS slate uploaded.', 'success');
+            toast('Custom Off Air slate uploaded.', 'success');
         } catch (err) {
             toast(err.message, 'error');
         }
@@ -3562,7 +3377,8 @@
         try {
             const data = await api('/ebs/slates/' + variant, { method: 'DELETE' });
             renderEbsCustomSlateStatus(data.customSlates);
-            toast('Custom EBS slate removed.', 'success');
+            refreshEbsPreviews();
+            toast('Custom Off Air slate removed.', 'success');
         } catch (err) {
             toast(err.message, 'error');
         }
@@ -3587,7 +3403,7 @@
         const select = $('weather-music-library');
         if (select && Array.isArray(status?.musicLibraries)) {
             const current = status.weatherMusicLibraryId || '';
-            select.innerHTML = '<option value="">Use EBS / all music</option>' +
+            select.innerHTML = '<option value="">Use Off Air / all music</option>' +
                 status.musicLibraries.map((lib) => `<option value="${escapeHtml(lib.id)}" ${lib.id === current ? 'selected' : ''}>${escapeHtml(lib.name)}</option>`).join('');
             if (current) select.value = current;
         }
@@ -3700,11 +3516,86 @@
     }
 
     function toggleWeatherAlertCutInFields() {
+        const mode = $('weather-alert-overlay-mode')?.value || 'off';
         const fields = $('weather-alert-cutin-fields');
-        if (!fields) {
+        if (fields) {
+            fields.classList.toggle('hidden', mode === 'off');
+        }
+        const interval = $('weather-alert-interval-wrap');
+        if (interval) {
+            interval.classList.toggle('hidden', mode !== 'cutin');
+        }
+    }
+
+    function hideWeatherAlertTestPreview() {
+        const preview = $('weather-alert-test-preview');
+        const hint = $('weather-alert-test-hint');
+        if (preview) {
+            preview.innerHTML = '';
+            preview.hidden = true;
+            preview.classList.add('hidden');
+        }
+        if (hint) {
+            hint.textContent = '';
+            hint.hidden = true;
+            hint.classList.add('hidden');
+        }
+    }
+
+    function showWeatherAlertTestPreview(data) {
+        const preview = $('weather-alert-test-preview');
+        const hint = $('weather-alert-test-hint');
+        if (!preview) {
             return;
         }
-        fields.classList.toggle('hidden', ($('weather-alert-overlay-mode')?.value || 'off') !== 'cutin');
+        const parts = [];
+        const jpeg = data?.hazardsJpeg;
+        if (data?.mode === 'cutin' && jpeg) {
+            parts.push('<img alt="Sample weather alerts screen" src="data:image/jpeg;base64,' + jpeg + '">');
+        } else if (data?.mode === 'cutin') {
+            parts.push('<p class="hint" style="padding:0.75rem;margin:0">' + escapeHtml(data.headline || data.eventName || 'Sample weather alert') + '</p>');
+        }
+        if (data?.mode === 'ticker') {
+            const text = escapeHtml(data.tickerText || data.headline || 'WEATHER ALERT');
+            parts.push('<div class="weather-alert-ticker-preview" role="img" aria-label="Sample scrolling weather alert"><span>' + text + '</span></div>');
+        }
+        preview.innerHTML = parts.join('');
+        preview.hidden = parts.length === 0;
+        preview.classList.toggle('hidden', parts.length === 0);
+        if (hint) {
+            hint.textContent = data?.message || '';
+            hint.hidden = !data?.message;
+            hint.classList.toggle('hidden', !data?.message);
+        }
+    }
+
+    async function testWeatherAlerts() {
+        const btn = $('btn-test-weather-alerts');
+        const originalLabel = btn ? btn.textContent : '';
+        try {
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = 'Testing…';
+            }
+            const mode = $('weather-alert-overlay-mode')?.value || 'off';
+            const data = await api('/weather/alerts/test', {
+                method: 'POST',
+                body: JSON.stringify({
+                    mode,
+                    durationSeconds: Number($('weather-alert-cutin-duration')?.value || 20)
+                })
+            });
+            showWeatherAlertTestPreview(data);
+            toast(data.eventName ? `Sample ${data.eventName} is ready.` : 'Sample weather alert is ready.', 'success');
+        } catch (err) {
+            hideWeatherAlertTestPreview();
+            toast(err.message || 'Could not test weather alerts.', 'error');
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = originalLabel || 'Test alerts';
+            }
+        }
     }
 
     function renderWeatherZipList(rows) {
@@ -3736,7 +3627,7 @@
         }
     }
 
-    async function saveWeatherSettings() {
+    async function saveWeatherSettings(successMessage) {
         const musicSelect = $('weather-music-library');
         const selected = musicSelect?.selectedOptions?.[0];
         try {
@@ -3764,7 +3655,7 @@
                     channels: channelZips
                 })
             });
-            toast('Weather settings saved.', 'success');
+            toast(typeof successMessage === 'string' ? successMessage : 'Weather settings saved.', 'success');
             renderWeatherStatus(saved);
             if (channels.length) {
                 await loadChannels();
@@ -3780,12 +3671,14 @@
                 api('/news/settings'),
                 api('/news/feeds')
             ]);
-            if ($('news-header')) $('news-header').value = settings.headerText || 'ChannelFlow News';
+            if ($('news-header')) $('news-header').value = settings.headerText || 'FlowWire News';
             if ($('news-count')) $('news-count').value = settings.articleCount || 8;
             if ($('news-refresh')) $('news-refresh').value = settings.refreshMinutes || 10;
             if ($('news-intro')) $('news-intro').value = settings.introText || '';
             if ($('news-outro')) $('news-outro').value = settings.outroText || '';
             if ($('news-tts')) $('news-tts').checked = settings.ttsEnabled !== false;
+            if ($('news-tts-engine')) $('news-tts-engine').value = settings.ttsEngine === 'ai' ? 'ai' : 'google';
+            if ($('news-ai-rewrite')) $('news-ai-rewrite').checked = !!settings.aiRewrite;
             if ($('news-show-header')) $('news-show-header').checked = settings.showHeader !== false;
             if ($('news-headlines-only')) $('news-headlines-only').checked = !!settings.readHeadlinesOnly;
             if ($('news-bulletin-enabled')) $('news-bulletin-enabled').checked = settings.bulletinVideosEnabled !== false;
@@ -3808,7 +3701,7 @@
             if (music) {
                 const current = settings.musicLibraryId || '';
                 const silent = String(current).toLowerCase() === 'none';
-                music.innerHTML = '<option value="">Use EBS background music</option>' +
+                music.innerHTML = '<option value="">Use Off Air background music</option>' +
                     libraries.map((lib) => `<option value="${escapeHtml(lib.id)}">${escapeHtml(lib.name)}</option>`).join('');
                 music.value = silent ? '' : current;
                 if (!silent && music.value !== current) {
@@ -3819,6 +3712,7 @@
                 }
                 syncNewsMusicUi();
             }
+            syncNewsTtsUi();
             newsFeeds = Array.isArray(feeds) ? feeds : [];
             if (newsFeeds.length === 0) {
                 newsFeeds = [{ name: 'NPR News', url: 'https://feeds.npr.org/1001/rss.xml', enabled: true }];
@@ -3878,16 +3772,26 @@
         music.disabled = !!noMusic?.checked;
     }
 
+    function syncNewsTtsUi() {
+        const enabled = !!$('news-tts')?.checked;
+        const engine = $('news-tts-engine');
+        if (engine) {
+            engine.disabled = !enabled;
+        }
+    }
+
     async function saveNewsSettings() {
         const music = $('news-music-library');
         const noMusic = !!$('news-no-music')?.checked;
         await api('/news/settings', {
             method: 'PUT',
             body: JSON.stringify({
-                headerText: $('news-header')?.value.trim() || 'ChannelFlow News',
+                headerText: $('news-header')?.value.trim() || 'FlowWire News',
                 articleCount: Number($('news-count')?.value || 8),
                 refreshMinutes: Number($('news-refresh')?.value || 10),
                 ttsEnabled: !!$('news-tts')?.checked,
+                ttsEngine: $('news-tts-engine')?.value === 'ai' ? 'ai' : 'google',
+                aiRewrite: !!$('news-ai-rewrite')?.checked,
                 showHeader: !!$('news-show-header')?.checked,
                 readHeadlinesOnly: !!$('news-headlines-only')?.checked,
                 voice: $('news-voice')?.value || 'en-US',
@@ -4132,6 +4036,73 @@
         }
         startCatalogCleanupPolling();
         await loadCatalogCleanup();
+    }
+
+    function renderAboutDl(elementId, rows) {
+        const el = $(elementId);
+        if (!el) {
+            return;
+        }
+        el.innerHTML = rows
+            .filter((row) => row[1] != null && row[1] !== '')
+            .map(([label, value, href]) => {
+                const text = escapeHtml(String(value));
+                const dd = href
+                    ? `<a href="${escapeHtml(String(href))}" target="_blank" rel="noopener">${text}</a>`
+                    : text;
+                return `<div class="about-row"><dt>${escapeHtml(label)}</dt><dd>${dd}</dd></div>`;
+            })
+            .join('') || '<div class="about-row"><dt>Status</dt><dd>Unavailable</dd></div>';
+    }
+
+    async function loadAbout() {
+        try {
+            const info = await api('/about');
+            const app = info.app || {};
+            const system = info.system || {};
+            const transcode = info.transcode || {};
+            renderAboutDl('about-app', [
+                ['Author', app.author, app.authorUrl],
+                ['Version', app.version],
+                ['Build', app.revision],
+                ['Packaging', app.packagingLabel || (app.packaging === 'docker' ? 'Docker' : 'Non-Docker')],
+                ['Image', app.image],
+                ['Runtime', app.framework],
+                ['Homepage', app.homepage, app.homepage]
+            ]);
+            renderAboutDl('about-system', [
+                ['Operating system', system.os],
+                ['Architecture', system.architecture],
+                ['Host', system.machineName],
+                ['Environment', system.environmentName],
+                ['CPU cores', system.processorCount],
+                ['Memory (working set)', system.workingSet],
+                ['GC heap', system.gcHeap],
+                ['Uptime', system.uptime],
+                ['Time zone', system.timeZone],
+                ['Server time', system.serverTime],
+                ['UTC', system.utcTime],
+                ['Listen port', system.listenPort],
+                ['Config folder', system.configFolder],
+                ['PostgreSQL host', system.postgresHost],
+                ['Active viewers', system.activeViewers]
+            ]);
+            const vaapi = transcode.useVaapi
+                ? `Available (${transcode.vaapiDevice})`
+                : (transcode.vaapiDeviceExists ? transcode.vaapiDevice : `Missing (${transcode.vaapiDevice || 'none'})`);
+            renderAboutDl('about-transcode', [
+                ['Encoder', transcode.encoder],
+                ['Hardware acceleration', transcode.hardwareAcceleration],
+                ['Source', transcode.source === 'saved' ? 'Saved on Transcode tab' : 'Container / environment default'],
+                ['VAAPI device', vaapi],
+                ['FFmpeg path', transcode.ffmpegPath],
+                ['FFmpeg', transcode.ffmpegVersion],
+                ['Environment default', `${transcode.environmentAcceleration || 'none'} / ${transcode.environmentEncoder || 'libx264'}`]
+            ]);
+        } catch (err) {
+            reportApiError(err, 'Could not load About information.');
+            renderAboutDl('about-app', [['Status', err.message || 'Could not load About information.']]);
+        }
     }
 
     function syncTranscodeUi() {
@@ -5163,14 +5134,16 @@
         special: '/special',
         commercials: '/commercials',
         commercialbrainz: '/commercialbrainz',
-        logos: '/logos',
         ebs: '/ebs',
+        emergency: '/emergency',
         ai: '/ai',
         weather: '/weather',
         news: '/news',
         transcode: '/transcode',
         general: '/general',
-        tasks: '/tasks'
+        tasks: '/tasks',
+        about: '/about',
+        credits: '/credits'
     };
 
     const TAB_TITLES = {
@@ -5183,14 +5156,16 @@
         special: 'Special Presentation',
         commercials: 'Commercials',
         commercialbrainz: 'CommercialBrainz',
-        logos: 'Logo Sets',
-        ebs: 'EBS',
+        ebs: 'Off Air',
+        emergency: 'Emergency Broadcast System',
         ai: 'AI',
         weather: 'Weather',
         news: 'News',
         transcode: 'Transcode',
         general: 'General',
-        tasks: 'Tasks'
+        tasks: 'Tasks',
+        about: 'About',
+        credits: 'Credits'
     };
 
     const TAB_SUBTITLES = {
@@ -5203,14 +5178,16 @@
         special: 'Recurring blocks that override the normal lineup',
         commercials: 'Jellyfin commercial library and blackframe scan',
         commercialbrainz: 'YouTube commercial pool from CommercialBrainz',
-        logos: 'Channel bugs and logo sets',
-        ebs: 'Off-air Emergency Broadcast System',
+        ebs: 'Playback when a channel has nothing scheduled',
+        emergency: 'NOAA watches and warnings on TV, movies, and music',
         ai: 'AI lineup generation and tagging',
         weather: 'WeatherStar live channels',
-        news: 'Live RSS news channel',
+        news: 'FlowWire live news',
         transcode: 'Hardware encoding for live MPEG-TS streams',
         general: 'Server-wide ChannelFlow-Server settings',
-        tasks: 'Rebuild playouts and maintenance'
+        tasks: 'Rebuild playouts and maintenance',
+        about: 'Version, system, and transcode information',
+        credits: 'People and projects ChannelFlow builds on'
     };
 
     function normalizePathname(pathname) {
@@ -5328,10 +5305,12 @@
         if (name === 'guide') loadGuide();
         if (name === 'general') loadGeneral();
         if (name === 'ebs') loadEbs();
+        if (name === 'emergency') loadWeather();
         if (name === 'ai') loadAi();
         if (name === 'weather') loadWeather();
         if (name === 'news') loadNews();
         if (name === 'transcode') loadTranscode();
+        if (name === 'about') loadAbout();
         if (name === 'presets') loadPresets();
         if (name === 'lineups') loadLineups();
         if (name === 'list') loadLists();
@@ -5343,7 +5322,6 @@
         if (name === 'special') loadSpecialPresentations();
         if (name === 'commercials') loadCommercials();
         if (name === 'commercialbrainz') loadCommercialBrainz();
-        if (name === 'logos') loadLogos();
 
         const path = TAB_PATHS[name];
         if (!options.skipHistory && normalizePathname(location.pathname) !== path) {
@@ -5474,11 +5452,6 @@
         click('btn-save-brainz', () => saveBrainzSettings().catch((e) => toast(e.message, 'error')));
         click('btn-preview-brainz', () => previewBrainz().catch((e) => toast(e.message, 'error')));
         click('btn-sync-brainz', () => syncBrainz().catch((e) => toast(e.message, 'error')));
-        click('btn-sync-logos', () => api('/logos/sets/binarygeek119/sync', { method: 'POST' })
-            .then(() => { toast('Logo set refreshed.', 'success'); return loadLogos(); })
-            .catch((e) => toast(e.message, 'error')));
-        click('btn-repair-logos', () => repairChannelLogos());
-        click('btn-create-logo-set', openCreateLogoSetModal);
         click('btn-rebuild-all', () => api('/tasks/rebuild-all', { method: 'POST' })
             .then(() => {
                 toast('Rebuild all started in background. This may take several minutes.', 'success');
@@ -5507,11 +5480,14 @@
         click('btn-upload-ebs-international', () => uploadEbsSlate('international', 'ebs-international-file'));
         click('btn-remove-ebs-usa', () => removeEbsSlate('usa'));
         click('btn-remove-ebs-international', () => removeEbsSlate('international'));
-        click('btn-save-weather', saveWeatherSettings);
-        click('btn-save-weather-source', saveWeatherSettings);
+        click('btn-save-weather', () => saveWeatherSettings());
+        click('btn-save-weather-source', () => saveWeatherSettings());
+        click('btn-save-weather-alerts', () => saveWeatherSettings('Emergency Broadcast System settings saved.'));
+        click('btn-test-weather-alerts', () => { void testWeatherAlerts(); });
         change('weather-alert-overlay-mode', toggleWeatherAlertCutInFields);
         click('btn-save-news', () => saveNewsSettings().catch((e) => toast(e.message, 'error')));
         change('news-no-music', syncNewsMusicUi);
+        change('news-tts', syncNewsTtsUi);
         click('btn-save-transcode', () => saveTranscodeSettings().catch((e) => toast(e.message, 'error')));
         click('btn-test-transcode', () => testTranscode().catch((e) => toast(e.message, 'error')));
         click('btn-reset-transcode', () => resetTranscodeSettings().catch((e) => toast(e.message, 'error')));
@@ -5522,6 +5498,7 @@
         click('btn-run-news-bulletin', () => runNewsBulletin().catch((e) => toast(e.message, 'error')));
         click('btn-run-news-bulletin-task', () => runNewsBulletin().catch((e) => toast(e.message, 'error')));
         change('ebs-display-mode', updateEbsFieldVisibility);
+        change('ebs-slate-variant', refreshEbsPreviews);
         change('ebs-audio-mode', updateEbsFieldVisibility);
         change('ebs-music-source', updateEbsFieldVisibility);
         click('btn-apply-presets', () => { void applyPresets(); });

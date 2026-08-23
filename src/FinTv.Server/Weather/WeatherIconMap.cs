@@ -125,6 +125,16 @@ public static class WeatherIconMap
         return "Cloudy";
     }
 
+    public static string DisplayName(string? iconKey)
+    {
+        if (string.IsNullOrWhiteSpace(iconKey) || string.Equals(iconKey, "No-Data", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Local weather";
+        }
+
+        return iconKey.Replace("-", " ", StringComparison.Ordinal);
+    }
+
     public static string Cardinal(double degrees)
     {
         var dirs = new[] { "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW" };

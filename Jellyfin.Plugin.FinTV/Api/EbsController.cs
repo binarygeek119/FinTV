@@ -9,7 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace Jellyfin.Plugin.FinTV.Api;
 
 /// <summary>
-/// Emergency Broadcast System settings and custom slate uploads.
+/// Off Air settings and custom slate uploads.
 /// </summary>
 [ApiController]
 [Route("ChannelFlow/api/ebs")]
@@ -161,11 +161,12 @@ public class EbsController : ControllerBase
     }
 
     /// <summary>
-    /// Gets a custom slate image for admin preview.
+    /// Gets the effective off-air slate (custom upload or bundled stock) for admin preview.
     /// </summary>
     /// <param name="variant">Slate variant (<c>usa</c> or <c>international</c>).</param>
     /// <returns>Image file.</returns>
     [HttpGet("slates/{variant}/image")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     public ActionResult GetSlateImage(string variant)
     {
         if (!TryParseVariant(variant, out var slateVariant))
@@ -173,15 +174,23 @@ public class EbsController : ControllerBase
             return BadRequest(new { message = "Variant must be usa or international." });
         }
 
-        var path = _ebs.ResolveCustomSlatePath(slateVariant);
-        if (string.IsNullOrWhiteSpace(path))
+        return FileSlate(_ebs.ResolveSlatePath(slateVariant));
+    }
+
+    private ActionResult FileSlate(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path))
         {
             return NotFound();
         }
 
-        var contentType = Path.GetExtension(path).Equals(".png", StringComparison.OrdinalIgnoreCase)
-            ? "image/png"
-            : "image/jpeg";
+        var contentType = Path.GetExtension(path).ToLowerInvariant() switch
+        {
+            ".png" => "image/png",
+            ".webp" => "image/webp",
+            ".gif" => "image/gif",
+            _ => "image/jpeg"
+        };
         return PhysicalFile(path, contentType);
     }
 

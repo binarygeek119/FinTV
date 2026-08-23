@@ -32,7 +32,6 @@ public static class ChannelPresets
         Preset(120, 119.2m, "Retro TV", ChannelContentType.TvShow, "TV Shows", "1910–1969 TV and movies (first-episode year for series)", "channelflow-retro", "Shows/Retro_TV.png", catalogMode: ChannelCatalogMode.Mixed, minYear: 1910, maxYear: 1969),
         Preset(121, 119.3m, "[OpenSwim]", ChannelContentType.TvShow, "TV Shows", "Nick, Disney, Fox Kids, and Cartoon Network style kids TV/movies; any year; TV-PG max", "channelflow-open-swim", "Shows/[open_swim].png", catalogMode: ChannelCatalogMode.Mixed, maxRating: "TV-PG"),
         Preset(122, 119.4m, "Flip Television", ChannelContentType.TvShow, "TV Shows", "Reality TV themed shows and movies", "channelflow-reality", "Shows/Flip_Television.png", catalogMode: ChannelCatalogMode.Mixed),
-        Preset(123, 119.5m, "BinaryGeek119 News", ChannelContentType.TvShow, "TV Shows", "News", "channelflow-news", logoPath: null),
         Preset(124, 119.6m, "WeatherStar4000", ChannelContentType.Weather, "TV Shows", "Weather channel", "channelflow-weatherstar4000", "Weather/WeatherStar4000.png", weather: true),
         Preset(125, 124.1m, "Past Tense News", ChannelContentType.TvShow, "TV Shows", "Home movies treated as live breaking news", "channelflow-past-tense-news", "News/Past_Tense_News.png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(128, 124.2m, "Cops And Robbers", ChannelContentType.TvShow, "TV Shows", "Crime and cop themed TV shows and movies (genre or plot)", "channelflow-crime", "Shows/cops_and_robbers.png", catalogMode: ChannelCatalogMode.Mixed),

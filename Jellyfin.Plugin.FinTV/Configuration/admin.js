@@ -1131,7 +1131,7 @@
                 banner.classList.remove('hidden');
                 if (itemCount > 0 && h.earliestStartUtc) {
                     const nextStart = new Date(h.earliestStartUtc).toLocaleString();
-                    banner.textContent = `Nothing on air right now. Next programme starts ${nextStart}. Live TV will show EBS until then.`;
+                    banner.textContent = `Nothing on air right now. Next programme starts ${nextStart}. Live TV will show Off Air until then.`;
                 } else {
                     banner.textContent = 'Live TV guide has no playout for this channel yet. Fill lineup slots (AI Generate or manual), then click Rebuild Playout.';
                 }
@@ -1822,272 +1822,6 @@
         }
     }
 
-    async function loadLogos() {
-        try {
-            const sets = await api('/logos/sets') || [];
-            logoSets = sets;
-            if (!sets.length) {
-                $('logo-set-info').innerHTML = '<div class="empty-state">No logo sets yet. Import Binarygeek119 or create a custom set.</div>';
-                return;
-            }
-
-            $('logo-set-info').innerHTML = sets.map((s) => {
-            const files = (s.entries || []).slice(0, 48).map((e) =>
-                `<span class="badge badge-type" style="margin:.15rem">${escapeHtml(e.displayName || e.fileName)}</span>`).join('');
-            const customBadge = s.isCustom ? '<span class="badge badge-on" style="margin-left:.35rem">Custom</span>' : '';
-            const actions = s.isCustom
-                ? `<div class="actions" style="margin-top:.65rem">
-                        <button type="button" class="emby-button btn-manage-logo-set" data-set-id="${escapeHtml(s.id)}">Manage Logos</button>
-                        <button type="button" class="emby-button btn-delete-logo-set" data-set-id="${escapeHtml(s.id)}">Delete Set</button>
-                   </div>`
-                : '';
-            return `<div class="card"><h3>${escapeHtml(s.name)}${customBadge}</h3><p class="hint">${(s.entries || []).length} logos indexed · assign per channel in the Channels editor</p><div>${files || '<span class="hint">No files found</span>'}</div>${actions}</div>`;
-        }).join('');
-
-        qa('.btn-manage-logo-set').forEach((btn) => {
-            btn.onclick = () => openCustomLogoSetModal(btn.dataset.setId);
-        });
-        qa('.btn-delete-logo-set').forEach((btn) => {
-            btn.onclick = () => deleteCustomLogoSet(btn.dataset.setId);
-        });
-        } catch (err) {
-            reportApiError(err, 'Could not load logo sets.');
-        }
-    }
-
-    async function repairChannelLogos() {
-        try {
-            const result = await api('/logos/repair-channels', { method: 'POST' });
-            const status = $('logo-repair-status');
-            if (status) {
-                status.classList.remove('hidden');
-                const repaired = result.repaired || result.Repaired || [];
-                const missing = result.missing || result.Missing || [];
-                status.textContent = [
-                    `Repaired ${repaired.length} channel(s).`,
-                    repaired.length ? `Updated: ${repaired.join(', ')}` : '',
-                    missing.length ? `Still missing artwork: ${missing.join(', ')}` : 'All channels now have logo assignments.'
-                ].filter(Boolean).join('\n');
-            }
-            toast(`Applied logos to ${(result.repaired || result.Repaired || []).length} channel(s).`, 'success');
-        } catch (err) {
-            toast(err.message, 'error');
-        }
-    }
-
-    function openCreateLogoSetModal() {
-        openModal(
-            'Create Custom Logo Set',
-            `<label class="field"><span>Set name</span><input id="new-logo-set-name" type="text" class="emby-input" placeholder="My Channel Logos"></label>
-             <p class="hint">After creating the set, you can upload named PNG/JPG/WEBP logos and assign them to channels.</p>`,
-            `<button type="button" class="emby-button" id="modal-cancel-logo-set">Cancel</button>
-             <button type="button" class="raised button-submit emby-button" id="modal-save-logo-set">Create Set</button>`
-        );
-
-        $('modal-cancel-logo-set').onclick = closeModal;
-        $('modal-save-logo-set').onclick = () => createCustomLogoSet();
-    }
-
-    async function createCustomLogoSet() {
-        const name = ($('new-logo-set-name')?.value || '').trim();
-        if (!name) {
-            toast('Set name is required.', 'error');
-            return;
-        }
-
-        try {
-            const set = await api('/logos/sets/custom', { method: 'POST', body: { name: name } });
-            closeModal();
-            toast(`Created logo set "${name}".`, 'success');
-            await loadLogos();
-            if (set && set.id) {
-                openCustomLogoSetModal(set.id);
-            }
-        } catch (err) {
-            toast(err.message, 'error');
-        }
-    }
-
-    async function deleteCustomLogoSet(setId) {
-        const set = logoSets.find((s) => s.id === setId);
-        if (!set) {
-            return;
-        }
-
-        if (!confirm(`Delete custom logo set "${set.name}"? This cannot be undone.`)) {
-            return;
-        }
-
-        try {
-            await api('/logos/sets/' + setId, { method: 'DELETE' });
-            toast('Logo set deleted.', 'success');
-            await loadLogos();
-        } catch (err) {
-            toast(err.message, 'error');
-        }
-    }
-
-    async function openCustomLogoSetModal(setId) {
-        const set = await api('/logos/sets/' + setId);
-        if (!set) {
-            toast('Logo set not found.', 'error');
-            return;
-        }
-
-        const modal = document.querySelector('#modal-backdrop .modal');
-        if (modal) {
-            modal.classList.add('modal-wide');
-        }
-
-        const rows = (set.entries || []).map((entry) => `
-            <div class="logo-entry-row" data-entry-id="${escapeHtml(entry.id)}">
-                <label><span>Logo name</span><input type="text" class="emby-input logo-entry-name" value="${escapeHtml(entry.displayName || entry.fileName)}"></label>
-                <label><span>File</span><input type="text" class="emby-input" value="${escapeHtml(entry.fileName)}" readonly></label>
-                <label><span>Replace image</span><input type="file" class="logo-entry-file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"></label>
-                <div class="logo-entry-actions">
-                    <button type="button" class="emby-button btn-save-logo-entry">Save Name</button>
-                    <button type="button" class="emby-button btn-upload-logo-entry">Upload</button>
-                    <button type="button" class="emby-button btn-danger btn-delete-logo-entry">Delete</button>
-                </div>
-            </div>`).join('');
-
-        openModal(
-            `Manage Logos · ${set.name}`,
-            `<div class="logo-upload-row">
-                <label><span>Logo name</span><input id="new-logo-display-name" type="text" class="emby-input" placeholder="FlashBack TV"></label>
-                <label><span>Image file</span><input id="new-logo-file" type="file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"></label>
-                <button type="button" class="raised button-submit emby-button" id="btn-add-custom-logo">Add Logo</button>
-            </div>
-            <div id="custom-logo-entries">${rows || '<div class="empty-state">No logos uploaded yet.</div>'}</div>`,
-            `<button type="button" class="emby-button" id="modal-close-logo-manager">Close</button>`
-        );
-
-        $('modal-close-logo-manager').onclick = () => {
-            if (modal) {
-                modal.classList.remove('modal-wide');
-            }
-            closeModal();
-            loadLogos();
-        };
-
-        $('btn-add-custom-logo').onclick = () => uploadCustomLogo(setId, {
-            displayNameInput: $('new-logo-display-name'),
-            fileInput: $('new-logo-file'),
-            refresh: () => openCustomLogoSetModal(setId)
-        });
-
-        qa('.logo-entry-row').forEach((row) => {
-            const entryId = row.dataset.entryId;
-            row.querySelector('.btn-save-logo-entry').onclick = () => saveCustomLogoName(setId, entryId, row.querySelector('.logo-entry-name').value, setId);
-            row.querySelector('.btn-upload-logo-entry').onclick = () => {
-                const fileInput = row.querySelector('.logo-entry-file');
-                if (!fileInput.files || !fileInput.files[0]) {
-                    toast('Choose a replacement image first.', 'error');
-                    return;
-                }
-
-                replaceCustomLogo(setId, entryId, row.querySelector('.logo-entry-name').value, fileInput.files[0], setId);
-            };
-            row.querySelector('.btn-delete-logo-entry').onclick = () => deleteCustomLogoEntry(setId, entryId, setId);
-        });
-    }
-
-    async function uploadCustomLogo(setId, options) {
-        const displayName = (options.displayNameInput?.value || '').trim();
-        const file = options.fileInput?.files && options.fileInput.files[0];
-        if (!displayName) {
-            toast('Logo name is required.', 'error');
-            return;
-        }
-
-        if (!file) {
-            toast('Choose an image file.', 'error');
-            return;
-        }
-
-        const formData = new FormData();
-        formData.append('displayName', displayName);
-        formData.append('file', file);
-
-        try {
-            await apiForm('/logos/sets/' + setId + '/logos', formData, 'POST');
-            toast('Logo uploaded.', 'success');
-            if (options.displayNameInput) {
-                options.displayNameInput.value = '';
-            }
-            if (options.fileInput) {
-                options.fileInput.value = '';
-            }
-            if (options.refresh) {
-                await options.refresh();
-            } else {
-                await loadLogos();
-            }
-        } catch (err) {
-            toast(err.message, 'error');
-        }
-    }
-
-    async function saveCustomLogoName(setId, entryId, displayName, refreshSetId) {
-        try {
-            await api('/logos/sets/' + setId + '/entries/' + entryId, {
-                method: 'PUT',
-                body: { displayName: displayName }
-            });
-            toast('Logo name saved.', 'success');
-            if (refreshSetId) {
-                await openCustomLogoSetModal(refreshSetId);
-            } else {
-                await loadLogos();
-            }
-        } catch (err) {
-            toast(err.message, 'error');
-        }
-    }
-
-    async function replaceCustomLogo(setId, entryId, displayName, file, refreshSetId) {
-        try {
-            await api('/logos/sets/' + setId + '/entries/' + entryId, { method: 'DELETE' });
-        } catch (err) {
-            toast(err.message, 'error');
-            return;
-        }
-
-        const formData = new FormData();
-        formData.append('displayName', displayName);
-        formData.append('file', file);
-
-        try {
-            await apiForm('/logos/sets/' + setId + '/logos', formData, 'POST');
-            toast('Logo replaced.', 'success');
-            if (refreshSetId) {
-                await openCustomLogoSetModal(refreshSetId);
-            } else {
-                await loadLogos();
-            }
-        } catch (err) {
-            toast(err.message, 'error');
-        }
-    }
-
-    async function deleteCustomLogoEntry(setId, entryId, refreshSetId) {
-        if (!confirm('Delete this logo?')) {
-            return;
-        }
-
-        try {
-            await api('/logos/sets/' + setId + '/entries/' + entryId, { method: 'DELETE' });
-            toast('Logo deleted.', 'success');
-            if (refreshSetId) {
-                await openCustomLogoSetModal(refreshSetId);
-            } else {
-                await loadLogos();
-            }
-        } catch (err) {
-            toast(err.message, 'error');
-        }
-    }
-
     async function loadPresets() {
         try {
             presetNumberingMode = parseInt($('preset-numbering-mode').value, 10) || 0;
@@ -2311,6 +2045,7 @@
             defaultProvider: Number($('ai-default-provider')?.value || '0'),
             openAiModel: $('ai-openai-model')?.value?.trim() || 'gpt-4o-mini',
             veniceModel: $('ai-venice-model')?.value?.trim() || 'gpt-4o-mini',
+            ttsVoice: $('ai-tts-voice')?.value?.trim() || 'nova',
             openAiApiKey: normalizeApiKeyInput($('ai-openai-key')?.value) || null,
             veniceApiKey: normalizeApiKeyInput($('ai-venice-key')?.value) || null
         };
@@ -2329,6 +2064,7 @@
             if ($('ai-default-provider')) $('ai-default-provider').value = String(aiSettings.defaultProvider ?? 0);
             if ($('ai-openai-model')) $('ai-openai-model').value = aiSettings.openAiModel || 'gpt-4o-mini';
             if ($('ai-venice-model')) $('ai-venice-model').value = aiSettings.veniceModel || 'gpt-4o-mini';
+            if ($('ai-tts-voice')) $('ai-tts-voice').value = aiSettings.ttsVoice || 'nova';
             if ($('ai-openai-key')) $('ai-openai-key').value = '';
             if ($('ai-venice-key')) $('ai-venice-key').value = '';
             const keyStatus = $('ai-key-status');
@@ -2973,7 +2709,7 @@
             renderEbsCustomSlateStatus(settings.customSlates);
             updateEbsFieldVisibility();
         } catch (err) {
-            reportApiError(err, 'Could not load EBS settings.');
+            reportApiError(err, 'Could not load Off Air settings.');
         }
     }
 
@@ -2992,7 +2728,7 @@
                     ebsBackgroundMusicLibraryName: selectedOption?.textContent?.trim() || 'Background Music'
                 })
             });
-            toast('EBS settings saved.', 'success');
+            toast('Off Air settings saved.', 'success');
             await loadEbs();
         } catch (err) {
             toast(err.message, 'error');
@@ -3013,7 +2749,7 @@
             const data = await apiForm('/ebs/slates/' + variant, formData, 'POST');
             renderEbsCustomSlateStatus(data.customSlates);
             if (input) input.value = '';
-            toast('Custom EBS slate uploaded.', 'success');
+            toast('Custom Off Air slate uploaded.', 'success');
         } catch (err) {
             toast(err.message, 'error');
         }
@@ -3023,7 +2759,7 @@
         try {
             const data = await api('/ebs/slates/' + variant, { method: 'DELETE' });
             renderEbsCustomSlateStatus(data.customSlates);
-            toast('Custom EBS slate removed.', 'success');
+            toast('Custom Off Air slate removed.', 'success');
         } catch (err) {
             toast(err.message, 'error');
         }
@@ -3726,7 +3462,6 @@
         if (name === 'list') loadLists();
         if (name === 'special') loadSpecialPresentations();
         if (name === 'commercials') loadCommercials();
-        if (name === 'logos') loadLogos();
     }
 
     function copyText(elementId) {
@@ -3829,11 +3564,6 @@
         click('btn-save-brainz', () => saveBrainzSettings().catch((e) => toast(e.message, 'error')));
         click('btn-preview-brainz', () => previewBrainz().catch((e) => toast(e.message, 'error')));
         click('btn-sync-brainz', () => syncBrainz().catch((e) => toast(e.message, 'error')));
-        click('btn-sync-logos', () => api('/logos/sets/binarygeek119/sync', { method: 'POST' })
-            .then(() => { toast('Logo set refreshed.', 'success'); return loadLogos(); })
-            .catch((e) => toast(e.message, 'error')));
-        click('btn-repair-logos', () => repairChannelLogos());
-        click('btn-create-logo-set', openCreateLogoSetModal);
         click('btn-rebuild-all', () => api('/tasks/rebuild-all', { method: 'POST' })
             .then(() => {
                 toast('Rebuild all started in background. This may take several minutes.', 'success');

@@ -86,6 +86,80 @@ public class LlmClientService
         return useJsonResponseFormat ? content : ExtractJsonFromText(content);
     }
 
+    public async Task<byte[]> SynthesizeSpeechAsync(
+        string text,
+        string voice,
+        CancellationToken cancellationToken = default)
+    {
+        var settings = FinTvRuntime.Current?.Configuration.Ai ?? new AiSettings();
+        var provider = settings.DefaultProvider;
+        var (apiKey, _, baseUrl) = ResolveProvider(provider, settings);
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            throw new InvalidOperationException(BuildMissingApiKeyMessage(provider, settings, null, null));
+        }
+
+        var input = text.Trim();
+        if (input.Length == 0)
+        {
+            throw new InvalidOperationException("TTS text is empty.");
+        }
+
+        var payload = new
+        {
+            model = "tts-1",
+            input,
+            voice = ResolveSpeechVoice(settings, voice),
+            response_format = "mp3"
+        };
+
+        using var request = CreateAuthorizedRequest(HttpMethod.Post, $"{baseUrl.TrimEnd('/')}/audio/speech", apiKey);
+        request.Content = new StringContent(JsonSerializer.Serialize(payload, RequestJsonOptions), Encoding.UTF8, "application/json");
+        var client = _httpClientFactory.CreateClient(nameof(LlmClientService));
+        using var response = await client.SendAsync(request, cancellationToken);
+        var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var message = TryExtractProviderError(Encoding.UTF8.GetString(bytes))
+                ?? $"AI TTS failed ({(int)response.StatusCode}).";
+            throw new InvalidOperationException(message);
+        }
+
+        if (bytes.Length < 64)
+        {
+            throw new InvalidOperationException("AI TTS returned an empty clip.");
+        }
+
+        return bytes;
+    }
+
+    private static string ResolveSpeechVoice(AiSettings settings, string? requested)
+    {
+        if (!string.IsNullOrWhiteSpace(settings.TtsVoice))
+        {
+            return settings.TtsVoice.Trim();
+        }
+
+        return MapSpeechVoice(requested);
+    }
+
+    private static string MapSpeechVoice(string? voice)
+    {
+        var key = (voice ?? "").Trim().ToLowerInvariant();
+        return key switch
+        {
+            "nova" or "catherine" or "catherine wolfe" => "nova",
+            "en-gb" or "en-uk" => "fable",
+            "es" or "es-es" or "es-mx" => "nova",
+            "fr" or "fr-fr" => "shimmer",
+            "de" or "de-de" => "onyx",
+            "it" or "it-it" => "echo",
+            "pt" or "pt-br" => "nova",
+            "ja" or "ko" or "zh-cn" or "zh" => "alloy",
+            _ => "alloy"
+        };
+    }
+
     internal static string ExtractJsonFromText(string content)
     {
         content = content.Trim();

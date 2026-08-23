@@ -65,7 +65,10 @@ public sealed class NewsHeadlineService
             .OrderBy(f => f.SortOrder)
             .ToListAsync(cancellationToken);
 
-        var articles = await FetchAsync(feeds, Math.Max(1, settings.ArticleCount), cancellationToken);
+        var fetchLimit = settings.AiRewrite
+            ? Math.Clamp(Math.Max(settings.ArticleCount * 3, 12), 8, 40)
+            : Math.Max(1, settings.ArticleCount);
+        var articles = await FetchAsync(feeds, fetchLimit, cancellationToken);
         lock (_gate)
         {
             _articles = articles;

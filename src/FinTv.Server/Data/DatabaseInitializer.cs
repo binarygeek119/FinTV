@@ -25,6 +25,8 @@ public class DatabaseInitializer : IHostedService
         await db.Database.EnsureCreatedAsync(cancellationToken);
         await CatalogSchema.EnsureEpisodesTableAsync(db, cancellationToken);
         await EnsureNewsColumnsAsync(db, cancellationToken);
+        await RenameFlowWireChannelAsync(db, cancellationToken);
+        await RemoveBinaryGeek119NewsChannelAsync(db, cancellationToken);
         await EnsureChannelColumnsAsync(db, cancellationToken);
         await EnsureMediaItemColumnsAsync(db, cancellationToken);
         await EnsureCatalogTablesAsync(db, cancellationToken);
@@ -61,6 +63,16 @@ public class DatabaseInitializer : IHostedService
         scope.ServiceProvider.GetRequiredService<FinTv.Streaming.FfmpegEncodingService>()
             .ApplyFromSaved(runtime.Configuration.Transcode);
 
+        try
+        {
+            await scope.ServiceProvider.GetRequiredService<LogoSetService>()
+                .EnsureBinarygeek119SetAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "FlowWire logo ensure skipped");
+        }
+
         _logger.LogInformation("ChannelFlow-Server database initialized");
     }
 
@@ -76,7 +88,9 @@ public class DatabaseInitializer : IHostedService
             """ALTER TABLE "NewsSettings" ADD COLUMN IF NOT EXISTS "OutroText" text NULL""",
             """ALTER TABLE "NewsSettings" ADD COLUMN IF NOT EXISTS "RefreshMinutes" integer NOT NULL DEFAULT 10""",
             """ALTER TABLE "NewsSettings" ADD COLUMN IF NOT EXISTS "MinNewStories" integer NOT NULL DEFAULT 1""",
-            """ALTER TABLE "NewsSettings" ADD COLUMN IF NOT EXISTS "BulletinVideosEnabled" boolean NOT NULL DEFAULT TRUE"""
+            """ALTER TABLE "NewsSettings" ADD COLUMN IF NOT EXISTS "BulletinVideosEnabled" boolean NOT NULL DEFAULT TRUE""",
+            """ALTER TABLE "NewsSettings" ADD COLUMN IF NOT EXISTS "TtsEngine" text NOT NULL DEFAULT 'google'""",
+            """ALTER TABLE "NewsSettings" ADD COLUMN IF NOT EXISTS "AiRewrite" boolean NOT NULL DEFAULT FALSE"""
         };
 
         foreach (var sql in statements)
@@ -88,6 +102,108 @@ public class DatabaseInitializer : IHostedService
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "News schema ensure skipped for {Sql}", sql);
+            }
+        }
+    }
+
+    private async Task RenameFlowWireChannelAsync(FinTvDbContext db, CancellationToken cancellationToken)
+    {
+        var statements = new[]
+        {
+            """UPDATE "Channels" SET "Name" = 'FlowWire' WHERE "Name" = 'ChannelFlow News'""",
+            """UPDATE "NewsSettings" SET "HeaderText" = 'FlowWire News' WHERE "HeaderText" IN ('ChannelFlow News', 'FlowWire', '') OR "HeaderText" IS NULL""",
+            """UPDATE "NewsSettings" SET "IntroText" = REPLACE("IntroText", 'ChannelFlow News', 'FlowWire News') WHERE "IntroText" LIKE '%ChannelFlow News%'""",
+            """UPDATE "NewsSettings" SET "OutroText" = REPLACE("OutroText", 'ChannelFlow News', 'FlowWire News') WHERE "OutroText" LIKE '%ChannelFlow News%'"""
+        };
+
+        foreach (var sql in statements)
+        {
+            try
+            {
+                var updated = await db.Database.ExecuteSqlRawAsync(sql, cancellationToken);
+                if (updated > 0)
+                {
+                    _logger.LogInformation("Renamed ChannelFlow News to FlowWire ({Updated} row(s))", updated);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "FlowWire rename skipped for {Sql}", sql);
+            }
+        }
+    }
+
+    private async Task RemoveBinaryGeek119NewsChannelAsync(FinTvDbContext db, CancellationToken cancellationToken)
+    {
+        List<Guid> ids;
+        try
+        {
+            var channels = await db.Channels
+                .AsNoTracking()
+                .Select(c => new { c.Id, c.Name, c.FilterJson })
+                .ToListAsync(cancellationToken);
+
+            ids = channels
+                .Where(c => string.Equals(c.Name, "BinaryGeek119 News", StringComparison.OrdinalIgnoreCase)
+                    || Domain.FilterDefinition.PresetIdsEqual(
+                        Domain.ChannelAiRules.ExtractLibraryTag(c.FilterJson),
+                        "channelflow-news"))
+                .Select(c => c.Id)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "BinaryGeek119 News lookup skipped");
+            return;
+        }
+
+        foreach (var id in ids)
+        {
+            try
+            {
+                await db.PlayoutItems.Where(p => p.ChannelId == id).ExecuteDeleteAsync(cancellationToken);
+                await db.PlayoutHistory.Where(p => p.ChannelId == id).ExecuteDeleteAsync(cancellationToken);
+
+                var specialIds = await db.SpecialPresentations
+                    .Where(s => s.ChannelId == id)
+                    .Select(s => s.Id)
+                    .ToListAsync(cancellationToken);
+                if (specialIds.Count > 0)
+                {
+                    await db.SpecialPresentationCandidates
+                        .Where(c => specialIds.Contains(c.SpecialPresentationId))
+                        .ExecuteDeleteAsync(cancellationToken);
+                    await db.SpecialPresentations.Where(s => s.ChannelId == id).ExecuteDeleteAsync(cancellationToken);
+                }
+
+                var lineupIds = await db.Lineups
+                    .Where(l => l.ChannelId == id)
+                    .Select(l => l.Id)
+                    .ToListAsync(cancellationToken);
+                var overrideIds = await db.LineupOverrides
+                    .Where(o => o.ChannelId == id)
+                    .Select(o => o.Id)
+                    .ToListAsync(cancellationToken);
+                var slotIds = await db.LineupSlots
+                    .Where(s =>
+                        (s.LineupId != null && lineupIds.Contains(s.LineupId.Value))
+                        || (s.LineupOverrideId != null && overrideIds.Contains(s.LineupOverrideId.Value)))
+                    .Select(s => s.Id)
+                    .ToListAsync(cancellationToken);
+                if (slotIds.Count > 0)
+                {
+                    await db.SlotCandidates.Where(c => slotIds.Contains(c.LineupSlotId)).ExecuteDeleteAsync(cancellationToken);
+                    await db.LineupSlots.Where(s => slotIds.Contains(s.Id)).ExecuteDeleteAsync(cancellationToken);
+                }
+
+                await db.LineupOverrides.Where(o => o.ChannelId == id).ExecuteDeleteAsync(cancellationToken);
+                await db.Lineups.Where(l => l.ChannelId == id).ExecuteDeleteAsync(cancellationToken);
+                await db.Channels.Where(c => c.Id == id).ExecuteDeleteAsync(cancellationToken);
+                _logger.LogInformation("Removed BinaryGeek119 News channel {ChannelId}", id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to remove BinaryGeek119 News channel {ChannelId}", id);
             }
         }
     }

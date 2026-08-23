@@ -18,6 +18,7 @@ services:
       FFMPEG_VAAPI_DEVICE: ${FFMPEG_VAAPI_DEVICE:-/dev/dri/renderD128}
       CHANNELFLOW_PUBLIC_URL: ${CHANNELFLOW_PUBLIC_URL:-${FINTV_PUBLIC_URL:-}}
       CHANNELFLOW_PATH_BASE: ${CHANNELFLOW_PATH_BASE:-${FINTV_PATH_BASE:-}}
+      CHANNELFLOW_IMAGE: ${CHANNELFLOW_IMAGE:-ghcr.io/flowmeadow01/channelflow:latest}
     devices:
       - /dev/dri:/dev/dri
     volumes:

@@ -10,13 +10,13 @@ namespace FinTv.Services;
 
 public class LogoSetService
 {
-    public const string Binarygeek119GitHubRef = "fintv2";
+    public const string Binarygeek119GitHubRef = "main";
 
     public const string Binarygeek119GitHubTreeUrl =
-        "https://api.github.com/repos/binarygeek119/open-channel-logos/git/trees/fintv2?recursive=1";
+        "https://api.github.com/repos/FlowMeadow01/ChannelFlow-logo/git/trees/main?recursive=1";
 
     public const string Binarygeek119GitHubRawBase =
-        "https://raw.githubusercontent.com/binarygeek119/open-channel-logos/fintv2/";
+        "https://raw.githubusercontent.com/FlowMeadow01/ChannelFlow-logo/main/";
 
     private static readonly string[] Binarygeek119LogoPathPrefixes =
     [
@@ -66,6 +66,9 @@ public class LogoSetService
             StoragePath = storagePath
         };
 
+        existing.SourceUrl = Binarygeek119GitHubRawBase;
+        existing.StoragePath = storagePath;
+
         if (isNew)
         {
             _db.LogoSets.Add(existing);
@@ -84,8 +87,14 @@ public class LogoSetService
         var localCount = Directory.Exists(storagePath)
             ? Directory.EnumerateFiles(storagePath, "*.*", SearchOption.AllDirectories).Count(IsImageFile)
             : 0;
+        var flowWireLogo = Path.Combine(storagePath, "News", "FlowWire.png");
+        var flowWireIntro = Path.Combine(storagePath, "News", "FlowWire-intro.mp3");
+        var flowWireOutro = Path.Combine(storagePath, "News", "FlowWire-outro.mp3");
 
-        if (localCount == 0)
+        if (localCount == 0
+            || !File.Exists(flowWireLogo)
+            || !File.Exists(flowWireIntro)
+            || !File.Exists(flowWireOutro))
         {
             await DownloadBinarygeek119SetFromGitHubAsync(storagePath, cancellationToken);
         }
@@ -93,6 +102,7 @@ public class LogoSetService
         await ScanLocalLogoFolderAsync(existing, storagePath, cancellationToken);
         existing.LastSyncedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(cancellationToken);
+        await ApplyFlowWireLogoAsync(existing, cancellationToken);
         return existing;
     }
 
@@ -144,7 +154,7 @@ public class LogoSetService
         }
 
         var copied = 0;
-        foreach (var source in Directory.EnumerateFiles(bundledPath, "*.*", SearchOption.AllDirectories).Where(IsImageFile))
+        foreach (var source in Directory.EnumerateFiles(bundledPath, "*.*", SearchOption.AllDirectories).Where(IsBundledAssetFile))
         {
             var relative = Path.GetRelativePath(bundledPath, source);
             var destination = Path.Combine(storagePath, relative);
@@ -275,6 +285,37 @@ public class LogoSetService
         channel.LogoFileName = entry.FileName;
         channel.ChannelLogoPath = ResolveLogoPath(logoSet, entry.RelativePath);
         channel.BugPlacement = BugPlacementMode.Auto;
+    }
+
+    private async Task ApplyFlowWireLogoAsync(LogoSet logoSet, CancellationToken cancellationToken)
+    {
+        var preset = ChannelPresets.Find("channelflow-live-news");
+        if (preset is null)
+        {
+            return;
+        }
+
+        var channels = await _db.Channels.ToListAsync(cancellationToken);
+        var applied = 0;
+        foreach (var channel in channels)
+        {
+            var tag = ChannelAiRules.ExtractLibraryTag(channel.FilterJson);
+            if (!FilterDefinition.PresetIdsEqual(tag, preset.Id)
+                && !string.Equals(channel.Name, preset.Name, StringComparison.OrdinalIgnoreCase)
+                && channel.ContentType != ChannelContentType.News)
+            {
+                continue;
+            }
+
+            ApplyLogoToChannel(channel, logoSet, preset.LogoRelativePath, preset.Name);
+            applied++;
+        }
+
+        if (applied > 0)
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+            _logger.LogInformation("Applied FlowWire logo to {Count} channel(s)", applied);
+        }
     }
 
     public bool TryBindChannelLogo(Channel channel, LogoSet logoSet)
@@ -465,8 +506,7 @@ public class LogoSetService
         if (normalizedName.Contains("newsweather", StringComparison.Ordinal)
             || normalizedName.Contains("newandweather", StringComparison.Ordinal))
         {
-            return ChannelPresets.All.FirstOrDefault(p => p.Id == "channelflow-weatherstar4000")
-                ?? ChannelPresets.All.FirstOrDefault(p => p.Id == "channelflow-news");
+            return ChannelPresets.All.FirstOrDefault(p => p.Id == "channelflow-weatherstar4000");
         }
 
         return ChannelPresets.All.FirstOrDefault(p =>
@@ -729,10 +769,10 @@ public class LogoSetService
             .Where(item =>
                 item.Type == "blob"
                 && IsBundledLogoPath(item.Path)
-                && IsImageFile(item.Path))
+                && IsBundledAssetFile(item.Path))
             .ToList();
 
-        _logger.LogInformation("Downloading {Count} Binarygeek119 logos from GitHub ({Ref})", files.Count, Binarygeek119GitHubRef);
+        _logger.LogInformation("Downloading {Count} ChannelFlow logos from GitHub ({Ref})", files.Count, Binarygeek119GitHubRef);
 
         foreach (var file in files)
         {
@@ -781,6 +821,27 @@ public class LogoSetService
     private static bool IsBundledLogoPath(string path)
         => Binarygeek119LogoPathPrefixes.Any(prefix =>
             path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+
+    private static bool IsBundledAssetFile(string path)
+        => IsImageFile(path) || IsNewsAudioFile(path);
+
+    private static bool IsNewsAudioFile(string path)
+    {
+        if (!path.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase)
+            && !path.EndsWith(".wav", StringComparison.OrdinalIgnoreCase)
+            && !path.EndsWith(".m4a", StringComparison.OrdinalIgnoreCase)
+            && !path.EndsWith(".aac", StringComparison.OrdinalIgnoreCase)
+            && !path.EndsWith(".ogg", StringComparison.OrdinalIgnoreCase)
+            && !path.EndsWith(".flac", StringComparison.OrdinalIgnoreCase)
+            && !path.EndsWith(".opus", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var normalized = path.Replace('\\', '/');
+        return normalized.Contains("/News/", StringComparison.OrdinalIgnoreCase)
+            || normalized.StartsWith("News/", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static bool IsImageFile(string path)
         => path.EndsWith(".png", StringComparison.OrdinalIgnoreCase)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download FinTV channel logos from the open-channel-logos fintv2 branch."""
+"""Download ChannelFlow channel logos from FlowMeadow01/ChannelFlow-logo."""
 
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-REPO = "binarygeek119/open-channel-logos"
-GIT_REF = "fintv2"
+REPO = "FlowMeadow01/ChannelFlow-logo"
+GIT_REF = "main"
 TREE_URL = f"https://api.github.com/repos/{REPO}/git/trees/{GIT_REF}?recursive=1"
 RAW_BASE = f"https://raw.githubusercontent.com/{REPO}/{GIT_REF}/"
 LOGO_PREFIXES = (
@@ -23,13 +23,19 @@ LOGO_PREFIXES = (
     "Shows/",
     "Music Videos Channels/",
     "The Holiday Channel/",
+    "The_Holiday_Channel_Filler/",
     "Weather/",
 )
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
+AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".opus"}
 
 
 def is_image(path: str) -> bool:
     return Path(path).suffix.lower() in IMAGE_SUFFIXES
+
+
+def is_news_audio(path: str) -> bool:
+    return path.startswith("News/") and Path(path).suffix.lower() in AUDIO_SUFFIXES
 
 
 def is_logo_path(path: str) -> bool:
@@ -39,7 +45,7 @@ def is_logo_path(path: str) -> bool:
 def build_request(url: str) -> urllib.request.Request:
     headers = {
         "Accept": "application/vnd.github+json",
-        "User-Agent": "FinTV-Jellyfin-Plugin",
+        "User-Agent": "ChannelFlow-Server",
     }
     token = os.environ.get("GITHUB_TOKEN")
     if token:
@@ -84,10 +90,10 @@ def main() -> int:
         for item in fetch_tree()
         if item.get("type") == "blob"
         and is_logo_path(item.get("path", ""))
-        and is_image(item["path"])
+        and (is_image(item["path"]) or is_news_audio(item["path"]))
     ]
 
-    print(f"Bundling {len(files)} logos from {REPO}@{GIT_REF} into {output_dir}")
+    print(f"Bundling {len(files)} ChannelFlow assets from {REPO}@{GIT_REF} into {output_dir}")
     for item in files:
         relative = item["path"]
         destination = output_dir / relative.replace("/", "\\") if sys.platform == "win32" else output_dir / relative

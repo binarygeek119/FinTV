@@ -89,6 +89,8 @@ public sealed class WeatherHourly
 
     public string IconKey { get; init; } = "No-Data";
 
+    public string? ConditionText { get; init; }
+
     public int? PrecipitationChance { get; init; }
 
     public int? CloudCover { get; init; }

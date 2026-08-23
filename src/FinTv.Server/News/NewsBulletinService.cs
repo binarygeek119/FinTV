@@ -126,7 +126,7 @@ public sealed class NewsBulletinService
         var stamp = ranAt.ToLocalTime().ToString("yyyyMMdd-HHmm");
         var workDir = Path.Combine(newsRoot, "bulletins", "work-" + stamp);
         var outputMp4 = Path.Combine(newsRoot, "bulletins", $"news-{stamp}.mp4");
-        var header = string.IsNullOrWhiteSpace(settings.HeaderText) ? "ChannelFlow News" : settings.HeaderText.Trim();
+        var header = string.IsNullOrWhiteSpace(settings.HeaderText) ? "FlowWire News" : settings.HeaderText.Trim();
 
         var ok = await renderer.RenderBulletinFileAsync(
             settings,

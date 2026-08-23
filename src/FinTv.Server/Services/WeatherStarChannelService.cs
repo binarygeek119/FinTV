@@ -47,6 +47,7 @@ public class WeatherStarChannelService
     private readonly JellyfinCatalogService _catalog;
     private readonly WeatherDataClient _weather;
     private readonly WeatherStarCompositor _compositor;
+    private readonly WeatherAlertOverlayService _alerts;
 
     public WeatherStarChannelService(
         ILogger<WeatherStarChannelService> logger,
@@ -55,7 +56,8 @@ public class WeatherStarChannelService
         IFfmpegLocator mediaEncoder,
         JellyfinCatalogService catalog,
         WeatherDataClient weather,
-        WeatherStarCompositor compositor)
+        WeatherStarCompositor compositor,
+        WeatherAlertOverlayService alerts)
     {
         _logger = logger;
         _ffmpegBuilder = ffmpegBuilder;
@@ -64,6 +66,7 @@ public class WeatherStarChannelService
         _catalog = catalog;
         _weather = weather;
         _compositor = compositor;
+        _alerts = alerts;
     }
 
     public async Task StreamAsync(Domain.Channel channel, Stream output, CancellationToken cancellationToken)
@@ -170,12 +173,19 @@ public class WeatherStarChannelService
         WeatherSnapshot snap;
         try
         {
-            snap = await _weather.GetSnapshotAsync(locationQuery, source, useMetric, cancellationToken);
+            snap = _alerts.OverlayAlerts(
+                await _weather.GetSnapshotAsync(locationQuery, source, useMetric, cancellationToken));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogDebug(ex, "Weather alert cut-in skipped; snapshot failed");
-            return;
+            var simulated = _alerts.TrySimulationSnapshot();
+            if (simulated is null)
+            {
+                _logger.LogDebug(ex, "Weather alert cut-in skipped; snapshot failed");
+                return;
+            }
+
+            snap = simulated;
         }
 
         if (snap.Alerts.Count == 0)

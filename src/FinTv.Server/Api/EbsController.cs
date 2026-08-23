@@ -8,7 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 namespace FinTv.Api;
 
 /// <summary>
-/// Emergency Broadcast System settings and custom slate uploads.
+/// Off Air settings and custom slate uploads.
 /// </summary>
 [ApiController]
 [Route("api/ebs")]
@@ -160,11 +160,12 @@ public class EbsController : ControllerBase
     }
 
     /// <summary>
-    /// Gets a custom slate image for admin preview.
+    /// Gets the effective off-air slate (custom upload or bundled stock) for admin preview.
     /// </summary>
     /// <param name="variant">Slate variant (<c>usa</c> or <c>international</c>).</param>
     /// <returns>Image file.</returns>
     [HttpGet("slates/{variant}/image")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     public ActionResult GetSlateImage(string variant)
     {
         if (!TryParseVariant(variant, out var slateVariant))
@@ -172,16 +173,47 @@ public class EbsController : ControllerBase
             return BadRequest(new { message = "Variant must be usa or international." });
         }
 
-        var path = _ebs.ResolveCustomSlatePath(slateVariant);
-        if (string.IsNullOrWhiteSpace(path))
+        return FileSlate(_ebs.ResolveSlatePath(slateVariant));
+    }
+
+    /// <summary>
+    /// Gets the off-air image currently used for dead air and playback errors.
+    /// </summary>
+    /// <param name="variant">Optional slate variant override (<c>0</c> USA, <c>1</c> International).</param>
+    /// <returns>Image file.</returns>
+    [HttpGet("preview")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public ActionResult GetPreview([FromQuery] int? variant)
+    {
+        var slateVariant = variant switch
+        {
+            1 => EbsSlateVariant.International,
+            0 => EbsSlateVariant.Usa,
+            _ => FinTvRuntime.Current?.Configuration.EbsSlateVariant ?? EbsSlateVariant.Usa
+        };
+
+        return FileSlate(_ebs.ResolveSlatePath(slateVariant));
+    }
+
+    private ActionResult FileSlate(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path))
         {
             return NotFound();
         }
 
-        var contentType = Path.GetExtension(path).Equals(".png", StringComparison.OrdinalIgnoreCase)
-            ? "image/png"
-            : "image/jpeg";
-        return PhysicalFile(path, contentType);
+        return PhysicalFile(path, GetImageContentType(path));
+    }
+
+    private static string GetImageContentType(string path)
+    {
+        return Path.GetExtension(path).ToLowerInvariant() switch
+        {
+            ".png" => "image/png",
+            ".webp" => "image/webp",
+            ".gif" => "image/gif",
+            _ => "image/jpeg"
+        };
     }
 
     private static bool TryParseVariant(string value, out EbsSlateVariant variant)

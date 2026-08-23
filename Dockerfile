@@ -9,13 +9,20 @@ COPY logo.png src/FinTv.Server/wwwroot/logo.png
 COPY vendor/ws4kp/server/fonts vendor/ws4kp/server/fonts
 COPY vendor/ws4kp/server/images/backgrounds vendor/ws4kp/server/images/backgrounds
 COPY vendor/ws4kp/server/images/icons/current-conditions vendor/ws4kp/server/images/icons/current-conditions
+COPY vendor/ws4kp/server/images/maps/radar vendor/ws4kp/server/images/maps/radar
 COPY vendor/ws3kp/server/fonts vendor/ws3kp/server/fonts
 COPY vendor/ws3kp/server/images/backgrounds vendor/ws3kp/server/images/backgrounds
 RUN python3 scripts/fetch-binarygeek119-logos.py src/FinTv.Server/wwwroot/logos/binarygeek119 \
     || echo "Logo fetch skipped (offline or rate-limited)"
-RUN dotnet publish src/FinTv.Server/FinTv.Server.csproj -c Release -o /app/publish /p:SkipLogoFetch=true
+ARG CHANNELFLOW_VERSION=1.0.0
+ARG CHANNELFLOW_REVISION=dev
+RUN dotnet publish src/FinTv.Server/FinTv.Server.csproj -c Release -o /app/publish /p:SkipLogoFetch=true \
+    /p:Version=1.0.0 \
+    /p:InformationalVersion=${CHANNELFLOW_VERSION}+${CHANNELFLOW_REVISION}
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
+ARG CHANNELFLOW_VERSION=1.0.0
+ARG CHANNELFLOW_REVISION=dev
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
         ca-certificates \
@@ -43,6 +50,9 @@ ENV CHANNELFLOW_CONFIG=/config \
     FINTV_YTDLP_PATH=/usr/local/bin/yt-dlp \
     FFMPEG_HWACCEL=vaapi \
     FFMPEG_VAAPI_DEVICE=/dev/dri/renderD128 \
+    CHANNELFLOW_VERSION=${CHANNELFLOW_VERSION} \
+    CHANNELFLOW_REVISION=${CHANNELFLOW_REVISION} \
+    CHANNELFLOW_PACKAGING=docker \
     PORT=8097
 
 EXPOSE 8097

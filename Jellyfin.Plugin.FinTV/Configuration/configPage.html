@@ -36,8 +36,7 @@
                 <button type="button" class="tab" data-tab="list" role="tab">List</button>
                 <button type="button" class="tab" data-tab="special" role="tab">Special Presentation</button>
                 <button type="button" class="tab" data-tab="commercials" role="tab">Commercials</button>
-                <button type="button" class="tab" data-tab="logos" role="tab">Logo Sets</button>
-                <button type="button" class="tab" data-tab="ebs" role="tab">EBS</button>
+                <button type="button" class="tab" data-tab="ebs" role="tab">Off Air</button>
                 <button type="button" class="tab" data-tab="ai" role="tab">AI</button>
                 <button type="button" class="tab" data-tab="weather" role="tab">Weather</button>
                 <button type="button" class="tab" data-tab="general" role="tab">General</button>
@@ -146,7 +145,7 @@
                             <button type="button" id="btn-apply-presets" class="raised button-submit emby-button">Create Missing Channels</button>
                         </div>
                     </div>
-                    <p class="hint">Creates the standard Binarygeek119 TV lineup with channel numbers, names, library tags, and bundled logos from <a href="https://github.com/binarygeek119/open-channel-logos/tree/fintv2" target="_blank" rel="noopener">open-channel-logos (fintv2)</a> for both the Live TV guide icon and on-screen channel bug.</p>
+                    <p class="hint">Creates the standard Binarygeek119 TV lineup with channel numbers, names, library tags, and bundled logos from <a href="https://github.com/FlowMeadow01/ChannelFlow-logo" target="_blank" rel="noopener">ChannelFlow-logo</a> for both the Live TV guide icon and on-screen channel bug.</p>
                     <label class="field">
                         <span>Channel numbering</span>
                         <select id="preset-numbering-mode" class="emby-select">
@@ -303,22 +302,10 @@
                 <div id="commercial-list" class="data-table-wrap"></div>
             </section>
 
-            <section id="tab-logos" class="tab-panel">
-                <p>Import the <a href="https://github.com/binarygeek119/open-channel-logos/tree/fintv2" target="_blank" rel="noopener">Binarygeek119 Set (fintv2 branch)</a>, or create your own custom logo set.</p>
-                <p class="hint">Channel bugs live under Shows, Movies, and Music Videos Channels. Off-air Emergency Broadcast System slates are configured on the <strong>EBS</strong> tab.</p>
-                <div class="toolbar">
-                    <button id="btn-sync-logos" class="emby-button">Import / Refresh Binarygeek119 Set</button>
-                    <button id="btn-repair-logos" class="emby-button">Apply Logos to Channels</button>
-                    <button id="btn-create-logo-set" class="raised button-submit emby-button">Create Custom Set</button>
-                </div>
-                <div id="logo-repair-status" class="status-card hidden"></div>
-                <div id="logo-set-info"></div>
-            </section>
-
             <section id="tab-ebs" class="tab-panel">
                 <div class="card section-card">
-                    <h2>Emergency Broadcast System</h2>
-                    <p class="hint">EBS plays when a channel has no scheduled media, when playback fails, or when a weather capture error occurs. Pick off-air video and audio independently — for example, color bars with a beep tone, or TV static with white noise.</p>
+                    <h2>Off Air</h2>
+                    <p class="hint">Off Air plays when a channel has no scheduled media, when playback fails, or when a weather capture error occurs. Pick off-air video and audio independently — for example, color bars with a beep tone, or TV static with white noise.</p>
                     <label class="field">
                         <span>Off-air video</span>
                         <select id="ebs-display-mode" class="emby-input">
@@ -356,7 +343,7 @@
                         <select id="ebs-music-library" class="emby-input"></select>
                     </label>
                     <div class="actions" style="margin-bottom:1rem">
-                        <button type="button" id="btn-save-ebs" class="raised button-submit emby-button">Save EBS Settings</button>
+                        <button type="button" id="btn-save-ebs" class="raised button-submit emby-button">Save Off Air Settings</button>
                     </div>
                 </div>
                 <div class="card section-card">
@@ -443,6 +430,11 @@
                         <span>Venice model</span>
                         <input id="ai-venice-model" type="text" class="emby-input" placeholder="gpt-4o-mini">
                     </label>
+                    <label class="field">
+                        <span>AI voice</span>
+                        <input id="ai-tts-voice" type="text" class="emby-input" placeholder="nova" autocomplete="off">
+                    </label>
+                    <p class="hint">Voice id for AI text-to-speech. OpenAI and Venice use different names — pick one that matches the default provider. See <a href="https://platform.openai.com/docs/guides/text-to-speech#voice-options" target="_blank" rel="noopener">OpenAI voices</a> and <a href="https://docs.venice.ai/models/text-to-speech" target="_blank" rel="noopener">Venice voices</a>.</p>
                     <p id="ai-key-status" class="hint"></p>
                     <p class="hint">AI lineups build up to <strong>14 days</strong> of playout. ChannelFlow auto-extends the schedule as each day ends. Auto-apply sets content mix and playout template from channel rules, generates the lineup, and rebuilds playout. The scheduled task adds <strong>one day</strong> when the horizon drops to 13 days instead of rebuilding all 14. Queued new channels can also be processed from <strong>Dashboard → Scheduled Tasks → ChannelFlow AI Lineup Auto-Apply (Channel Add)</strong>.</p>
                 </div>
@@ -599,7 +591,7 @@
                         <span>Public server URL (optional override)</span>
                         <input id="setup-public-base" type="text" class="emby-input" placeholder="https://channelflow.example.duckdns.org" autocomplete="off" spellcheck="false" inputmode="url">
                     </label>
-                    <p class="hint">Configure off-air Emergency Broadcast System playback on the <strong>EBS</strong> tab.</p>
+                    <p class="hint">Configure Off Air playback on the <strong>Off Air</strong> tab.</p>
                     <div class="actions" style="margin-bottom:1rem">
                         <button type="button" id="btn-save-setup" class="raised button-submit emby-button">Save &amp; Refresh URLs</button>
                     </div>

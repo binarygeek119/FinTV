@@ -82,7 +82,7 @@ public class StreamService
             {
                 try
                 {
-                    await weather.StreamHazardsCutInAsync(channel, output, _weatherAlerts.CutInDuration, cancellationToken);
+                    await weather.StreamHazardsCutInAsync(channel, output, _weatherAlerts.CutInDurationForStream, cancellationToken);
                     _weatherAlerts.MarkCutInComplete(alertSession);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)

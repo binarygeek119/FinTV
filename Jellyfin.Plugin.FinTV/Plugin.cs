@@ -60,7 +60,7 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages, IHasEmbedde
     public string LogosFolder => Path.Combine(DataFolder, "logos");
 
     /// <summary>
-    /// Gets the Emergency Broadcast System asset folder.
+    /// Gets the Off Air asset folder.
     /// </summary>
     public string EbsFolder => Path.Combine(DataFolder, "ebs");
 

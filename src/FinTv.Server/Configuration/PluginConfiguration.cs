@@ -41,7 +41,7 @@ public class PluginConfiguration
     public bool AutoRegisterLiveTv { get; set; }
 
     public string Binarygeek119LogoSetUrl { get; set; } =
-        "https://github.com/binarygeek119/open-channel-logos/tree/fintv2";
+        "https://github.com/FlowMeadow01/ChannelFlow-logo";
 
     public string WeatherStarBaseUrl { get; set; } = "http://127.0.0.1:8080";
 
@@ -163,6 +163,11 @@ public class AiSettings
     public string? VeniceApiKey { get; set; }
 
     public string VeniceModel { get; set; } = "gpt-4o-mini";
+
+    /// <summary>
+    /// Voice id for AI text-to-speech (OpenAI <c>nova</c>, Venice <c>af_sky</c>, etc.).
+    /// </summary>
+    public string TtsVoice { get; set; } = "nova";
 
     public int MaxCatalogItemsInPrompt { get; set; } = 250;
 
@@ -352,6 +357,8 @@ public class WeatherGuideSlotCache
     public string? Description { get; set; }
 
     public List<string> Categories { get; set; } = new();
+
+    public string? ForecastDate { get; set; }
 
     public DateTime GeneratedAtUtc { get; set; }
 }

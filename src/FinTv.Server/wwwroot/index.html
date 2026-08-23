@@ -151,14 +151,16 @@
                 <a href="special" class="tab" data-tab="special" role="tab">Special Presentation</a>
                 <a href="commercials" class="tab" data-tab="commercials" role="tab">Commercials</a>
                 <a href="commercialbrainz" class="tab" data-tab="commercialbrainz" role="tab">CommercialBrainz</a>
-                <a href="logos" class="tab" data-tab="logos" role="tab">Logo Sets</a>
-                <a href="ebs" class="tab" data-tab="ebs" role="tab">EBS</a>
+                <a href="ebs" class="tab" data-tab="ebs" role="tab">Off Air</a>
+                <a href="emergency" class="tab" data-tab="emergency" role="tab">Emergency Broadcast System</a>
                 <a href="ai" class="tab" data-tab="ai" role="tab">AI</a>
                 <a href="weather" class="tab" data-tab="weather" role="tab">Weather</a>
                 <a href="news" class="tab" data-tab="news" role="tab">News</a>
                 <a href="transcode" class="tab" data-tab="transcode" role="tab">Transcode</a>
                 <a href="general" class="tab" data-tab="general" role="tab">General</a>
                 <a href="tasks" class="tab" data-tab="tasks" role="tab">Tasks</a>
+                <a href="about" class="tab" data-tab="about" role="tab">About</a>
+                <a href="credits" class="tab" data-tab="credits" role="tab">Credits</a>
             </nav>
 
             <div id="toast-container" class="toast-container" aria-live="polite"></div>
@@ -278,7 +280,7 @@
                             <button type="button" id="btn-apply-presets" class="raised button-submit emby-button">Create Missing Channels</button>
                         </div>
                     </div>
-                    <p class="hint">Creates the standard Binarygeek119 TV lineup with channel numbers, names, library tags, and bundled logos from <a href="https://github.com/binarygeek119/open-channel-logos/tree/fintv2" target="_blank" rel="noopener">open-channel-logos (fintv2)</a> for both the Live TV guide icon and on-screen channel bug.</p>
+                    <p class="hint">Creates the standard Binarygeek119 TV lineup with channel numbers, names, library tags, and bundled logos from <a href="https://github.com/FlowMeadow01/ChannelFlow-logo" target="_blank" rel="noopener">ChannelFlow-logo</a> for both the Live TV guide icon and on-screen channel bug.</p>
                     <label class="field">
                         <span>Channel numbering</span>
                         <select id="preset-numbering-mode" class="emby-select">
@@ -512,22 +514,20 @@
                 </div>
             </section>
 
-            <section id="tab-logos" class="tab-panel hidden" hidden>
-                <p>Import the <a href="https://github.com/binarygeek119/open-channel-logos/tree/fintv2" target="_blank" rel="noopener">Binarygeek119 Set (fintv2 branch)</a>, or create your own custom logo set.</p>
-                <p class="hint">Channel bugs live under Shows, Movies, and Music Videos Channels. Off-air Emergency Broadcast System slates are configured on the <strong>EBS</strong> tab.</p>
-                <div class="toolbar">
-                    <button id="btn-sync-logos" class="emby-button">Import / Refresh Binarygeek119 Set</button>
-                    <button id="btn-repair-logos" class="emby-button">Apply Logos to Channels</button>
-                    <button id="btn-create-logo-set" class="raised button-submit emby-button">Create Custom Set</button>
-                </div>
-                <div id="logo-repair-status" class="status-card hidden"></div>
-                <div id="logo-set-info"></div>
-            </section>
-
             <section id="tab-ebs" class="tab-panel hidden" hidden>
                 <div class="card section-card">
-                    <h2>Emergency Broadcast System</h2>
-                    <p class="hint">EBS plays when a channel has no scheduled media, when playback fails, or when a weather capture error occurs. Pick off-air video and audio independently — for example, color bars with a beep tone, or TV static with white noise.</p>
+                    <h2>Off Air</h2>
+                    <p class="hint">Off Air plays when a channel has no scheduled media, when playback fails, or when a weather capture error occurs. Pick off-air video and audio independently — for example, color bars with a beep tone, or TV static with white noise.</p>
+                    <div class="ebs-live-preview" id="ebs-live-preview">
+                        <span class="ebs-live-preview-label">What viewers see</span>
+                        <div class="ebs-live-preview-frame" id="ebs-live-preview-frame">
+                            <img id="ebs-live-preview-image" class="ebs-live-preview-image hidden" alt="Off-air image shown during dead air and errors">
+                            <div id="ebs-live-preview-bars" class="ebs-preview-bars hidden" hidden></div>
+                            <div id="ebs-live-preview-static" class="ebs-preview-static hidden" hidden></div>
+                            <p id="ebs-live-preview-missing" class="ebs-preview-missing hidden" hidden>No off-air slate image was found.</p>
+                        </div>
+                        <p class="hint" id="ebs-live-preview-caption">Shown during dead air and playback errors.</p>
+                    </div>
                     <label class="field">
                         <span>Off-air video</span>
                         <select id="ebs-display-mode" class="emby-input">
@@ -565,7 +565,7 @@
                         <select id="ebs-music-library" class="emby-input"></select>
                     </label>
                     <div class="actions" style="margin-bottom:1rem">
-                        <button type="button" id="btn-save-ebs" class="raised button-submit emby-button">Save EBS Settings</button>
+                        <button type="button" id="btn-save-ebs" class="raised button-submit emby-button">Save Off Air Settings</button>
                     </div>
                 </div>
                 <div class="card section-card">
@@ -575,6 +575,9 @@
                         <div class="ebs-upload-card">
                             <h4>USA slate</h4>
                             <p class="hint">Stock fallback: <code>offlineusa.jpg</code></p>
+                            <div class="ebs-upload-preview-wrap hidden">
+                                <img id="ebs-usa-preview" class="ebs-upload-preview hidden" alt="USA off-air slate">
+                            </div>
                             <div id="ebs-usa-status" class="status-card"></div>
                             <label class="field">
                                 <span>Upload image</span>
@@ -588,6 +591,9 @@
                         <div class="ebs-upload-card">
                             <h4>International slate</h4>
                             <p class="hint">Stock fallback: <code>offline.jpg</code></p>
+                            <div class="ebs-upload-preview-wrap hidden">
+                                <img id="ebs-international-preview" class="ebs-upload-preview hidden" alt="International off-air slate">
+                            </div>
                             <div id="ebs-international-status" class="status-card"></div>
                             <label class="field">
                                 <span>Upload image</span>
@@ -599,6 +605,37 @@
                             </div>
                         </div>
                     </div>
+                </div>
+            </section>
+
+            <section id="tab-emergency" class="tab-panel hidden" hidden>
+                <div class="card section-card">
+                    <h3>Emergency Broadcast System</h3>
+                    <p class="hint">When NOAA has watches or warnings for the default Weather tab location, show them on TV, movies, and music. WeatherStar and FlowWire keep their own displays.</p>
+                    <label class="field">
+                        <span>Alert display</span>
+                        <select id="weather-alert-overlay-mode" class="emby-select">
+                            <option value="off" selected>Off</option>
+                            <option value="cutin">Switch to the alerts screen every so often</option>
+                            <option value="ticker">Scrolling alert text at the bottom</option>
+                        </select>
+                    </label>
+                    <div id="weather-alert-cutin-fields" class="form-grid hidden">
+                        <label class="field" id="weather-alert-interval-wrap">
+                            <span>How often (minutes)</span>
+                            <input id="weather-alert-cutin-interval" type="number" class="emby-input" min="1" max="180" step="1" value="15">
+                        </label>
+                        <label class="field">
+                            <span>How long (seconds)</span>
+                            <input id="weather-alert-cutin-duration" type="number" class="emby-input" min="5" max="120" step="1" value="20">
+                        </label>
+                    </div>
+                    <div class="actions">
+                        <button type="button" id="btn-test-weather-alerts" class="emby-button">Test alerts</button>
+                        <button type="button" id="btn-save-weather-alerts" class="raised button-submit emby-button">Save Alert Settings</button>
+                    </div>
+                    <div id="weather-alert-test-preview" class="weather-alert-test-preview hidden" hidden></div>
+                    <p id="weather-alert-test-hint" class="hint hidden" hidden></p>
                 </div>
             </section>
 
@@ -652,6 +689,11 @@
                         <span>Venice model</span>
                         <input id="ai-venice-model" type="text" class="emby-input" placeholder="gpt-4o-mini">
                     </label>
+                    <label class="field">
+                        <span>AI voice</span>
+                        <input id="ai-tts-voice" type="text" class="emby-input" placeholder="nova" autocomplete="off">
+                    </label>
+                    <p class="hint">Voice id for AI text-to-speech (FlowWire, Catherine Wolfe, and any other AI speech). OpenAI and Venice use different names — pick one that matches the default provider. See <a href="https://platform.openai.com/docs/guides/text-to-speech#voice-options" target="_blank" rel="noopener">OpenAI voices</a> and <a href="https://docs.venice.ai/models/text-to-speech" target="_blank" rel="noopener">Venice voices</a>.</p>
                     <p id="ai-key-status" class="hint"></p>
                     <p class="hint">AI lineups build up to <strong>14 days</strong> of playout. ChannelFlow-Server auto-extends the schedule as each day ends. Auto-apply sets content mix and playout template from channel rules, generates the lineup, and rebuilds playout. The scheduled task adds <strong>one day</strong> when the horizon drops to 13 days instead of rebuilding all 14. Queued new channels can also be processed from <strong>Dashboard → Scheduled Tasks → ChannelFlow-Server AI Lineup Auto-Apply (Channel Add)</strong>.</p>
                 </div>
@@ -663,7 +705,7 @@
                             <button type="button" id="btn-weather-guide-cache-clear" class="emby-button">Delete Weather Guide Cache</button>
                         </div>
                     </div>
-                    <p class="hint">When AI is enabled, ChannelFlow-Server generates TV-guide-style titles and descriptions for each weather channel location and hour of day (0–23). Generation runs once when you click <strong>Generate Weather Guide Cache</strong>, then the same metadata is reused every day for matching time slots. EPG and playout builds read the cache only — they do not call the LLM.</p>
+                    <p class="hint">At local midnight, ChannelFlow-Server pulls the real forecast from the Weather tab source (NOAA or Open-Meteo) for each weather channel location and writes that day's TV guide titles and descriptions. If AI is enabled, it turns those facts into cable-guide copy; if not, the live temperatures and conditions go in the guide as-is. Click <strong>Generate Weather Guide Cache</strong> to refresh today now. EPG reads the cache only.</p>
                     <p id="ai-weather-guide-cache-status" class="hint">Loading weather guide cache status…</p>
                 </div>
                 <div class="card section-card">
@@ -713,7 +755,7 @@
                     <div class="actions">
                         <button type="button" id="btn-save-weather-source" class="raised button-submit emby-button">Save Weather Source</button>
                     </div>
-                    <p class="hint">Apply a weather preset, then set each channel&apos;s location below. Background music comes from a Jellyfin music library (falls back to EBS music).</p>
+                    <p class="hint">Apply a weather preset, then set each channel&apos;s location below. Background music comes from a Jellyfin music library (falls back to Off Air music).</p>
                 </div>
                 <div class="card section-card">
                     <h3>Background music</h3>
@@ -729,34 +771,12 @@
                 </div>
                 <div class="card section-card">
                     <h3>Location</h3>
-                    <p class="hint">WeatherStar looks up NWS data for US ZIPs and Open-Meteo for the rest of the world. Each weather channel can have its own location. New weather channels use the default.</p>
+                    <p class="hint">WeatherStar looks up NWS data for US ZIPs and Open-Meteo for the rest of the world. Each weather channel can have its own location. New weather channels use the default. NOAA watches and warnings on TV, movies, and music are on the <strong>Emergency Broadcast System</strong> tab.</p>
                     <label class="field">
                         <span>Default location</span>
                         <input id="weather-default-zip" type="text" class="emby-input" placeholder="50317 or London, UK" autocomplete="off">
                     </label>
                     <div id="weather-zip-list" class="weather-zip-list"></div>
-                </div>
-                <div class="card section-card">
-                    <h3>Alerts on other channels</h3>
-                    <p class="hint">When NOAA has watches or warnings for the default location, show them on TV, movies, and music. WeatherStar and the live news channel keep their own displays.</p>
-                    <label class="field">
-                        <span>Alert display</span>
-                        <select id="weather-alert-overlay-mode" class="emby-select">
-                            <option value="off" selected>Off</option>
-                            <option value="cutin">Switch to the alerts screen every so often</option>
-                            <option value="ticker">Scrolling alert text at the bottom</option>
-                        </select>
-                    </label>
-                    <div id="weather-alert-cutin-fields" class="form-grid hidden">
-                        <label class="field">
-                            <span>How often (minutes)</span>
-                            <input id="weather-alert-cutin-interval" type="number" class="emby-input" min="1" max="180" step="1" value="15">
-                        </label>
-                        <label class="field">
-                            <span>How long (seconds)</span>
-                            <input id="weather-alert-cutin-duration" type="number" class="emby-input" min="5" max="120" step="1" value="20">
-                        </label>
-                    </div>
                 </div>
                 <div class="card section-card">
                     <h3>Display settings</h3>
@@ -941,14 +961,97 @@
                     <p id="catalog-local-scan-status" class="hint">Loading local file scan status…</p>
                 </div>
             </section>
+            <section id="tab-about" class="tab-panel hidden" hidden>
+                <div class="card section-card">
+                    <div class="about-hero">
+                        <img src="logo.png" alt="">
+                        <div>
+                            <h2>ChannelFlow-Server</h2>
+                            <p class="hint">Simulated live TV for Jellyfin. Version, how this instance is running, and the live encoder.</p>
+                        </div>
+                    </div>
+                    <dl id="about-app" class="about-dl"><div class="about-row"><dt>Status</dt><dd>Loading…</dd></div></dl>
+                </div>
+                <div class="card section-card">
+                    <h3>System</h3>
+                    <dl id="about-system" class="about-dl"></dl>
+                </div>
+                <div class="card section-card">
+                    <h3>Transcode</h3>
+                    <p class="hint">Live MPEG-TS encoder in use right now. Change this on the Transcode tab.</p>
+                    <dl id="about-transcode" class="about-dl"></dl>
+                </div>
+            </section>
+
+            <section id="tab-credits" class="tab-panel hidden" hidden>
+                <div class="card section-card">
+                    <h2>Credits</h2>
+                    <p class="hint">ChannelFlow stands on work from these people and projects. Thank you.</p>
+                </div>
+                <div class="card section-card">
+                    <h3>Authors</h3>
+                    <ul class="credits-list">
+                        <li><a href="https://github.com/binarygeek119" target="_blank" rel="noopener">binarygeek119</a> — author of ChannelFlow</li>
+                        <li><a href="https://github.com/netbymatt" target="_blank" rel="noopener">netbymatt</a> — WeatherStar 4000+ and WeatherStar 3000+</li>
+                        <li><a href="https://github.com/liam8888999/ErsatzTV-Filler" target="_blank" rel="noopener">liam8888999</a> — ErsatzTV-Filler</li>
+                        <li><a href="https://github.com/jasongdove" target="_blank" rel="noopener">jasongdove</a> — <a href="https://ersatztv.org" target="_blank" rel="noopener">ErsatzTV</a></li>
+                    </ul>
+                </div>
+                <div class="card section-card">
+                    <h3>ChannelFlow</h3>
+                    <ul class="credits-list">
+                        <li><a href="https://github.com/FlowMeadow01/ChannelFlow" target="_blank" rel="noopener">ChannelFlow</a> — simulated live TV for Jellyfin, by binarygeek119</li>
+                        <li><a href="https://github.com/FlowMeadow01/ChannelFlow-logo" target="_blank" rel="noopener">ChannelFlow-logo</a> — channel bugs and guide icons, including FlowWire</li>
+                    </ul>
+                </div>
+                <div class="card section-card">
+                    <h3>Jellyfin</h3>
+                    <ul class="credits-list">
+                        <li><a href="https://jellyfin.org" target="_blank" rel="noopener">Jellyfin</a> — media server, library, and Live TV plugin host</li>
+                    </ul>
+                </div>
+                <div class="card section-card">
+                    <h3>WeatherStar</h3>
+                    <ul class="credits-list">
+                        <li><a href="https://github.com/netbymatt/ws4kp" target="_blank" rel="noopener">WeatherStar 4000+</a> by <a href="https://github.com/netbymatt" target="_blank" rel="noopener">netbymatt</a> — look, fonts, backgrounds, and maps used by the native compositor (MIT)</li>
+                        <li><a href="https://github.com/netbymatt/ws3kp" target="_blank" rel="noopener">WeatherStar 3000+</a> by <a href="https://github.com/netbymatt" target="_blank" rel="noopener">netbymatt</a> — 3000-style assets (MIT)</li>
+                        <li><a href="https://github.com/vbguyny/ws4kp" target="_blank" rel="noopener">Original WeatherStar 4000+</a> by Mike Battaglia</li>
+                        <li><a href="https://twcclassics.com/" target="_blank" rel="noopener">TWCClassics</a> — WeatherStar fonts and icon references</li>
+                        <li><a href="https://www.weather.gov/documentation/services-web-api" target="_blank" rel="noopener">NOAA / National Weather Service</a> — forecasts, observations, and alerts</li>
+                        <li><a href="https://mesonet.agron.iastate.edu/" target="_blank" rel="noopener">Iowa Environmental Mesonet</a> — NEXRAD radar imagery</li>
+                    </ul>
+                </div>
+                <div class="card section-card">
+                    <h3>ErsatzTV</h3>
+                    <ul class="credits-list">
+                        <li><a href="https://ersatztv.org" target="_blank" rel="noopener">ErsatzTV</a> by <a href="https://github.com/jasongdove" target="_blank" rel="noopener">jasongdove</a> — live custom TV channels from a personal library</li>
+                        <li><a href="https://github.com/liam8888999/ErsatzTV-Filler" target="_blank" rel="noopener">ErsatzTV-Filler</a> by <a href="https://github.com/liam8888999" target="_blank" rel="noopener">liam8888999</a> — weather, news, and offline filler</li>
+                    </ul>
+                </div>
+                <div class="card section-card">
+                    <h3>Playback and graphics</h3>
+                    <ul class="credits-list">
+                        <li><a href="https://ffmpeg.org" target="_blank" rel="noopener">FFmpeg</a> — live MPEG-TS encode, overlays, and TTS mux</li>
+                        <li><a href="https://github.com/mono/SkiaSharp" target="_blank" rel="noopener">SkiaSharp</a> — in-process WeatherStar rendering</li>
+                    </ul>
+                </div>
+                <div class="card section-card">
+                    <h3>News, commercials, and AI</h3>
+                    <ul class="credits-list">
+                        <li>FlowWire news TTS may use Google Translate speech or the configured AI provider</li>
+                        <li><a href="https://platform.openai.com/docs/guides/text-to-speech#voice-options" target="_blank" rel="noopener">OpenAI</a> and <a href="https://docs.venice.ai/models/text-to-speech" target="_blank" rel="noopener">Venice</a> — optional lineup generation and speech</li>
+                        <li>CommercialBrainz — optional YouTube commercial pool</li>
+                    </ul>
+                </div>
+            </section>
         </div>
 
         
             <section id="tab-news" class="tab-panel hidden" hidden>
                 <div class="card section-card">
-                    <div class="section-header"><h3>Live news channel</h3></div>
-                    <p class="hint">Apply the <strong>ChannelFlow News</strong> preset (or set a channel to content type News). ChannelFlow-Server fetches RSS, scrolls headlines with an ASS overlay, shows story photos when the feed includes them, optionally reads them with TTS, and mixes a Jellyfin music bed into a 24/7 MPEG-TS stream.</p>
-                    <label class="field"><span>Header text</span><input id="news-header" type="text" class="emby-input" placeholder="ChannelFlow News"></label>
+                    <div class="section-header"><h3>FlowWire</h3></div>
+                    <p class="hint">Apply the <strong>FlowWire</strong> preset (or set a channel to content type News). ChannelFlow-Server fetches RSS, scrolls headlines with an ASS overlay, shows story photos when the feed includes them, and optionally reads them with TTS. Intro music plays with the channel logo before Catherine speaks; after her sign-off, outro audio plays with the logo again.</p>
+                    <label class="field"><span>Header text</span><input id="news-header" type="text" class="emby-input" placeholder="FlowWire News"></label>
                     <label class="field"><span>Article count</span><input id="news-count" type="number" min="1" max="30" value="8" class="emby-input"></label>
                     <label class="field"><span>Refresh interval (minutes)</span><input id="news-refresh" type="number" min="2" max="120" value="10" class="emby-input"></label>
                     <label class="field">
@@ -966,19 +1069,30 @@
                             <option value="zh-CN">Chinese</option>
                         </select>
                     </label>
-                    <label class="field"><span>Read intro</span><input id="news-intro" type="text" class="emby-input" placeholder="You're watching ChannelFlow News"></label>
-                    <label class="field"><span>Read outro</span><input id="news-outro" type="text" class="emby-input" placeholder="Those are the headlines."></label>
+                    <label class="field"><span>Anchor intro</span><textarea id="news-intro" class="emby-input" rows="2" placeholder="I'm Catherine Wolfe. You're watching FlowWire News."></textarea></label>
+                    <label class="field"><span>Anchor outro</span><textarea id="news-outro" class="emby-input" rows="2" placeholder="I'm Catherine Wolfe. Stay with FlowWire News."></textarea></label>
+                    <p class="hint">Catherine reads the <strong>anchor intro</strong> before the stories, then the <strong>anchor outro</strong> as her sign-off immediately before outro audio. Leave both blank to use her defaults. Bumper music comes from the ChannelFlow logo set (<code>News/FlowWire-intro.mp3</code> and <code>News/FlowWire-outro.mp3</code>). Override those with <code>intro.mp3</code> and <code>outro.mp3</code> in the server news folder, or a short clip from News music is used if nothing is found.</p>
                     <label class="field checkbox-field"><input id="news-tts" type="checkbox" checked><span class="channelflow-check-box"></span><span>Enable TTS</span></label>
+                    <label class="field">
+                        <span>TTS engine</span>
+                        <select id="news-tts-engine" class="emby-select">
+                            <option value="google">Basic Google TTS</option>
+                            <option value="ai">AI TTS</option>
+                        </select>
+                    </label>
+                    <p class="hint">AI TTS uses the provider, API key, and <strong>AI voice</strong> on the AI tab. If AI speech fails, ChannelFlow falls back to Google TTS.</p>
+                    <label class="field checkbox-field"><input id="news-ai-rewrite" type="checkbox"><span class="channelflow-check-box"></span><span>AI rewrite as one news show</span></label>
+                    <p class="hint">Uses the AI tab provider to merge RSS into a single newscast presented by FlowWire anchor <strong>Catherine Wolfe</strong>, dropping duplicate coverage of the same event. Custom anchor intro/outro still override her open and sign-off if you fill them in.</p>
                     <label class="field checkbox-field"><input id="news-show-header" type="checkbox" checked><span class="channelflow-check-box"></span><span>Show header on screen</span></label>
                     <label class="field checkbox-field"><input id="news-headlines-only" type="checkbox"><span class="channelflow-check-box"></span><span>Read headlines only (skip descriptions)</span></label>
                     <label class="field checkbox-field"><input id="news-no-music" type="checkbox"><span class="channelflow-check-box"></span><span>Play no music at all</span></label>
                     <label class="field">
                         <span>News music</span>
                         <select id="news-music-library" class="emby-select">
-                            <option value="">Use EBS background music</option>
+                            <option value="">Use Off Air background music</option>
                         </select>
                     </label>
-                    <p class="hint">Turn on <strong>Play no music at all</strong> for TTS or silence with no bed. Otherwise pick a Jellyfin music library, or leave on EBS to use the EBS background music setting.</p>
+                    <p class="hint">Turn on <strong>Play no music at all</strong> for TTS or silence with no bed. Otherwise pick a Jellyfin music library, or leave on Off Air to use the Off Air background music setting.</p>
                     <div class="actions">
                         <button type="button" id="btn-save-news" class="raised button-submit emby-button">Save news settings</button>
                     </div>

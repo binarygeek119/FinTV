@@ -56,7 +56,7 @@ public class PluginConfiguration : BasePluginConfiguration
     public bool AutoRegisterLiveTv { get; set; }
 
     public string Binarygeek119LogoSetUrl { get; set; } =
-        "https://github.com/binarygeek119/open-channel-logos/tree/fintv2";
+        "https://github.com/FlowMeadow01/ChannelFlow-logo";
 
     /// <summary>
     /// Base URL for the WeatherStar page (scheme + host + port only). Display settings come from <see cref="WeatherStarPermalinkQuery"/>.
@@ -143,6 +143,11 @@ public class AiSettings
     public string? VeniceApiKey { get; set; }
 
     public string VeniceModel { get; set; } = "gpt-4o-mini";
+
+    /// <summary>
+    /// Voice id for AI text-to-speech (OpenAI <c>nova</c>, Venice <c>af_sky</c>, etc.).
+    /// </summary>
+    public string TtsVoice { get; set; } = "nova";
 
     public int MaxCatalogItemsInPrompt { get; set; } = 250;
 

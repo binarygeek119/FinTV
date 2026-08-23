@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.FinTV.Services;
 
 /// <summary>
-/// Resolves Emergency Broadcast System assets and playback plans for off-air channels.
+/// Resolves Off Air assets and playback plans when a channel has no scheduled media.
 /// </summary>
 public class EbsService
 {
@@ -70,12 +70,22 @@ public class EbsService
     public string? ResolveSlatePath()
     {
         var variant = Plugin.Instance?.Configuration.EbsSlateVariant ?? EbsSlateVariant.Usa;
+        return ResolveSlatePath(variant);
+    }
+
+    public string? ResolveSlatePath(EbsSlateVariant variant)
+    {
         var customPath = ResolveCustomSlatePath(variant);
         if (!string.IsNullOrWhiteSpace(customPath))
         {
             return customPath;
         }
 
+        return ResolveStockSlatePath(variant);
+    }
+
+    public string? ResolveStockSlatePath(EbsSlateVariant variant)
+    {
         var preferredFile = variant == EbsSlateVariant.Usa ? UsaSlateFile : InternationalSlateFile;
         foreach (var root in GetStockSlateRoots())
         {

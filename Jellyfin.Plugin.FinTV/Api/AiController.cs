@@ -78,6 +78,11 @@ public class AiController : ControllerBase
             ai.VeniceModel = request.VeniceModel;
         }
 
+        if (request.TtsVoice is not null)
+        {
+            ai.TtsVoice = string.IsNullOrWhiteSpace(request.TtsVoice) ? "nova" : request.TtsVoice.Trim();
+        }
+
         if (request.MaxCatalogItemsInPrompt.HasValue)
         {
             ai.MaxCatalogItemsInPrompt = Math.Clamp(request.MaxCatalogItemsInPrompt.Value, 10, 1000);
@@ -128,6 +133,7 @@ public class AiController : ControllerBase
             defaultProvider = (int)ai.DefaultProvider,
             openAiModel = ai.OpenAiModel,
             veniceModel = ai.VeniceModel,
+            ttsVoice = string.IsNullOrWhiteSpace(ai.TtsVoice) ? "nova" : ai.TtsVoice,
             maxCatalogItemsInPrompt = ai.MaxCatalogItemsInPrompt,
             hasOpenAiApiKey = !string.IsNullOrWhiteSpace(ai.OpenAiApiKey),
             hasVeniceApiKey = !string.IsNullOrWhiteSpace(ai.VeniceApiKey),
@@ -448,6 +454,8 @@ public class AiSettingsRequest
     public string? VeniceApiKey { get; set; }
 
     public string? VeniceModel { get; set; }
+
+    public string? TtsVoice { get; set; }
 
     public int? MaxCatalogItemsInPrompt { get; set; }
 

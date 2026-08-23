@@ -42,6 +42,30 @@ internal static class WeatherGuideCacheStore
         }
     }
 
+    public static void Prune(Func<string, bool> shouldRemove)
+    {
+        lock (FileLock)
+        {
+            var entries = LoadEntriesUnsafe();
+            var removed = false;
+            foreach (var key in entries.Keys.ToList())
+            {
+                if (!shouldRemove(key))
+                {
+                    continue;
+                }
+
+                entries.Remove(key);
+                removed = true;
+            }
+
+            if (removed)
+            {
+                WriteEntriesUnsafe(entries);
+            }
+        }
+    }
+
     public static void SetMany(IEnumerable<KeyValuePair<string, WeatherGuideSlotCache>> values)
     {
         lock (FileLock)

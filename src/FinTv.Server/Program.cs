@@ -136,6 +136,7 @@ builder.Services.AddScoped<AiChannelAutoApplyService>();
 builder.Services.AddScoped<EbsService>();
 builder.Services.AddSingleton<NewsHeadlineService>();
 builder.Services.AddSingleton<NewsTtsService>();
+builder.Services.AddScoped<NewsShowWriter>();
 builder.Services.AddSingleton<NewsBulletinService>();
 builder.Services.AddSingleton<NewsBulletinTask>();
 builder.Services.AddScoped<WeatherStarChannelService>();
@@ -146,6 +147,7 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<PlayoutBuilderServ
 builder.Services.AddHostedService<ScheduledTaskHost>();
 builder.Services.AddHostedService<NewsRefreshHostedService>();
 builder.Services.AddHostedService<NewsBulletinHostedService>();
+builder.Services.AddHostedService<WeatherGuideRefreshHostedService>();
 
 var app = builder.Build();
 

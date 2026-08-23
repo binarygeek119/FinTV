@@ -1,0 +1,46 @@
+name: Native apps
+
+# Self-contained Windows and Linux builds. Manual only — not shipped, not on push.
+on:
+  workflow_dispatch:
+    inputs:
+      rid:
+        description: Runtime to publish
+        type: choice
+        options:
+          - all
+          - linux-x64
+          - win-x64
+        default: all
+
+jobs:
+  publish:
+    # Flip to true when native Windows/Linux apps should be built from Actions.
+    if: ${{ false }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: ${{ github.event.inputs.rid == 'all' && fromJSON('["linux-x64","win-x64"]') || fromJSON(format('["{0}"]', github.event.inputs.rid)) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Publish ${{ matrix.rid }}
+        env:
+          CHANNELFLOW_VERSION: 1.0.0
+          CHANNELFLOW_REVISION: ${{ github.sha }}
+        run: bash scripts/publish-native.sh ${{ matrix.rid }}
+
+      - name: Upload ${{ matrix.rid }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: channelflow-server-${{ matrix.rid }}
+          path: artifacts/native/${{ matrix.rid }}
+          if-no-files-found: error
+          retention-days: 7

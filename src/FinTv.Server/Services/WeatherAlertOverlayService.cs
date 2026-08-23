@@ -7,10 +7,14 @@ namespace FinTv.Services;
 public sealed class WeatherAlertOverlayService
 {
     private readonly WeatherDataClient _weather;
+    private readonly WeatherStarCompositor _compositor;
+    private readonly object _gate = new();
+    private AlertOverlaySimulation? _simulation;
 
-    public WeatherAlertOverlayService(WeatherDataClient weather)
+    public WeatherAlertOverlayService(WeatherDataClient weather, WeatherStarCompositor compositor)
     {
         _weather = weather;
+        _compositor = compositor;
     }
 
     public static WeatherAlertOverlayMode ParseMode(string? value)
@@ -42,6 +46,15 @@ public sealed class WeatherAlertOverlayService
     public WeatherAlertOverlayMode Mode
         => ParseMode(FinTvRuntime.Current?.Configuration.WeatherAlertOverlayMode);
 
+    public WeatherAlertOverlayMode EffectiveMode
+    {
+        get
+        {
+            var simulation = GetActiveSimulation();
+            return simulation is null ? Mode : simulation.Mode;
+        }
+    }
+
     public TimeSpan CutInInterval
     {
         get
@@ -68,6 +81,12 @@ public sealed class WeatherAlertOverlayService
 
     public async Task<IReadOnlyList<WeatherAlert>> GetActiveAlertsAsync(CancellationToken cancellationToken)
     {
+        var simulation = GetActiveSimulation();
+        if (simulation is not null)
+        {
+            return simulation.Alerts;
+        }
+
         try
         {
             var snap = await GetSnapshotAsync(cancellationToken);
@@ -79,14 +98,88 @@ public sealed class WeatherAlertOverlayService
         }
     }
 
+    public WeatherSnapshot OverlayAlerts(WeatherSnapshot snap)
+    {
+        var simulation = GetActiveSimulation();
+        if (simulation is null)
+        {
+            return snap;
+        }
+
+        return CloneWithAlerts(snap, simulation.Alerts);
+    }
+
+    public async Task<WeatherAlertTestPreview> StartTestAsync(
+        WeatherAlertOverlayMode mode,
+        TimeSpan duration,
+        CancellationToken cancellationToken)
+    {
+        if (mode is not WeatherAlertOverlayMode.CutIn and not WeatherAlertOverlayMode.Ticker)
+        {
+            throw new ArgumentOutOfRangeException(nameof(mode), "Pick the alerts screen or scrolling text to test.");
+        }
+
+        var alerts = SampleAlerts();
+        var armFor = duration > TimeSpan.FromMinutes(2) ? duration : TimeSpan.FromMinutes(2);
+        var simulation = new AlertOverlaySimulation(Guid.NewGuid(), mode, DateTime.UtcNow + armFor, duration, alerts);
+        lock (_gate)
+        {
+            _simulation = simulation;
+        }
+
+        var ticker = FormatTickerText(alerts);
+        if (mode == WeatherAlertOverlayMode.Ticker && !string.IsNullOrWhiteSpace(ticker))
+        {
+            await WriteTickerFileAsync(ticker, cancellationToken);
+        }
+
+        byte[] jpeg;
+        try
+        {
+            jpeg = await RenderHazardsPreviewAsync(alerts, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            jpeg = [];
+        }
+
+        return new WeatherAlertTestPreview(mode, duration, alerts, ticker, jpeg);
+    }
+
+    public WeatherSnapshot? TrySimulationSnapshot()
+    {
+        var simulation = GetActiveSimulation();
+        return simulation is null ? null : PreviewSnapshot(simulation.Alerts);
+    }
+
+    public TimeSpan CutInDurationForStream
+    {
+        get
+        {
+            var simulation = GetActiveSimulation();
+            if (simulation is not null && simulation.Mode == WeatherAlertOverlayMode.CutIn)
+            {
+                return TimeSpan.FromSeconds(Math.Clamp(simulation.CutInDuration.TotalSeconds, 5, 120));
+            }
+
+            return CutInDuration;
+        }
+    }
+
     public async Task<bool> ShouldCutInNowAsync(
         Channel channel,
         WeatherAlertCutInSession session,
         CancellationToken cancellationToken)
     {
-        if (Mode != WeatherAlertOverlayMode.CutIn || !AppliesTo(channel))
+        if (EffectiveMode != WeatherAlertOverlayMode.CutIn || !AppliesTo(channel))
         {
             return false;
+        }
+
+        var simulation = GetActiveSimulation();
+        if (simulation is not null && simulation.Mode == WeatherAlertOverlayMode.CutIn && session.PlayedTestId != simulation.Id)
+        {
+            return true;
         }
 
         var alerts = await GetActiveAlertsAsync(cancellationToken);
@@ -104,7 +197,7 @@ public sealed class WeatherAlertOverlayService
         double durationSeconds,
         CancellationToken cancellationToken)
     {
-        if (Mode != WeatherAlertOverlayMode.CutIn || !AppliesTo(channel) || durationSeconds <= 2)
+        if (EffectiveMode != WeatherAlertOverlayMode.CutIn || !AppliesTo(channel) || durationSeconds <= 2)
         {
             return durationSeconds;
         }
@@ -125,11 +218,18 @@ public sealed class WeatherAlertOverlayService
     }
 
     public void MarkCutInComplete(WeatherAlertCutInSession session)
-        => session.LastCutInUtc = DateTime.UtcNow;
+    {
+        session.LastCutInUtc = DateTime.UtcNow;
+        var simulation = GetActiveSimulation();
+        if (simulation is not null)
+        {
+            session.PlayedTestId = simulation.Id;
+        }
+    }
 
     public async Task<string?> PrepareTickerFileAsync(Channel channel, CancellationToken cancellationToken)
     {
-        if (Mode != WeatherAlertOverlayMode.Ticker || !AllowsTicker(channel))
+        if (EffectiveMode != WeatherAlertOverlayMode.Ticker || !AllowsTicker(channel))
         {
             return null;
         }
@@ -152,9 +252,26 @@ public sealed class WeatherAlertOverlayService
         return path;
     }
 
+    private async Task WriteTickerFileAsync(string text, CancellationToken cancellationToken)
+    {
+        var folder = FinTvRuntime.Current?.WeatherStarFolder;
+        if (string.IsNullOrWhiteSpace(folder))
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(folder);
+        await File.WriteAllTextAsync(Path.Combine(folder, "alert-ticker.txt"), text, Encoding.UTF8, cancellationToken);
+    }
+
     private async Task<string?> BuildTickerTextAsync(CancellationToken cancellationToken)
     {
         var alerts = await GetActiveAlertsAsync(cancellationToken);
+        return FormatTickerText(alerts);
+    }
+
+    private static string? FormatTickerText(IReadOnlyList<WeatherAlert> alerts)
+    {
         if (alerts.Count == 0)
         {
             return null;
@@ -185,6 +302,99 @@ public sealed class WeatherAlertOverlayService
         return text.Length > 900 ? text[..900] : text;
     }
 
+    private AlertOverlaySimulation? GetActiveSimulation()
+    {
+        lock (_gate)
+        {
+            var simulation = _simulation;
+            if (simulation is null || simulation.UntilUtc <= DateTime.UtcNow)
+            {
+                if (simulation is not null)
+                {
+                    _simulation = null;
+                }
+
+                return null;
+            }
+
+            return simulation;
+        }
+    }
+
+    private async Task<byte[]> RenderHazardsPreviewAsync(
+        IReadOnlyList<WeatherAlert> alerts,
+        CancellationToken cancellationToken)
+    {
+        WeatherSnapshot snap;
+        try
+        {
+            snap = CloneWithAlerts(await GetSnapshotAsync(cancellationToken), alerts);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            snap = PreviewSnapshot(alerts);
+        }
+
+        var config = FinTvRuntime.Current?.Configuration;
+        var skin = string.Equals(config?.WeatherStarVariant, "ws3kp", StringComparison.OrdinalIgnoreCase)
+            ? WeatherStarDockerVariant.Ws3kp
+            : WeatherStarDockerVariant.Ws4kp;
+        return _compositor.RenderJpeg(snap, WeatherStarScreen.Hazards, skin, 854, 480, scanlines: false, radarIndex: 0);
+    }
+
+    private static WeatherSnapshot PreviewSnapshot(IReadOnlyList<WeatherAlert> alerts)
+    {
+        var location = WeatherStarChannelService.ResolveDefaultLocationQuery();
+        return new WeatherSnapshot
+        {
+            Place = new GeoPlace
+            {
+                Query = location,
+                DisplayName = location,
+                Latitude = 0,
+                Longitude = 0,
+                Timezone = TimeZoneInfo.Local.Id
+            },
+            IsUnitedStates = true,
+            Backend = "test",
+            UseMetric = false,
+            Alerts = alerts,
+            FetchedAt = DateTimeOffset.UtcNow
+        };
+    }
+
+    private static WeatherSnapshot CloneWithAlerts(WeatherSnapshot snap, IReadOnlyList<WeatherAlert> alerts)
+        => new()
+        {
+            Place = snap.Place,
+            IsUnitedStates = snap.IsUnitedStates,
+            Backend = snap.Backend,
+            UseMetric = snap.UseMetric,
+            Current = snap.Current,
+            Hourly = snap.Hourly,
+            Daily = snap.Daily,
+            Alerts = alerts,
+            Radar = snap.Radar,
+            Observations = snap.Observations,
+            Periods = snap.Periods,
+            Regional = snap.Regional,
+            Travel = snap.Travel,
+            SpcOutlook = snap.SpcOutlook,
+            FetchedAt = snap.FetchedAt
+        };
+
+    private static IReadOnlyList<WeatherAlert> SampleAlerts()
+        =>
+        [
+            new WeatherAlert
+            {
+                Event = "Severe Thunderstorm Watch",
+                Headline = "SEVERE THUNDERSTORM WATCH IN EFFECT UNTIL 8 PM CDT",
+                Description = "THIS IS A CHANNELFLOW TEST. A Severe Thunderstorm Watch is in effect. Be prepared to move to shelter if a warning is issued. This sample is not a real National Weather Service product.",
+                Severity = "Severe"
+            }
+        ];
+
     private async Task<WeatherSnapshot> GetSnapshotAsync(CancellationToken cancellationToken)
     {
         var config = FinTvRuntime.Current?.Configuration;
@@ -209,9 +419,25 @@ public sealed class WeatherAlertCutInSession
 {
     public DateTime LastCutInUtc { get; set; } = DateTime.UtcNow;
 
+    public Guid PlayedTestId { get; set; }
+
     public double SecondsUntilNext(TimeSpan interval)
     {
         var due = LastCutInUtc + interval;
         return Math.Max(0, (due - DateTime.UtcNow).TotalSeconds);
     }
 }
+
+public sealed record AlertOverlaySimulation(
+    Guid Id,
+    WeatherAlertOverlayMode Mode,
+    DateTime UntilUtc,
+    TimeSpan CutInDuration,
+    IReadOnlyList<WeatherAlert> Alerts);
+
+public sealed record WeatherAlertTestPreview(
+    WeatherAlertOverlayMode Mode,
+    TimeSpan Duration,
+    IReadOnlyList<WeatherAlert> Alerts,
+    string? TickerText,
+    byte[] HazardsJpeg);

@@ -149,7 +149,7 @@ public sealed class WeatherDataClient
             StationName = place.DisplayName
         };
 
-        var hourly = ReadUpcomingHourly(root, maxCount: 24);
+        var hourly = ReadUpcomingHourly(root, maxCount: 48);
 
         var daily = new List<WeatherDaily>();
         if (root.TryGetProperty("daily", out var dailyEl))
@@ -387,13 +387,14 @@ public sealed class WeatherDataClient
                     WindSpeed = windSpeed,
                     WindDirection = windDir,
                     IconKey = WeatherIconMap.FromNwsIcon(period.TryGetProperty("icon", out var icon) ? icon.GetString() : null, period.GetProperty("shortForecast").GetString()),
+                    ConditionText = period.GetProperty("shortForecast").GetString(),
                     PrecipitationChance = period.TryGetProperty("probabilityOfPrecipitation", out var pop)
                         && pop.TryGetProperty("value", out var pv)
                         && pv.ValueKind == JsonValueKind.Number
                             ? pv.GetInt32()
                             : null
                 });
-                if (hourly.Count >= 24)
+                if (hourly.Count >= 48)
                 {
                     break;
                 }
@@ -1054,6 +1055,7 @@ public sealed class WeatherDataClient
                      " International Airport",
                      " Regional Airport",
                      " Municipal Airport",
+                     " Municipal",
                      " Airport",
                      " Weather Forecast Office",
                      " Weather Station"
@@ -1149,31 +1151,6 @@ public sealed class WeatherDataClient
         GeoPlace place,
         CancellationToken cancellationToken)
     {
-        var west = -126.0;
-        var north = 50.0;
-        var pixelSize = 0.005;
-        try
-        {
-            var wld = await client.GetStringAsync(
-                "https://mesonet.agron.iastate.edu/data/gis/images/4326/USCOMP/n0r_0.wld",
-                cancellationToken);
-            var parts = wld.Split(['\n', '\r', ' '], StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length >= 6
-                && double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var dx)
-                && double.TryParse(parts[3], NumberStyles.Float, CultureInfo.InvariantCulture, out var dy)
-                && double.TryParse(parts[4], NumberStyles.Float, CultureInfo.InvariantCulture, out var x0)
-                && double.TryParse(parts[5], NumberStyles.Float, CultureInfo.InvariantCulture, out var y0))
-            {
-                pixelSize = Math.Abs(dx) > 0 ? Math.Abs(dx) : 0.005;
-                west = x0 - pixelSize / 2;
-                north = y0 + Math.Abs(dy) / 2;
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Radar world file unavailable; using default extent");
-        }
-
         var frames = new List<WeatherRadarFrame>();
         foreach (var index in new[] { 0, 1, 2, 3, 4, 5 })
         {
@@ -1186,11 +1163,10 @@ public sealed class WeatherDataClient
                     continue;
                 }
 
-                var cropped = CropRadarPng(bytes, place.Latitude, place.Longitude, west, north, pixelSize);
                 frames.Add(new WeatherRadarFrame
                 {
                     Time = DateTimeOffset.UtcNow.AddMinutes(-index * 5),
-                    Image = cropped.Length > 0 ? cropped : bytes
+                    Image = WeatherStarRadar.CropReflectivity(bytes, place.Latitude, place.Longitude)
                 });
             }
             catch (Exception ex)
@@ -1200,42 +1176,6 @@ public sealed class WeatherDataClient
         }
 
         return frames;
-    }
-
-    private static byte[] CropRadarPng(
-        byte[] png,
-        double latitude,
-        double longitude,
-        double west,
-        double north,
-        double pixelSize)
-    {
-        using var bmp = SKBitmap.Decode(png);
-        if (bmp is null || pixelSize <= 0)
-        {
-            return png;
-        }
-
-        var lonSpan = 3.2;
-        var latSpan = 2.4;
-        var x = (int)Math.Round((longitude - lonSpan / 2 - west) / pixelSize);
-        var y = (int)Math.Round((north - (latitude + latSpan / 2)) / pixelSize);
-        var w = (int)Math.Round(lonSpan / pixelSize);
-        var h = (int)Math.Round(latSpan / pixelSize);
-        x = Math.Clamp(x, 0, Math.Max(0, bmp.Width - 8));
-        y = Math.Clamp(y, 0, Math.Max(0, bmp.Height - 8));
-        w = Math.Clamp(w, 32, bmp.Width - x);
-        h = Math.Clamp(h, 32, bmp.Height - y);
-        using var crop = new SKBitmap(w, h);
-        using var canvas = new SKCanvas(crop);
-        canvas.DrawBitmap(
-            bmp,
-            new SKRect(x, y, x + w, y + h),
-            new SKRect(0, 0, w, h),
-            new SKSamplingOptions(SKFilterMode.Nearest));
-        using var image = SKImage.FromBitmap(crop);
-        using var data = image.Encode(SKEncodedImageFormat.Png, 90);
-        return data.ToArray();
     }
 
     private static List<WeatherHourly> ReadUpcomingHourly(JsonElement root, int maxCount)
@@ -1285,6 +1225,7 @@ public sealed class WeatherDataClient
                 WindSpeed = ArrayNumber(winds, i),
                 WindDirection = ArrayNumber(windDirs, i) is double deg ? WeatherIconMap.Cardinal(deg) : null,
                 IconKey = WeatherIconMap.FromWmo(codes[i].GetInt32()),
+                ConditionText = WeatherIconMap.FromWmoText(codes[i].GetInt32()),
                 PrecipitationChance = ArrayNumber(pops, i) is double p ? (int)Math.Round(p) : null,
                 CloudCover = ArrayNumber(clouds, i) is double c ? (int)Math.Round(c) : null
             });

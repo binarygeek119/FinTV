@@ -14,11 +14,16 @@ public class WeatherController : ControllerBase
 {
     private readonly JellyfinCatalogService _catalog;
     private readonly ChannelService _channels;
+    private readonly WeatherAlertOverlayService _alerts;
 
-    public WeatherController(JellyfinCatalogService catalog, ChannelService channels)
+    public WeatherController(
+        JellyfinCatalogService catalog,
+        ChannelService channels,
+        WeatherAlertOverlayService alerts)
     {
         _catalog = catalog;
         _channels = channels;
+        _alerts = alerts;
     }
 
     [HttpGet("status")]
@@ -179,6 +184,42 @@ public class WeatherController : ControllerBase
         return await GetStatus(cancellationToken);
     }
 
+    [HttpPost("alerts/test")]
+    public async Task<ActionResult<object>> TestAlerts(
+        [FromBody] WeatherAlertTestRequest? request,
+        CancellationToken cancellationToken)
+    {
+        var mode = WeatherAlertOverlayService.ParseMode(request?.Mode);
+        if (mode is WeatherAlertOverlayMode.Off)
+        {
+            return BadRequest(new { message = "Pick the alerts screen or scrolling text, then try again." });
+        }
+
+        var seconds = Math.Clamp(request?.DurationSeconds ?? 20, 5, 120);
+        try
+        {
+            var preview = await _alerts.StartTestAsync(mode, TimeSpan.FromSeconds(seconds), cancellationToken);
+            var first = preview.Alerts.FirstOrDefault();
+            var liveHint = mode == WeatherAlertOverlayMode.CutIn
+                ? "Live TV, movies, and music switch to this screen at the next program break for the next couple of minutes."
+                : "Live TV, movies, and music show the scrolling bar on the next program for the next couple of minutes.";
+            return Ok(new
+            {
+                mode = WeatherAlertOverlayService.FormatMode(preview.Mode),
+                durationSeconds = seconds,
+                tickerText = preview.TickerText,
+                eventName = first?.Event,
+                headline = first?.Headline,
+                hazardsJpeg = preview.HazardsJpeg,
+                message = $"Sample {first?.Event ?? "weather alert"} preview. {liveHint}"
+            });
+        }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     private static string NormalizeWeatherStarId(string? value)
         => !string.IsNullOrWhiteSpace(value) && value.Contains("3", StringComparison.OrdinalIgnoreCase)
             ? "ws3kp"
@@ -212,6 +253,13 @@ public class WeatherSettingsRequest
     public int? WeatherAlertCutInDurationSeconds { get; set; }
 
     public List<WeatherChannelLocationRequest>? Channels { get; set; }
+}
+
+public class WeatherAlertTestRequest
+{
+    public string? Mode { get; set; }
+
+    public int? DurationSeconds { get; set; }
 }
 
 public class WeatherChannelLocationRequest

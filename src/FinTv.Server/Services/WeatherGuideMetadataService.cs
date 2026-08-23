@@ -1,10 +1,12 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using FinTv.Configuration;
 using FinTv.Data;
 using FinTv.Domain;
+using FinTv.Weather;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -24,17 +26,20 @@ public class WeatherGuideMetadataService
 
     private readonly FinTvDbContext _db;
     private readonly LlmClientService _llm;
+    private readonly WeatherDataClient _weather;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<WeatherGuideMetadataService> _logger;
 
     public WeatherGuideMetadataService(
         FinTvDbContext db,
         LlmClientService llm,
+        WeatherDataClient weather,
         IServiceScopeFactory scopeFactory,
         ILogger<WeatherGuideMetadataService> logger)
     {
         _db = db;
         _llm = llm;
+        _weather = weather;
         _scopeFactory = scopeFactory;
         _logger = logger;
     }
@@ -65,21 +70,17 @@ public class WeatherGuideMetadataService
     }
 
     /// <summary>
-    /// Queues a background job to generate missing weather guide cache entries with AI.
+    /// Queues a background job to generate today's weather guide from the Weather tab source.
+    /// AI writes TV-guide copy when configured; otherwise live forecast facts are used directly.
     /// </summary>
     public void QueueGenerateCache(bool force = false)
     {
-        if (!IsAiConfigured())
-        {
-            throw new InvalidOperationException("AI is not enabled or API keys are not configured.");
-        }
-
         if (IsGenerating)
         {
             return;
         }
 
-        _logger.LogInformation("Queueing weather guide AI cache generation (force={Force})", force);
+        _logger.LogInformation("Queueing weather guide cache generation (force={Force}, ai={Ai})", force, IsAiConfigured());
         _ = Task.Run(async () =>
         {
             await GenerateLock.WaitAsync().ConfigureAwait(false);
@@ -92,7 +93,7 @@ public class WeatherGuideMetadataService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Weather guide AI cache generation failed");
+                _logger.LogWarning(ex, "Weather guide cache generation failed");
             }
             finally
             {
@@ -124,11 +125,13 @@ public class WeatherGuideMetadataService
             .OrderBy(c => c.Number)
             .ToListAsync(cancellationToken);
 
+        var tz = WeatherLineupHelper.GetScheduleTimeZone();
+        var forecastDate = LocalForecastDate(tz);
         var channels = weatherChannels.Select(channel =>
         {
             var location = NormalizeLocation(channel.WeatherLocationQuery);
             var hoursCached = Enumerable.Range(0, 24)
-                .Count(hour => WeatherGuideCacheStore.Contains(BuildCacheKey(channel.Id, location, hour)));
+                .Count(hour => WeatherGuideCacheStore.Contains(BuildCacheKey(channel.Id, location, forecastDate, hour)));
             return new
             {
                 channelId = channel.Id,
@@ -139,12 +142,28 @@ public class WeatherGuideMetadataService
             };
         }).ToList();
 
+        var lastGenerated = weatherChannels
+            .SelectMany(channel => Enumerable.Range(0, 24)
+                .Select(hour => BuildCacheKey(channel.Id, NormalizeLocation(channel.WeatherLocationQuery), forecastDate, hour)))
+            .Select(key => WeatherGuideCacheStore.TryGet(key, out var slot) ? slot : null)
+            .Where(slot => slot is not null)
+            .Select(slot => slot!.GeneratedAtUtc)
+            .DefaultIfEmpty()
+            .Max();
+
         return new
         {
             isGenerating = IsGenerating,
             entryCount = WeatherGuideCacheStore.Count(),
             channelCount = weatherChannels.Count,
             completeChannels = channels.Count(c => c.isComplete),
+            forecastDate = forecastDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            lastGeneratedAt = lastGenerated == default ? (DateTime?)null : lastGenerated,
+            weatherSource = string.IsNullOrWhiteSpace(FinTvRuntime.Current?.Configuration.WeatherSource)
+                ? "auto"
+                : FinTvRuntime.Current!.Configuration.WeatherSource,
+            aiEnabled = IsAiConfigured(),
+            midnightRefresh = true,
             channels
         };
     }
@@ -158,7 +177,8 @@ public class WeatherGuideMetadataService
         var tz = WeatherLineupHelper.GetScheduleTimeZone();
         var localStart = TimeZoneInfo.ConvertTimeFromUtc(item.Start, tz);
         var hour = localStart.Hour;
-        var cacheKey = BuildCacheKey(channel.Id, location, hour);
+        var date = DateOnly.FromDateTime(localStart);
+        var cacheKey = BuildCacheKey(channel.Id, location, date, hour);
 
         if (TryGetCachedMetadata(cacheKey, out var cached))
         {
@@ -178,34 +198,55 @@ public class WeatherGuideMetadataService
 
         if (weatherChannels.Count == 0)
         {
-            _logger.LogInformation("Weather guide AI cache generation skipped: no enabled weather channels");
+            _logger.LogInformation("Weather guide cache generation skipped: no enabled weather channels");
             return;
         }
+
+        var tz = WeatherLineupHelper.GetScheduleTimeZone();
+        var forecastDate = LocalForecastDate(tz);
+        PruneStaleCache(forecastDate);
 
         foreach (var channel in weatherChannels)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var location = NormalizeLocation(channel.WeatherLocationQuery);
             var missingHours = Enumerable.Range(0, 24)
-                .Where(hour => force || !IsHourCached(channel.Id, location, hour))
+                .Where(hour => force || !IsHourCached(channel.Id, location, forecastDate, hour))
                 .ToList();
 
             if (missingHours.Count == 0)
             {
                 FinTvDebugLog.Ai(
                     _logger,
-                    "Weather guide cache already complete for {Channel} ({Location})",
+                    "Weather guide cache already complete for {Channel} ({Location}) on {Date}",
+                    channel.Name,
+                    location,
+                    forecastDate);
+                continue;
+            }
+
+            WeatherSnapshot? snapshot = null;
+            try
+            {
+                snapshot = await FetchChannelSnapshotAsync(channel, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Weather tab source failed for {Channel} ({Location}); writing static guide copy",
                     channel.Name,
                     location);
-                continue;
             }
 
             FinTvDebugLog.Ai(
                 _logger,
-                "Generating weather guide cache for {Channel} ({Location}): {Hours} hours",
+                "Generating weather guide cache for {Channel} ({Location}) on {Date}: {Hours} hours from {Backend}",
                 channel.Name,
                 location,
-                missingHours.Count);
+                forecastDate,
+                missingHours.Count,
+                snapshot?.Backend ?? "none");
 
             var generatedCount = 0;
             foreach (var hourBatch in missingHours.Chunk(HoursPerAiBatch))
@@ -215,28 +256,35 @@ public class WeatherGuideMetadataService
                 Dictionary<int, WeatherGuideSlotCache> generated;
                 try
                 {
-                    generated = await GenerateChannelHoursAsync(channel, location, batchHours, cancellationToken)
+                    generated = await GenerateChannelHoursAsync(
+                            channel,
+                            location,
+                            forecastDate,
+                            batchHours,
+                            snapshot,
+                            cancellationToken)
                         .ConfigureAwait(false);
                 }
                 catch (Exception ex) when (IsTransientLlmFailure(ex))
                 {
                     _logger.LogWarning(
                         ex,
-                        "Weather guide AI batch failed for {Channel} hours {Hours}; using static fallback for this batch",
+                        "Weather guide AI batch failed for {Channel} hours {Hours}; using live forecast facts",
                         channel.Name,
                         string.Join(", ", batchHours.Select(h => h.ToString("00", CultureInfo.InvariantCulture))));
                     generated = batchHours.ToDictionary(
                         hour => hour,
-                        hour => BuildStaticCacheEntry(channel, location, hour));
+                        hour => BuildLiveCacheEntry(channel, location, forecastDate, hour, snapshot));
                 }
 
-                SaveCacheEntries(channel.Id, location, generated);
+                SaveCacheEntries(channel.Id, location, forecastDate, generated);
                 generatedCount += generated.Count;
             }
 
             _logger.LogInformation(
-                "Weather guide AI cache updated for {Channel}: {Count} hour slots",
+                "Weather guide cache updated for {Channel} on {Date}: {Count} hour slots",
                 channel.Name,
+                forecastDate,
                 generatedCount);
         }
     }
@@ -260,14 +308,29 @@ public class WeatherGuideMetadataService
     private async Task<Dictionary<int, WeatherGuideSlotCache>> GenerateChannelHoursAsync(
         Channel channel,
         string locationQuery,
+        DateOnly forecastDate,
         IReadOnlyList<int> hours,
+        WeatherSnapshot? snapshot,
         CancellationToken cancellationToken)
     {
+        if (!IsAiConfigured() || snapshot is null)
+        {
+            return hours.ToDictionary(
+                hour => hour,
+                hour => BuildLiveCacheEntry(channel, locationQuery, forecastDate, hour, snapshot));
+        }
+
         for (var attempt = 1; attempt <= 2; attempt++)
         {
             try
             {
-                return await GenerateChannelHoursCoreAsync(channel, locationQuery, hours, cancellationToken)
+                return await GenerateChannelHoursCoreAsync(
+                        channel,
+                        locationQuery,
+                        forecastDate,
+                        hours,
+                        snapshot,
+                        cancellationToken)
                     .ConfigureAwait(false);
             }
             catch (Exception ex) when (attempt < 2 && IsTransientLlmFailure(ex))
@@ -287,32 +350,44 @@ public class WeatherGuideMetadataService
     private async Task<Dictionary<int, WeatherGuideSlotCache>> GenerateChannelHoursCoreAsync(
         Channel channel,
         string locationQuery,
+        DateOnly forecastDate,
         IReadOnlyList<int> hours,
+        WeatherSnapshot snapshot,
         CancellationToken cancellationToken)
     {
         var provider = FinTvRuntime.Current?.Configuration.Ai.DefaultProvider ?? AiProvider.OpenAi;
-        var displayLocation = WeatherLocationParser.GetDisplayName(locationQuery);
+        var displayLocation = snapshot.Place.DisplayName;
+        if (string.IsNullOrWhiteSpace(displayLocation))
+        {
+            displayLocation = WeatherLocationParser.GetDisplayName(locationQuery);
+        }
+
         var tz = WeatherLineupHelper.GetScheduleTimeZone();
         var hourList = string.Join(", ", hours.Select(h => h.ToString("00", CultureInfo.InvariantCulture)));
+        var facts = BuildForecastFactSheet(snapshot, tz, forecastDate, hours);
 
         var systemPrompt =
             "You write concise TV guide listings for a 24-hour local weather channel. " +
             "Return JSON with key hours: an array of objects with hour (0-23 integer), title, subTitle, description, categories (string array). " +
-            "Each entry should suit that hour's daypart for the given location. " +
-            "Do not invent live temperatures, radar, or alerts. Keep descriptions timeless and reusable daily.";
+            "Use only the live forecast facts provided. Include the real temperature and conditions in each title. " +
+            "Do not invent temperatures, radar, or alerts. Write for this calendar day only.";
 
         var userPrompt =
             $"Channel: {channel.Name}\n" +
             $"Location query: {locationQuery}\n" +
             $"Display location: {displayLocation}\n" +
             $"Schedule time zone: {tz.Id}\n" +
+            $"Forecast date: {forecastDate:yyyy-MM-dd}\n" +
+            $"Weather source: {snapshot.Backend}\n" +
             $"Generate guide entries for these local hours only: {hourList}\n" +
-            "Use classic cable TV guide tone.";
+            "Use classic cable TV guide tone.\n\n" +
+            facts;
 
         var json = await _llm.CompleteJsonAsync(provider, systemPrompt, userPrompt, cancellationToken);
         var parsed = JsonSerializer.Deserialize<AiWeatherGuideBatchResponse>(json, JsonOptions);
         var result = new Dictionary<int, WeatherGuideSlotCache>();
         var now = DateTime.UtcNow;
+        var dateLabel = forecastDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
         foreach (var entry in parsed?.Hours ?? new List<AiWeatherGuideHourResponse>())
         {
@@ -334,28 +409,45 @@ public class WeatherGuideMetadataService
                     ? $"{displayLocation} · {timeLabel}"
                     : entry.SubTitle.Trim(),
                 Description = TruncateOverview(entry.Description)
-                    ?? $"Local weather forecast for {displayLocation}.",
+                    ?? BuildLiveDescription(channel, displayLocation, forecastDate, hour, snapshot),
                 Categories = entry.Categories?.Where(c => !string.IsNullOrWhiteSpace(c)).ToList()
                     is { Count: > 0 } categories
                     ? categories
-                    : new List<string> { "Weather", "News" },
+                    : DefaultCategories(snapshot),
+                ForecastDate = dateLabel,
                 GeneratedAtUtc = now
             };
         }
 
         foreach (var hour in hours.Where(h => !result.ContainsKey(h)))
         {
-            result[hour] = BuildStaticCacheEntry(channel, locationQuery, hour);
+            result[hour] = BuildLiveCacheEntry(channel, locationQuery, forecastDate, hour, snapshot);
         }
 
         return result;
     }
 
-    private static void SaveCacheEntries(Guid channelId, string location, Dictionary<int, WeatherGuideSlotCache> entries)
+    private async Task<WeatherSnapshot> FetchChannelSnapshotAsync(Channel channel, CancellationToken cancellationToken)
+    {
+        var config = FinTvRuntime.Current?.Configuration;
+        var locationQuery = string.IsNullOrWhiteSpace(channel.WeatherLocationQuery)
+            ? WeatherStarChannelService.ResolveDefaultLocationQuery()
+            : channel.WeatherLocationQuery.Trim();
+        var source = WeatherDataClient.ParseSource(config?.WeatherSource);
+        var useMetric = WeatherStarChannelService.PermalinkUsesMetricUnits(config?.WeatherStarPermalinkQuery);
+        return await _weather.GetSnapshotAsync(locationQuery, source, useMetric, cancellationToken);
+    }
+
+    private static void SaveCacheEntries(
+        Guid channelId,
+        string location,
+        DateOnly forecastDate,
+        Dictionary<int, WeatherGuideSlotCache> entries)
     {
         WeatherGuideCacheStore.SetMany(entries.Select(pair => new KeyValuePair<string, WeatherGuideSlotCache>(
-            BuildCacheKey(channelId, location, pair.Key),
+            BuildCacheKey(channelId, location, forecastDate, pair.Key),
             pair.Value)));
+        PruneStaleCache(forecastDate);
     }
 
     private static bool TryGetCachedMetadata(string cacheKey, out GuideProgramMetadata metadata)
@@ -377,11 +469,11 @@ public class WeatherGuideMetadataService
         return true;
     }
 
-    private static bool IsHourCached(Guid channelId, string location, int hour)
-        => WeatherGuideCacheStore.Contains(BuildCacheKey(channelId, location, hour));
+    private static bool IsHourCached(Guid channelId, string location, DateOnly date, int hour)
+        => WeatherGuideCacheStore.Contains(BuildCacheKey(channelId, location, date, hour));
 
-    public static string BuildCacheKey(Guid channelId, string location, int hour)
-        => $"{channelId:N}|{location}|{hour:00}";
+    public static string BuildCacheKey(Guid channelId, string location, DateOnly date, int hour)
+        => $"{channelId:N}|{location}|{date:yyyy-MM-dd}|{hour:00}";
 
     private static string NormalizeLocation(string? locationQuery)
         => string.IsNullOrWhiteSpace(locationQuery)
@@ -420,18 +512,277 @@ public class WeatherGuideMetadataService
         };
     }
 
-    private static WeatherGuideSlotCache BuildStaticCacheEntry(Channel channel, string locationQuery, int hour)
+    private static WeatherGuideSlotCache BuildLiveCacheEntry(
+        Channel channel,
+        string locationQuery,
+        DateOnly forecastDate,
+        int hour,
+        WeatherSnapshot? snapshot)
     {
-        var displayLocation = WeatherLocationParser.GetDisplayName(locationQuery);
+        var displayLocation = snapshot?.Place.DisplayName;
+        if (string.IsNullOrWhiteSpace(displayLocation))
+        {
+            displayLocation = WeatherLocationParser.GetDisplayName(locationQuery);
+        }
+
         var timeLabel = FormatHourLabel(hour);
+        var hourRow = MatchHour(snapshot, forecastDate, hour);
+        var condition = HourCondition(hourRow, snapshot);
+        var temp = FormatTemperature(hourRow?.Temperature ?? snapshot?.Current?.Temperature, snapshot?.UseMetric == true);
+        var title = string.IsNullOrWhiteSpace(temp)
+            ? condition
+            : $"{condition} · {temp}";
         return new WeatherGuideSlotCache
         {
-            Title = "Local Weather",
+            Title = title,
             SubTitle = $"{displayLocation} · {timeLabel}",
-            Description = $"Local weather forecast for {displayLocation} on {channel.Name}.",
-            Categories = new List<string> { "Weather" },
+            Description = BuildLiveDescription(channel, displayLocation, forecastDate, hour, snapshot),
+            Categories = DefaultCategories(snapshot),
+            ForecastDate = forecastDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
             GeneratedAtUtc = DateTime.UtcNow
         };
+    }
+
+    private static string BuildLiveDescription(
+        Channel channel,
+        string displayLocation,
+        DateOnly forecastDate,
+        int hour,
+        WeatherSnapshot? snapshot)
+    {
+        var sb = new StringBuilder();
+        sb.Append("Live local weather for ")
+            .Append(displayLocation)
+            .Append(" on ")
+            .Append(forecastDate.ToString("dddd, MMMM d", CultureInfo.InvariantCulture))
+            .Append(" at ")
+            .Append(FormatHourLabel(hour))
+            .Append(" (")
+            .Append(channel.Name)
+            .Append(").");
+
+        var hourRow = MatchHour(snapshot, forecastDate, hour);
+        if (hourRow is not null)
+        {
+            sb.Append(' ').Append(HourCondition(hourRow, snapshot)).Append('.');
+            var temp = FormatTemperature(hourRow.Temperature, snapshot?.UseMetric == true);
+            if (!string.IsNullOrWhiteSpace(temp))
+            {
+                sb.Append(" Temperature ").Append(temp).Append('.');
+            }
+
+            if (hourRow.PrecipitationChance is int pop)
+            {
+                sb.Append(" Chance of precipitation ").Append(pop).Append('%').Append('.');
+            }
+
+            if (hourRow.WindSpeed is double wind)
+            {
+                sb.Append(" Wind ");
+                if (!string.IsNullOrWhiteSpace(hourRow.WindDirection))
+                {
+                    sb.Append(hourRow.WindDirection).Append(' ');
+                }
+
+                sb.Append(Math.Round(wind).ToString("0", CultureInfo.InvariantCulture))
+                    .Append(snapshot?.UseMetric == true ? " km/h." : " mph.");
+            }
+        }
+
+        var today = snapshot?.Daily.FirstOrDefault(day => day.Date == forecastDate)
+            ?? snapshot?.Daily.FirstOrDefault();
+        if (today is not null)
+        {
+            if (!string.IsNullOrWhiteSpace(today.Narrative))
+            {
+                sb.Append(' ').Append(today.Narrative.Trim().TrimEnd('.')).Append('.');
+            }
+
+            var high = FormatTemperature(today.High, snapshot?.UseMetric == true);
+            var low = FormatTemperature(today.Low, snapshot?.UseMetric == true);
+            if (!string.IsNullOrWhiteSpace(high) || !string.IsNullOrWhiteSpace(low))
+            {
+                sb.Append(" High ").Append(high ?? "n/a").Append(", low ").Append(low ?? "n/a").Append('.');
+            }
+        }
+
+        if (snapshot?.Alerts is { Count: > 0 } alerts)
+        {
+            sb.Append(" Alerts: ")
+                .Append(string.Join("; ", alerts.Select(alert =>
+                    string.IsNullOrWhiteSpace(alert.Headline) ? alert.Event : alert.Headline).Take(3)))
+                .Append('.');
+        }
+
+        return TruncateOverview(sb.ToString()) ?? sb.ToString();
+    }
+
+    private static string BuildForecastFactSheet(
+        WeatherSnapshot snapshot,
+        TimeZoneInfo tz,
+        DateOnly forecastDate,
+        IReadOnlyList<int> hours)
+    {
+        var unit = snapshot.UseMetric ? "C" : "F";
+        var windUnit = snapshot.UseMetric ? "km/h" : "mph";
+        var sb = new StringBuilder();
+        sb.AppendLine($"Fetched: {snapshot.FetchedAt:u}");
+        sb.AppendLine($"Place: {snapshot.Place.DisplayName}");
+        sb.AppendLine($"Backend: {snapshot.Backend}");
+        sb.AppendLine($"Units: °{unit}, {windUnit}");
+        if (snapshot.Current is { } current)
+        {
+            sb.AppendLine(
+                $"Current: {current.ConditionText}, {FormatTemperature(current.Temperature, snapshot.UseMetric)}");
+        }
+
+        var today = snapshot.Daily.FirstOrDefault(day => day.Date == forecastDate) ?? snapshot.Daily.FirstOrDefault();
+        if (today is not null)
+        {
+            sb.AppendLine(
+                $"Daily: {today.Narrative}. High {FormatTemperature(today.High, snapshot.UseMetric)}, low {FormatTemperature(today.Low, snapshot.UseMetric)}.");
+        }
+
+        foreach (var period in snapshot.Periods.Take(4))
+        {
+            sb.AppendLine($"Period {period.Name}: {period.Narrative}");
+        }
+
+        if (snapshot.Alerts.Count > 0)
+        {
+            sb.AppendLine("Alerts:");
+            foreach (var alert in snapshot.Alerts.Take(5))
+            {
+                sb.AppendLine($"- {alert.Event}: {(string.IsNullOrWhiteSpace(alert.Headline) ? alert.Description : alert.Headline)}");
+            }
+        }
+        else
+        {
+            sb.AppendLine("Alerts: none");
+        }
+
+        sb.AppendLine("Hourly facts:");
+        foreach (var hour in hours)
+        {
+            var row = MatchHour(snapshot, forecastDate, hour);
+            if (row is null)
+            {
+                sb.AppendLine($"{hour:00}:00 local — no hour-specific forecast; use today's daily summary.");
+                continue;
+            }
+
+            var local = TimeZoneInfo.ConvertTime(row.Time, tz);
+            sb.Append(hour.ToString("00", CultureInfo.InvariantCulture))
+                .Append(":00 local (")
+                .Append(local.ToString("HH:mm", CultureInfo.InvariantCulture))
+                .Append(") ")
+                .Append(HourCondition(row, snapshot))
+                .Append(", ")
+                .Append(FormatTemperature(row.Temperature, snapshot.UseMetric));
+            if (row.PrecipitationChance is int pop)
+            {
+                sb.Append(", precip ").Append(pop).Append('%');
+            }
+
+            if (row.WindSpeed is double wind)
+            {
+                sb.Append(", wind ");
+                if (!string.IsNullOrWhiteSpace(row.WindDirection))
+                {
+                    sb.Append(row.WindDirection).Append(' ');
+                }
+
+                sb.Append(Math.Round(wind).ToString("0", CultureInfo.InvariantCulture)).Append(' ').Append(windUnit);
+            }
+
+            sb.AppendLine();
+        }
+
+        return sb.ToString();
+    }
+
+    private static WeatherHourly? MatchHour(WeatherSnapshot? snapshot, DateOnly date, int hour)
+    {
+        if (snapshot is null)
+        {
+            return null;
+        }
+
+        var tz = WeatherLineupHelper.GetScheduleTimeZone();
+        return snapshot.Hourly.FirstOrDefault(row =>
+        {
+            var local = TimeZoneInfo.ConvertTime(row.Time, tz);
+            return DateOnly.FromDateTime(local.DateTime) == date && local.Hour == hour;
+        });
+    }
+
+    private static string HourCondition(WeatherHourly? hour, WeatherSnapshot? snapshot)
+    {
+        if (!string.IsNullOrWhiteSpace(hour?.ConditionText))
+        {
+            return hour.ConditionText.Trim();
+        }
+
+        if (!string.IsNullOrWhiteSpace(hour?.IconKey))
+        {
+            return WeatherIconMap.DisplayName(hour.IconKey);
+        }
+
+        if (!string.IsNullOrWhiteSpace(snapshot?.Current?.ConditionText))
+        {
+            return snapshot.Current.ConditionText.Trim();
+        }
+
+        return "Local weather";
+    }
+
+    private static string? FormatTemperature(double? value, bool useMetric)
+    {
+        if (value is not double number)
+        {
+            return null;
+        }
+
+        return Math.Round(number).ToString("0", CultureInfo.InvariantCulture) + (useMetric ? "°C" : "°F");
+    }
+
+    private static List<string> DefaultCategories(WeatherSnapshot? snapshot)
+    {
+        var categories = new List<string> { "Weather", "News" };
+        if (snapshot?.Alerts is { Count: > 0 })
+        {
+            categories.Add("Weather Warning");
+        }
+
+        return categories;
+    }
+
+    private static DateOnly LocalForecastDate(TimeZoneInfo tz)
+        => DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz));
+
+    public static DateTimeOffset NextLocalMidnight(TimeZoneInfo? timeZone = null)
+    {
+        var tz = timeZone ?? WeatherLineupHelper.GetScheduleTimeZone();
+        var localNow = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz);
+        var nextLocal = DateTime.SpecifyKind(localNow.Date.AddDays(1), DateTimeKind.Unspecified);
+        var nextUtc = TimeZoneInfo.ConvertTimeToUtc(nextLocal, tz);
+        return new DateTimeOffset(nextUtc, TimeSpan.Zero);
+    }
+
+    private static void PruneStaleCache(DateOnly forecastDate)
+    {
+        var keepFrom = forecastDate.AddDays(-1);
+        WeatherGuideCacheStore.Prune(key =>
+        {
+            var parts = key.Split('|');
+            if (parts.Length < 4)
+            {
+                return true;
+            }
+
+            return !DateOnly.TryParseExact(parts[2], "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
+                || date < keepFrom;
+        });
     }
 
     private static string FormatHourLabel(int hour)

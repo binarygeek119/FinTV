@@ -22,14 +22,16 @@
         special: 'Special Presentation',
         commercials: 'Commercials',
         commercialbrainz: 'CommercialBrainz',
-        logos: 'Logo Sets',
-        ebs: 'EBS',
+        ebs: 'Off Air',
+        emergency: 'Emergency Broadcast System',
         ai: 'AI',
         weather: 'Weather',
         news: 'News',
         transcode: 'Transcode',
         general: 'General',
-        tasks: 'Tasks'
+        tasks: 'Tasks',
+        about: 'About',
+        credits: 'Credits'
     };
 
     const subtitles = {
@@ -42,14 +44,16 @@
         special: 'Recurring blocks that override the normal lineup',
         commercials: 'Jellyfin commercial library and blackframe scan',
         commercialbrainz: 'YouTube commercial pool from CommercialBrainz',
-        logos: 'Channel bugs and logo sets',
-        ebs: 'Off-air Emergency Broadcast System',
+        ebs: 'Playback when a channel has nothing scheduled',
+        emergency: 'NOAA watches and warnings on TV, movies, and music',
         ai: 'AI lineup generation and tagging',
         weather: 'WeatherStar live channels',
-        news: 'Live RSS news channel',
+        news: 'FlowWire live news',
         transcode: 'Hardware encoding for live MPEG-TS streams',
         general: 'Server-wide ChannelFlow-Server settings',
-        tasks: 'Rebuild playouts and maintenance'
+        tasks: 'Rebuild playouts and maintenance',
+        about: 'Version, system, and transcode information',
+        credits: 'People and projects ChannelFlow builds on'
     };
 
     async function api(path, options) {

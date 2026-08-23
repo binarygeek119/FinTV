@@ -4,16 +4,18 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$Repo = "binarygeek119/open-channel-logos"
-$GitRef = "fintv2"
+$Repo = "FlowMeadow01/ChannelFlow-logo"
+$GitRef = "main"
 $TreeUrl = "https://api.github.com/repos/$Repo/git/trees/$GitRef`?recursive=1"
 $RawBase = "https://raw.githubusercontent.com/$Repo/$GitRef/"
 $LogoPrefixes = @(
     "EBS/",
     "Movies/",
+    "News/",
     "Shows/",
     "Music Videos Channels/",
     "The Holiday Channel/",
+    "The_Holiday_Channel_Filler/",
     "Weather/"
 )
 $ImageSuffixes = @(".png", ".jpg", ".jpeg", ".webp")
@@ -22,7 +24,7 @@ New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 
 $headers = @{
     Accept       = "application/vnd.github+json"
-    "User-Agent" = "FinTV-Jellyfin-Plugin"
+    "User-Agent" = "ChannelFlow-Server"
 }
 
 $tree = Invoke-RestMethod -Uri $TreeUrl -Headers $headers
@@ -36,7 +38,7 @@ $files = $tree.tree | Where-Object {
 Write-Host "Bundling $($files.Count) logos from ${Repo}@${GitRef} into $OutputDir"
 
 $client = New-Object System.Net.WebClient
-$client.Headers.Add("User-Agent", "FinTV-Jellyfin-Plugin")
+$client.Headers.Add("User-Agent", "ChannelFlow-Server")
 
 foreach ($file in $files) {
     $relative = $file.path

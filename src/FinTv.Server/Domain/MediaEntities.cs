@@ -146,11 +146,21 @@ public class NewsSettings
 {
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    public string HeaderText { get; set; } = "ChannelFlow News";
+    public string HeaderText { get; set; } = "FlowWire News";
 
     public int ArticleCount { get; set; } = 8;
 
     public bool TtsEnabled { get; set; } = true;
+
+    /// <summary>
+    /// <c>google</c> (translate TTS) or <c>ai</c> (OpenAI/Venice speech from the AI tab).
+    /// </summary>
+    public string TtsEngine { get; set; } = "google";
+
+    /// <summary>
+    /// Merge RSS items into one newscast and drop duplicate stories via the configured AI provider.
+    /// </summary>
+    public bool AiRewrite { get; set; }
 
     public string Voice { get; set; } = "en-US";
 

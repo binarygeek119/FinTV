@@ -18,7 +18,10 @@ public static class NewsAssBuilder
     internal static string BuildSpoken(
         int width,
         int height,
-        IReadOnlyList<NewsStoryBeat> beats)
+        IReadOnlyList<NewsStoryBeat> beats,
+        string? presenter = null,
+        double presenterStartSeconds = 0,
+        double? presenterEndSeconds = null)
     {
         var playX = width;
         var playY = height;
@@ -70,6 +73,17 @@ public static class NewsAssBuilder
                 .AppendLine(text);
         }
 
+        if (!string.IsNullOrWhiteSpace(presenter))
+        {
+            var presenterEnd = presenterEndSeconds ?? (beats.Count == 0 ? 1 : beats[^1].EndSeconds);
+            events.Append("Dialogue: 1,")
+                .Append(FormatAssTime(presenterStartSeconds)).Append(',')
+                .Append(FormatAssTime(presenterEnd))
+                .Append(",Presenter,,0,0,0,,")
+                .Append(Escape(presenter.Trim()))
+                .AppendLine();
+        }
+
         if (events.Length == 0)
         {
             events.Append("Dialogue: 0,0:00:00.00,").Append(end)
@@ -78,7 +92,7 @@ public static class NewsAssBuilder
 
         var sb = new StringBuilder();
         sb.AppendLine("[Script Info]");
-        sb.AppendLine("Title: ChannelFlow News");
+        sb.AppendLine("Title: FlowWire News");
         sb.AppendLine("ScriptType: v4.00+");
         sb.AppendLine("WrapStyle: 0");
         sb.AppendLine("PlayResX: " + playX);
@@ -89,6 +103,7 @@ public static class NewsAssBuilder
         sb.AppendLine("Style: Story, Arial, 28, &H00FFFFFF, &H000000FF, &H00000000, &H80000000, 0, 0, 0, 0, 100, 100, 0, 0, 1, 2, 0, 5, 48, 48, 40, 1");
         sb.AppendLine("Style: Scroll, Arial, 28, &H00FFFFFF, &H000000FF, &H00000000, &H80000000, 0, 0, 0, 0, 100, 100, 0, 0, 1, 2, 0, 8, 48, 48, 36, 1");
         sb.AppendLine("Style: Caption, Arial, 26, &H00FFFFFF, &H000000FF, &H00000000, &H80000000, 0, 0, 0, 0, 100, 100, 0, 0, 1, 2, 1, 2, 36, 36, 28, 1");
+        sb.AppendLine("Style: Presenter, Arial, 18, &H00FFFFFF, &H000000FF, &H00000000, &H80000000, 0, 0, 0, 0, 100, 100, 0, 0, 1, 2, 1, 1, 36, 36, 24, 1");
         sb.AppendLine();
         sb.AppendLine("[Events]");
         sb.AppendLine("Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text");
@@ -129,7 +144,7 @@ public static class NewsAssBuilder
             }
         }
 
-        return sb.Length == 0 ? @"{\b1}ChannelFlow News" : sb.ToString();
+        return sb.Length == 0 ? @"{\b1}FlowWire News" : sb.ToString();
     }
 
     private static IEnumerable<string> Wrap(string text, int maxChars)

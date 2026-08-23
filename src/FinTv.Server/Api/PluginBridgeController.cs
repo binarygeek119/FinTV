@@ -338,6 +338,8 @@ public class NewsController : ControllerBase
             settings.HeaderText,
             settings.ArticleCount,
             settings.TtsEnabled,
+            settings.TtsEngine,
+            settings.AiRewrite,
             settings.Voice,
             settings.MusicLibraryId,
             settings.MusicLibraryName,
@@ -363,9 +365,15 @@ public class NewsController : ControllerBase
             _db.NewsSettings.Add(row);
         }
 
-        row.HeaderText = settings.HeaderText;
+        row.HeaderText = string.IsNullOrWhiteSpace(settings.HeaderText)
+            ? "FlowWire News"
+            : settings.HeaderText.Trim();
         row.ArticleCount = Math.Clamp(settings.ArticleCount, 1, 30);
         row.TtsEnabled = settings.TtsEnabled;
+        row.TtsEngine = string.Equals(settings.TtsEngine?.Trim(), "ai", StringComparison.OrdinalIgnoreCase)
+            ? "ai"
+            : "google";
+        row.AiRewrite = settings.AiRewrite;
         row.Voice = string.IsNullOrWhiteSpace(settings.Voice) ? "en-US" : settings.Voice.Trim();
         if (NewsChannelService.IsNoMusic(settings)
             || string.Equals(settings.MusicLibraryId?.Trim(), NewsChannelService.NoMusicLibraryId, StringComparison.OrdinalIgnoreCase))

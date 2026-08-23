@@ -21,7 +21,6 @@ public static class ChannelAiRules
         ["channelflow-reality"] = new(
             "Reality TV themed shows and movies. Match Reality genre or reality/competition keywords in title, plot, or tags. Exclude crime, cops, and game shows.",
             ChannelCatalogMode.Mixed),
-        ["channelflow-news"] = new("News programming only (News genre preferred).", ChannelCatalogMode.TvOnly),
         ["channelflow-past-tense-news"] = new(
             "Home movies and home videos from the Past Tense News / Home Movies / Home Videos library. Shuffle clips at random and present every clip as live breaking news.",
             ChannelCatalogMode.Mixed),
@@ -203,10 +202,6 @@ public static class ChannelAiRules
                 "captain america", "avenger", "marvel", "x-men", "war hero", "medal of honor",
                 "unsung hero", "everyday hero", "disaster relief", "against all odds"
             }
-        },
-        ["channelflow-news"] = new ChannelCatalogGenreConstraints
-        {
-            RequiredGenreKeywords = new[] { "News", "Newscast", "Journalism" }
         }
     };
 

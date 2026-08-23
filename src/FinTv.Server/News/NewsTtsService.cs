@@ -2,6 +2,8 @@ using System.Net.Http.Headers;
 using System.Text;
 using CliWrap;
 using FinTv.Domain;
+using FinTv.Services;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace FinTv.News;
@@ -9,21 +11,95 @@ namespace FinTv.News;
 public sealed class NewsTtsService
 {
     public const int MaxChunkChars = 180;
+    public const int AiMaxChunkChars = 4000;
     private static readonly TimeSpan RateLimitBackoff = TimeSpan.FromMinutes(10);
 
     private readonly IHttpClientFactory _http;
     private readonly IFfmpegLocator _ffmpeg;
+    private readonly IServiceScopeFactory _scopes;
     private readonly ILogger<NewsTtsService> _logger;
     private DateTimeOffset _rateLimitedUntil = DateTimeOffset.MinValue;
 
-    public NewsTtsService(IHttpClientFactory http, IFfmpegLocator ffmpeg, ILogger<NewsTtsService> logger)
+    public NewsTtsService(
+        IHttpClientFactory http,
+        IFfmpegLocator ffmpeg,
+        IServiceScopeFactory scopes,
+        ILogger<NewsTtsService> logger)
     {
         _http = http;
         _ffmpeg = ffmpeg;
+        _scopes = scopes;
         _logger = logger;
     }
 
+    public Task<string?> SynthesizeAsync(
+        string script,
+        string voice,
+        string newsDir,
+        CancellationToken cancellationToken)
+        => SynthesizeAsync(script, voice, newsDir, "google", cancellationToken);
+
     public async Task<string?> SynthesizeAsync(
+        string script,
+        string voice,
+        string newsDir,
+        string? engine,
+        CancellationToken cancellationToken)
+    {
+        if (IsAiEngine(engine))
+        {
+            try
+            {
+                var aiPath = await SynthesizeAiAsync(script, voice, newsDir, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(aiPath))
+                {
+                    return aiPath;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "AI news TTS failed; falling back to Google TTS");
+            }
+        }
+
+        return await SynthesizeGoogleAsync(script, voice, newsDir, cancellationToken);
+    }
+
+    public static bool IsAiEngine(string? engine)
+        => string.Equals(engine?.Trim(), "ai", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<string?> SynthesizeAiAsync(
+        string script,
+        string voice,
+        string newsDir,
+        CancellationToken cancellationToken)
+    {
+        var chunks = Chunk(script, AiMaxChunkChars);
+        if (chunks.Count == 0)
+        {
+            return null;
+        }
+
+        Directory.CreateDirectory(newsDir);
+        var output = Path.Combine(newsDir, "speech.mp3");
+        var partDir = Path.Combine(newsDir, "tts-ai");
+        Directory.CreateDirectory(partDir);
+        var parts = new List<string>();
+
+        using var scope = _scopes.CreateScope();
+        var llm = scope.ServiceProvider.GetRequiredService<LlmClientService>();
+        for (var i = 0; i < chunks.Count; i++)
+        {
+            var bytes = await llm.SynthesizeSpeechAsync(chunks[i], voice, cancellationToken);
+            var path = Path.Combine(partDir, $"part-{i:00}.mp3");
+            await File.WriteAllBytesAsync(path, bytes, cancellationToken);
+            parts.Add(path);
+        }
+
+        return await ConcatPartsAsync(parts, partDir, output, cancellationToken);
+    }
+
+    private async Task<string?> SynthesizeGoogleAsync(
         string script,
         string voice,
         string newsDir,
@@ -85,37 +161,51 @@ public sealed class NewsTtsService
                 parts.Add(path);
             }
 
-            if (parts.Count == 1)
-            {
-                File.Copy(parts[0], output, overwrite: true);
-                return output;
-            }
-
-            var listPath = Path.Combine(partDir, "concat.txt");
-            var list = new StringBuilder();
-            foreach (var part in parts)
-            {
-                list.Append("file '").Append(Path.GetFileName(part).Replace("'", @"'\''")).AppendLine("'");
-            }
-
-            await File.WriteAllTextAsync(listPath, list.ToString(), cancellationToken);
-            await Cli.Wrap(_ffmpeg.EncoderPath)
-                .WithWorkingDirectory(partDir)
-                .WithArguments([
-                    "-hide_banner", "-loglevel", "error",
-                    "-f", "concat", "-safe", "0", "-i", "concat.txt",
-                    "-c:a", "libmp3lame", "-b:a", "64k", "-y", output
-                ])
-                .WithValidation(CommandResultValidation.ZeroExitCode)
-                .ExecuteAsync(cancellationToken);
-
-            return File.Exists(output) ? output : null;
+            return await ConcatPartsAsync(parts, partDir, output, cancellationToken);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "News TTS failed");
             return File.Exists(output) ? output : null;
         }
+    }
+
+    private async Task<string?> ConcatPartsAsync(
+        IReadOnlyList<string> parts,
+        string partDir,
+        string output,
+        CancellationToken cancellationToken)
+    {
+        if (parts.Count == 0)
+        {
+            return File.Exists(output) ? output : null;
+        }
+
+        if (parts.Count == 1)
+        {
+            File.Copy(parts[0], output, overwrite: true);
+            return output;
+        }
+
+        var listPath = Path.Combine(partDir, "concat.txt");
+        var list = new StringBuilder();
+        foreach (var part in parts)
+        {
+            list.Append("file '").Append(Path.GetFileName(part).Replace("'", @"'\''")).AppendLine("'");
+        }
+
+        await File.WriteAllTextAsync(listPath, list.ToString(), cancellationToken);
+        await Cli.Wrap(_ffmpeg.EncoderPath)
+            .WithWorkingDirectory(partDir)
+            .WithArguments([
+                "-hide_banner", "-loglevel", "error",
+                "-f", "concat", "-safe", "0", "-i", "concat.txt",
+                "-c:a", "libmp3lame", "-b:a", "64k", "-y", output
+            ])
+            .WithValidation(CommandResultValidation.ZeroExitCode)
+            .ExecuteAsync(cancellationToken);
+
+        return File.Exists(output) ? output : null;
     }
 
     public async Task<double> ProbeDurationSecondsAsync(string path, CancellationToken cancellationToken)
@@ -146,7 +236,7 @@ public sealed class NewsTtsService
         }
     }
 
-    public static IReadOnlyList<string> Chunk(string script)
+    public static IReadOnlyList<string> Chunk(string script, int maxChars = MaxChunkChars)
     {
         var text = script.Replace('\n', ' ').Trim();
         if (string.IsNullOrWhiteSpace(text))
@@ -158,17 +248,17 @@ public sealed class NewsTtsService
         var remaining = text;
         while (remaining.Length > 0)
         {
-            if (remaining.Length <= MaxChunkChars)
+            if (remaining.Length <= maxChars)
             {
                 chunks.Add(remaining.Trim());
                 break;
             }
 
-            var window = remaining[..MaxChunkChars];
+            var window = remaining[..maxChars];
             var split = Math.Max(window.LastIndexOf(". ", StringComparison.Ordinal), window.LastIndexOf(' '));
             if (split < 20)
             {
-                split = MaxChunkChars;
+                split = maxChars;
             }
 
             chunks.Add(remaining[..split].Trim());
