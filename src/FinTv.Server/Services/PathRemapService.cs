@@ -10,6 +10,7 @@ namespace FinTv.Services;
 public sealed class PathRemapService
 {
     private readonly FinTvDbContext _db;
+    private IReadOnlyList<PathMapping>? _mappings;
 
     public PathRemapService(FinTvDbContext db)
     {
@@ -41,6 +42,7 @@ public sealed class PathRemapService
         }
 
         await _db.SaveChangesAsync(cancellationToken);
+        _mappings = null;
     }
 
     public string? Remap(string? jellyfinPath, IReadOnlyList<PathMapping>? mappings = null)
@@ -51,7 +53,7 @@ public sealed class PathRemapService
         }
 
         var source = jellyfinPath.Replace('\\', '/');
-        mappings ??= _db.PathMappings.AsNoTracking().OrderBy(m => m.SortOrder).ToList();
+        mappings ??= LoadMappings();
         PathMapping? best = null;
         foreach (var mapping in mappings)
         {
@@ -147,6 +149,9 @@ public sealed class PathRemapService
 
         return new { total = items.Count, exists, missing, mappings = mappings.Count, samples };
     }
+
+    public IReadOnlyList<PathMapping> LoadMappings()
+        => _mappings ??= _db.PathMappings.AsNoTracking().OrderBy(m => m.SortOrder).ToList();
 
     private static string NormalizePrefix(string prefix) => prefix.Trim().Replace('\\', '/').TrimEnd('/');
 }

@@ -224,6 +224,7 @@ public sealed class CatalogLibraryManager : ILibraryManager, IChapterManager
 
     private List<BaseItem> QueryTyped(InternalItemsQuery query, HashSet<BaseItemKind>? kinds)
     {
+        _remap.LoadMappings();
         var items = new List<BaseItem>();
         var wantAll = kinds is null || kinds.Count == 0;
         var parentId = query.ParentId;
@@ -237,7 +238,7 @@ public sealed class CatalogLibraryManager : ILibraryManager, IChapterManager
             }
 
             tv = ApplyNameFilter(tv, query);
-            items.AddRange(tv.AsEnumerable().Select(row => Map(row, BaseItemKind.Series)));
+            items.AddRange(MapRows(tv, BaseItemKind.Series));
         }
 
         if (wantAll || kinds!.Contains(BaseItemKind.Episode))
@@ -251,7 +252,7 @@ public sealed class CatalogLibraryManager : ILibraryManager, IChapterManager
                 }
 
                 episodes = ApplyNameFilter(episodes, query);
-                items.AddRange(episodes.AsEnumerable().Select(row => Map(row, BaseItemKind.Episode)));
+                items.AddRange(MapRows(episodes, BaseItemKind.Episode));
             }
             catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedTable)
             {
@@ -270,7 +271,7 @@ public sealed class CatalogLibraryManager : ILibraryManager, IChapterManager
             }
 
             news = ApplyNameFilter(news, query);
-            items.AddRange(news.AsEnumerable().Select(MapNews));
+            items.AddRange(news.ToList().Select(MapNews));
         }
 
         if (wantAll || kinds!.Contains(BaseItemKind.Movie) || kinds.Contains(BaseItemKind.Video))
@@ -282,7 +283,7 @@ public sealed class CatalogLibraryManager : ILibraryManager, IChapterManager
             }
 
             movies = ApplyNameFilter(movies, query);
-            items.AddRange(movies.AsEnumerable().Select(row => Map(row, BaseItemKind.Movie)));
+            items.AddRange(MapRows(movies, BaseItemKind.Movie));
         }
 
         if (wantAll || kinds!.Contains(BaseItemKind.Audio))
@@ -294,7 +295,7 @@ public sealed class CatalogLibraryManager : ILibraryManager, IChapterManager
             }
 
             music = ApplyNameFilter(music, query);
-            items.AddRange(music.AsEnumerable().Select(row => Map(row, BaseItemKind.Audio)));
+            items.AddRange(MapRows(music, BaseItemKind.Audio));
         }
 
         if (wantAll || kinds!.Contains(BaseItemKind.MusicVideo))
@@ -306,7 +307,7 @@ public sealed class CatalogLibraryManager : ILibraryManager, IChapterManager
             }
 
             videos = ApplyNameFilter(videos, query);
-            items.AddRange(videos.AsEnumerable().Select(row => Map(row, BaseItemKind.MusicVideo)));
+            items.AddRange(MapRows(videos, BaseItemKind.MusicVideo));
         }
 
         return items;
@@ -362,6 +363,10 @@ public sealed class CatalogLibraryManager : ILibraryManager, IChapterManager
 
         return query;
     }
+
+    private List<BaseItem> MapRows<T>(IQueryable<T> query, BaseItemKind kind)
+        where T : CatalogMediaRow
+        => query.ToList().Select(row => Map(row, kind)).ToList();
 
     private IEnumerable<(Guid Id, string Name, string? CollectionType)> DistinctLibraries()
     {
