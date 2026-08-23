@@ -110,7 +110,7 @@ public class DatabaseInitializer : IHostedService
     {
         var statements = new[]
         {
-            """UPDATE "Channels" SET "Name" = 'FlowWire' WHERE "Name" = 'ChannelFlow News'""",
+            """UPDATE "Channels" SET "Name" = 'FlowWire News' WHERE "Name" IN ('FlowWire', 'ChannelFlow News')""",
             """UPDATE "NewsSettings" SET "HeaderText" = 'FlowWire News' WHERE "HeaderText" IN ('ChannelFlow News', 'FlowWire', '') OR "HeaderText" IS NULL""",
             """UPDATE "NewsSettings" SET "IntroText" = REPLACE("IntroText", 'ChannelFlow News', 'FlowWire News') WHERE "IntroText" LIKE '%ChannelFlow News%'""",
             """UPDATE "NewsSettings" SET "OutroText" = REPLACE("OutroText", 'ChannelFlow News', 'FlowWire News') WHERE "OutroText" LIKE '%ChannelFlow News%'"""
@@ -123,7 +123,7 @@ public class DatabaseInitializer : IHostedService
                 var updated = await db.Database.ExecuteSqlRawAsync(sql, cancellationToken);
                 if (updated > 0)
                 {
-                    _logger.LogInformation("Renamed ChannelFlow News to FlowWire ({Updated} row(s))", updated);
+                    _logger.LogInformation("Renamed news channel to FlowWire News ({Updated} row(s))", updated);
                 }
             }
             catch (Exception ex)

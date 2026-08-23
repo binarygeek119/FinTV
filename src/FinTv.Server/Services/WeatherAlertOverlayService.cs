@@ -335,10 +335,7 @@ public sealed class WeatherAlertOverlayService
             snap = PreviewSnapshot(alerts);
         }
 
-        var config = FinTvRuntime.Current?.Configuration;
-        var skin = string.Equals(config?.WeatherStarVariant, "ws3kp", StringComparison.OrdinalIgnoreCase)
-            ? WeatherStarDockerVariant.Ws3kp
-            : WeatherStarDockerVariant.Ws4kp;
+        var skin = WeatherStarChannelService.ResolveConfiguredVariant();
         return _compositor.RenderJpeg(snap, WeatherStarScreen.Hazards, skin, 854, 480, scanlines: false, radarIndex: 0);
     }
 

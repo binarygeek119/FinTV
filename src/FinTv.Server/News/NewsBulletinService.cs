@@ -217,7 +217,7 @@ public sealed class NewsBulletinService
             TryDeleteDirectory(workDir);
         }
 
-        if (!ok || !IsPlayableVideo(stagingMp4))
+        if (!ok || !IsFinishedVideo(stagingMp4))
         {
             TryDeleteFile(stagingMp4);
             return SaveSkip(ledger, ranAt, "FFmpeg failed to create the news video.", encoded.Count);
@@ -225,7 +225,7 @@ public sealed class NewsBulletinService
 
         try
         {
-            File.Move(stagingMp4, outputMp4, overwrite: false);
+            File.Move(stagingMp4, outputMp4, overwrite: true);
         }
         catch (Exception ex)
         {
@@ -339,8 +339,10 @@ public sealed class NewsBulletinService
     }
 
     private static bool IsPlayableVideo(string? path)
+        => IsFinishedVideo(path) && !path!.EndsWith(".partial", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsFinishedVideo(string? path)
         => !string.IsNullOrWhiteSpace(path)
-           && !path.EndsWith(".partial", StringComparison.OrdinalIgnoreCase)
            && File.Exists(path)
            && new FileInfo(path).Length > 1024;
 

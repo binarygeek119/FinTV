@@ -25,6 +25,12 @@ services:
     volumes:
       - channelflow-config:/config
       - ${CHANNELFLOW_MEDIA:-${FINTV_MEDIA:-./media}}:/media
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8097/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
     restart: unless-stopped
 
 volumes:

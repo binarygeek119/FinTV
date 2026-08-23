@@ -24,7 +24,8 @@ public sealed class WeatherStarCompositor
         int screenRepeat = 0,
         TimeSpan elapsed = default)
     {
-        using var surface = SKSurface.Create(new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Premul));
+        using var surface = SKSurface.Create(new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Premul))
+            ?? throw new InvalidOperationException("Could not create a WeatherStar frame surface.");
         var canvas = surface.Canvas;
         canvas.Clear(skin == WeatherStarDockerVariant.Ws3kp ? new SKColor(0x10, 0x20, 0x70) : new SKColor(0x00, 0x28, 0x8A));
 
@@ -153,6 +154,13 @@ public sealed class WeatherStarCompositor
         {
             DrawText(canvas, "Travel", font, 28, ox + 170, BaselineBelow(font, 28, 28), white);
             DrawText(canvas, "Cities", font, 28, ox + 170, BaselineBelow(font, 28, 56), white);
+            return;
+        }
+
+        if (screen == WeatherStarScreen.ExtendedForecast)
+        {
+            DrawText(canvas, "Extended", font, 28, ox + 170, BaselineBelow(font, 28, 28), white);
+            DrawText(canvas, "Forecast", font, 28, ox + 170, BaselineBelow(font, 28, 56), white);
             return;
         }
 
@@ -529,32 +537,33 @@ public sealed class WeatherStarCompositor
         var offset = ScrollStep(radarIndex, maxOffset);
         var page = hours.Skip(offset).Take(pageSize).ToList();
 
-        // hourly.scss left positions on the 640 canvas; keep every column inside the 1.png box (x≈52–583).
+        // hourly.scss on the 640 canvas: hour 25, icon 255×70, temp 355, like 425, wind 505×100.
         var hourX = originX + 70f;
-        var iconX = originX + 248f;
+        var iconCol = originX + 255f;
         var tempX = originX + 355f;
         var likeX = originX + 430f;
         var windRight = originX + 568f;
-        const float iconSize = 64f;
+        const float headerTop = 90f;
+        const float rowHeight = 72f;
 
         using var headerBar = new SKPaint { Color = new SKColor(32, 0, 87) };
         using var heat = new SKPaint { Color = new SKColor(0xEE, 0x00, 0x00), IsAntialias = true };
         using var chill = new SKPaint { Color = new SKColor(0x80, 0x80, 0xFF), IsAntialias = true };
-        canvas.DrawRect(originX + 52, 90, 532, 20, headerBar);
+        canvas.DrawRect(originX + 52, headerTop, 532, 20, headerBar);
         DrawText(canvas, "TEMP", font, 18, tempX, 107, gold);
         DrawText(canvas, "LIKE", font, 18, likeX, 107, gold);
         DrawText(canvas, "WIND", font, 18, windRight, 107, gold, SKTextAlign.Right);
 
-        var y = 150f;
-        const float row = 72f;
+        var rowTop = headerTop + 28f;
         foreach (var hour in page)
         {
             var local = InPlace(hour.Time, snap);
-            DrawText(canvas, local.ToString("ddd h tt", CultureInfo.InvariantCulture), large, 22, hourX, y, gold);
+            var baseline = BaselineBelow(large, 22, rowTop + 8);
+            DrawText(canvas, local.ToString("ddd h tt", CultureInfo.InvariantCulture), large, 22, hourX, baseline, gold);
             var icon = WeatherIcon(hour.IconKey, elapsed);
             if (icon is not null)
             {
-                DrawBitmap(canvas, icon, new SKRect(iconX, y - 46, iconX + iconSize, y + 18));
+                DrawFittedIcon(canvas, icon, iconCol, columnWidth: 70f, rowTop, rowHeight, maxSize: 47f);
             }
 
             DrawText(
@@ -563,7 +572,7 @@ public sealed class WeatherStarCompositor
                 large,
                 24,
                 tempX,
-                y,
+                baseline,
                 white);
             var feels = hour.FeelsLike ?? hour.Temperature;
             var likePaint = feels < hour.Temperature - 0.5 ? chill
@@ -575,11 +584,11 @@ public sealed class WeatherStarCompositor
                 large,
                 24,
                 likeX,
-                y,
+                baseline,
                 likePaint);
-            DrawText(canvas, FormatHourlyWind(hour), large, 22, windRight, y, white, SKTextAlign.Right);
-            y += row;
-            if (y > height - 36)
+            DrawText(canvas, FormatHourlyWind(hour), large, 22, windRight, baseline, white, SKTextAlign.Right);
+            rowTop += rowHeight;
+            if (rowTop > height - 36)
             {
                 break;
             }
@@ -751,6 +760,17 @@ public sealed class WeatherStarCompositor
         return dir + new string(' ', pad) + speed;
     }
 
+    private static (float Left, float Right)[] ThreeDayPanels(int width)
+    {
+        var scaleX = width / 640f;
+        return
+        [
+            (46f * scaleX, 204f * scaleX),
+            (240f * scaleX, 398f * scaleX),
+            (434f * scaleX, 592f * scaleX)
+        ];
+    }
+
     private static float ContentOriginX(int width)
         => width > 700 ? (width - 640f) / 2f : 0f;
 
@@ -809,44 +829,51 @@ public sealed class WeatherStarCompositor
         const int pageSize = 3;
         var page = days.Count <= pageSize ? 0 : Math.Clamp(screenRepeat, 0, 1);
         var pageDays = days.Skip(page * pageSize).Take(pageSize).ToList();
-        const float cardW = 155f;
-        const float gap = 15f;
-        var startX = 42f + Math.Max(0, (3 - pageDays.Count) * (cardW + gap) / 2f);
+        var panels = ThreeDayPanels(width);
+        const float panelTop = 112f;
         using var loLabel = new SKPaint { Color = new SKColor(0x80, 0x80, 0xFF), IsAntialias = true };
 
         for (var i = 0; i < pageDays.Count; i++)
         {
             var day = pageDays[i];
-            var x = startX + i * (cardW + gap);
-            var center = x + cardW / 2f;
+            var left = panels[i].Left;
+            var right = panels[i].Right;
+            var panelW = right - left;
+            var center = (left + right) / 2f;
             DrawText(
                 canvas,
                 ExtendedDayName(day.Name),
                 font,
                 22,
                 center,
-                BaselineBelow(font, 22, 118),
+                BaselineBelow(font, 22, panelTop + 8),
                 gold,
                 SKTextAlign.Center);
 
             var icon = WeatherIcon(day.IconKey, elapsed);
             if (icon is not null)
             {
-                const float iconSize = 72f;
-                DrawBitmap(canvas, icon, new SKRect(center - iconSize / 2f, 148, center + iconSize / 2f, 148 + iconSize));
+                DrawFittedIcon(
+                    canvas,
+                    icon,
+                    left,
+                    panelW,
+                    panelTop + 40f,
+                    rowHeight: 75f,
+                    maxSize: Math.Min(75f, panelW - 16f));
             }
 
             var condition = ShortenExtendedCondition(string.IsNullOrWhiteSpace(day.Condition) ? day.Narrative : day.Condition);
-            var lines = WrapText(condition, font, 16, cardW - 8);
-            var textY = BaselineBelow(font, 16, 230);
+            var lines = WrapText(condition, font, 16, panelW - 16);
+            var textY = BaselineBelow(font, 16, panelTop + 122);
             foreach (var line in lines.Take(2))
             {
                 DrawText(canvas, line, font, 16, center, textY, white, SKTextAlign.Center);
                 textY += 20;
             }
 
-            var loX = x + 36f;
-            var hiX = x + cardW - 36f;
+            var loX = left + panelW * 0.28f;
+            var hiX = left + panelW * 0.72f;
             DrawText(canvas, "Lo", font, 16, loX, BaselineBelow(font, 16, 290), loLabel, SKTextAlign.Center);
             DrawText(canvas, "Hi", font, 16, hiX, BaselineBelow(font, 16, 290), gold, SKTextAlign.Center);
             if (day.Low is double low)
@@ -886,12 +913,23 @@ public sealed class WeatherStarCompositor
             return "TODAY";
         }
 
+        if (Enum.TryParse<DayOfWeek>(text, ignoreCase: true, out var day))
+        {
+            return CultureInfo.InvariantCulture.DateTimeFormat.GetAbbreviatedDayName(day).ToUpperInvariant();
+        }
+
         if (DateTime.TryParseExact(
                 text,
                 ["dddd", "ddd"],
                 CultureInfo.InvariantCulture,
                 DateTimeStyles.None,
-                out var date))
+                out var date)
+            || DateTime.TryParseExact(
+                text,
+                ["dddd", "ddd"],
+                CultureInfo.CurrentCulture,
+                DateTimeStyles.None,
+                out date))
         {
             return date.ToString("ddd", CultureInfo.InvariantCulture).ToUpperInvariant();
         }
@@ -1060,13 +1098,7 @@ public sealed class WeatherStarCompositor
         }
 
         // 2.png: three vertical boxes at x 46–204, 240–398, 434–592; inner y 112–384.
-        var scaleX = width / 640f;
-        var panels = new (float Left, float Right)[]
-        {
-            (46f * scaleX, 204f * scaleX),
-            (240f * scaleX, 398f * scaleX),
-            (434f * scaleX, 592f * scaleX)
-        };
+        var panels = ThreeDayPanels(width);
         const float panelTop = 112f;
         const float panelBottom = 384f;
         var midY = (panelTop + panelBottom) / 2f;
@@ -1182,13 +1214,7 @@ public sealed class WeatherStarCompositor
             var icon = WeatherIcon(city.IconKey, elapsed);
             if (icon is not null)
             {
-                const float maxIcon = 47f;
-                var scale = Math.Min(maxIcon / Math.Max(1, icon.Width), maxIcon / Math.Max(1, icon.Height));
-                var iconW = icon.Width * scale;
-                var iconH = icon.Height * scale;
-                var iconX = iconCol + (70f - iconW) / 2f;
-                var iconTop = y + (rowHeight - iconH) / 2f - 4f;
-                DrawBitmap(canvas, icon, new SKRect(iconX, iconTop, iconX + iconW, iconTop + iconH));
+                DrawFittedIcon(canvas, icon, iconCol, columnWidth: 70f, y, rowHeight, maxSize: 47f, yNudge: -4f);
             }
 
             if (city.Low is double low)
@@ -1339,7 +1365,7 @@ public sealed class WeatherStarCompositor
             citySize,
             width - 16,
             BaselineBelow(font, citySize, 28),
-            white,
+            gold,
             SKTextAlign.Right);
         DrawText(canvas, "Local", font, titleSize, 16, BaselineBelow(font, titleSize, 50), white);
         DrawText(canvas, "Forecast", font, titleSize, 16, BaselineBelow(font, titleSize, 78), white);
@@ -1641,6 +1667,24 @@ public sealed class WeatherStarCompositor
 
     private static void DrawBitmap(SKCanvas canvas, SKBitmap bitmap, SKRect dest)
         => canvas.DrawBitmap(bitmap, dest, BitmapSampling);
+
+    private static void DrawFittedIcon(
+        SKCanvas canvas,
+        SKBitmap icon,
+        float columnLeft,
+        float columnWidth,
+        float rowTop,
+        float rowHeight,
+        float maxSize,
+        float yNudge = 0f)
+    {
+        var scale = Math.Min(maxSize / Math.Max(1, icon.Width), maxSize / Math.Max(1, icon.Height));
+        var iconW = icon.Width * scale;
+        var iconH = icon.Height * scale;
+        var x = columnLeft + (columnWidth - iconW) / 2f;
+        var y = rowTop + (rowHeight - iconH) / 2f + yNudge;
+        DrawBitmap(canvas, icon, new SKRect(x, y, x + iconW, y + iconH));
+    }
 
     private static float Measure(SKTypeface typeface, float size, string text)
     {

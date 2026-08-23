@@ -474,6 +474,7 @@ public class FfmpegCommandBuilder
         {
             args.AddRange(new[]
             {
+                "-thread_queue_size", "1024",
                 "-stream_loop", "-1",
                 "-i", audioPath!
             });
@@ -490,8 +491,9 @@ public class FfmpegCommandBuilder
         args.AddRange(new[]
         {
             "-vf", vf,
-            "-map", "0:v",
-            "-map", "1:a"
+            "-map", "0:v:0",
+            "-map", "1:a:0?",
+            "-af", "aresample=async=1:first_pts=0,aformat=sample_rates=48000:channel_layouts=stereo"
         });
         AppendVideoEncoderArgs(args, context, stillImage: true);
         args.AddRange(new[]

@@ -83,6 +83,11 @@ builder.Services.AddHttpClient("Weather", client =>
     client.Timeout = TimeSpan.FromSeconds(25);
     client.DefaultRequestHeaders.UserAgent.ParseAdd("ChannelFlow-Server/1.0 (https://github.com/FlowMeadow01/ChannelFlow)");
 });
+builder.Services.AddHttpClient("News", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(45);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("ChannelFlow-Server/0.0.3 (news)");
+});
 builder.Services.AddHttpClient();
 
 builder.Services.AddSingleton<FinTvRuntime>();
@@ -156,6 +161,9 @@ app.UseMiddleware<ApiKeyMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseStaticFiles();
+app.MapGet("/health", () => Results.Text("ok"))
+    .AllowAnonymous()
+    .ShortCircuit();
 app.MapControllers();
 app.MapSpaFallback();
 

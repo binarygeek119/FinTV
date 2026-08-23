@@ -47,6 +47,7 @@ public class WeatherStarChannelService
     private readonly JellyfinCatalogService _catalog;
     private readonly WeatherDataClient _weather;
     private readonly WeatherStarCompositor _compositor;
+    private readonly WeatherStarAssets _assets;
     private readonly WeatherAlertOverlayService _alerts;
 
     public WeatherStarChannelService(
@@ -57,6 +58,7 @@ public class WeatherStarChannelService
         JellyfinCatalogService catalog,
         WeatherDataClient weather,
         WeatherStarCompositor compositor,
+        WeatherStarAssets assets,
         WeatherAlertOverlayService alerts)
     {
         _logger = logger;
@@ -66,6 +68,7 @@ public class WeatherStarChannelService
         _catalog = catalog;
         _weather = weather;
         _compositor = compositor;
+        _assets = assets;
         _alerts = alerts;
     }
 
@@ -82,6 +85,7 @@ public class WeatherStarChannelService
         var ffmpegPath = _mediaEncoder.EncoderPath;
         var backgroundMusicPath = ResolveWeatherMusicPath();
         var skin = ResolveVariant(channel);
+        _logger.LogInformation("WeatherStar stream {Channel} using {Skin}", channel.Name, skin);
 
         WeatherSnapshot snap;
         try
@@ -118,6 +122,7 @@ public class WeatherStarChannelService
                 .ExecuteAsync(linkedCts.Token);
 
             var pumpTask = PumpFramesAsync(
+                channel,
                 snap,
                 locationQuery,
                 source,
@@ -194,9 +199,7 @@ public class WeatherStarChannelService
         }
 
         var (width, height) = GetCutInResolution(channel);
-        var skin = string.Equals(config?.WeatherStarVariant, "ws3kp", StringComparison.OrdinalIgnoreCase)
-            ? WeatherStarDockerVariant.Ws3kp
-            : WeatherStarDockerVariant.Ws4kp;
+        var skin = ResolveVariant(channel);
         var ffmpegPath = _mediaEncoder.EncoderPath;
         var backgroundMusicPath = ResolveWeatherMusicPath();
         var durationSeconds = Math.Clamp(duration.TotalSeconds, 5, 120);
@@ -249,33 +252,62 @@ public class WeatherStarChannelService
 
     public static WeatherStarDockerVariant ResolveVariant(Domain.Channel channel)
     {
-        var tag = FilterDefinition.ExtractFintvLibraryTag(channel.FilterJson) ?? channel.Name;
-        if (tag.Contains("3000", StringComparison.OrdinalIgnoreCase)
-            || tag.Contains("ws3", StringComparison.OrdinalIgnoreCase))
+        var tag = FilterDefinition.ExtractFintvLibraryTag(channel.FilterJson) ?? string.Empty;
+        var name = channel.Name ?? string.Empty;
+        if (IsWeatherStar3000Token(tag) || IsWeatherStar3000Token(name))
         {
             return WeatherStarDockerVariant.Ws3kp;
         }
 
-        return WeatherStarDockerVariant.Ws4kp;
+        return ResolveConfiguredVariant();
     }
+
+    public static WeatherStarDockerVariant ResolveConfiguredVariant()
+    {
+        var configured = FinTvRuntime.Current?.Configuration.WeatherStarVariant;
+        return IsWeatherStar3000Token(configured)
+            ? WeatherStarDockerVariant.Ws3kp
+            : WeatherStarDockerVariant.Ws4kp;
+    }
+
+    private static bool IsWeatherStar3000Token(string? value)
+        => !string.IsNullOrWhiteSpace(value)
+            && (value.Contains("3000", StringComparison.OrdinalIgnoreCase)
+                || value.Contains("ws3", StringComparison.OrdinalIgnoreCase));
 
     public string? ResolveWeatherMusicPath()
     {
         var config = FinTvRuntime.Current?.Configuration;
+        string? fromLibrary = null;
         if (config is null)
         {
-            return _ebs.ResolveBackgroundMusicPath();
+            fromLibrary = _ebs.ResolveBackgroundMusicPath();
+        }
+        else
+        {
+            var selectedId = string.IsNullOrWhiteSpace(config.WeatherMusicLibraryId) ? null : config.WeatherMusicLibraryId;
+            var selectedName = string.IsNullOrWhiteSpace(config.WeatherMusicLibraryName) ? null : config.WeatherMusicLibraryName;
+            var libraryId = selectedId ?? config.EbsBackgroundMusicLibraryId;
+            var libraryName = selectedName ?? config.EbsBackgroundMusicLibraryName;
+            fromLibrary = string.IsNullOrWhiteSpace(libraryId) && string.IsNullOrWhiteSpace(libraryName)
+                ? _catalog.PickPlayableMusicPath(null, null, fallbackToAllMusic: true)
+                : _catalog.PickPlayableMusicPath(libraryId, libraryName, fallbackToAllMusic: true);
+            fromLibrary ??= _ebs.ResolveBackgroundMusicPath();
         }
 
-        var selectedId = string.IsNullOrWhiteSpace(config.WeatherMusicLibraryId) ? null : config.WeatherMusicLibraryId;
-        var selectedName = string.IsNullOrWhiteSpace(config.WeatherMusicLibraryName) ? null : config.WeatherMusicLibraryName;
-        var libraryId = selectedId ?? config.EbsBackgroundMusicLibraryId;
-        var libraryName = selectedName ?? config.EbsBackgroundMusicLibraryName;
-        var fromLibrary = string.IsNullOrWhiteSpace(libraryId) && string.IsNullOrWhiteSpace(libraryName)
-            ? _catalog.PickPlayableMusicPath(null, null, fallbackToAllMusic: true)
-            : _catalog.PickPlayableMusicPath(libraryId, libraryName, fallbackToAllMusic: true);
-        return fromLibrary ?? _ebs.ResolveBackgroundMusicPath();
+        var path = PlayableMusicPath(fromLibrary) ?? _assets.PickRandomMusicPath();
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            _logger.LogWarning("Weather stream has no music file; encoding silence");
+            return null;
+        }
+
+        _logger.LogInformation("Weather stream music {File}", Path.GetFileName(path));
+        return path;
     }
+
+    private static string? PlayableMusicPath(string? path)
+        => !string.IsNullOrWhiteSpace(path) && File.Exists(path) ? path : null;
 
     internal static string BuildWeatherPageUrl(
         string locationQuery,
@@ -418,6 +450,7 @@ public class WeatherStarChannelService
     }
 
     private async Task PumpFramesAsync(
+        Domain.Channel channel,
         WeatherSnapshot snap,
         string locationQuery,
         WeatherSourceKind source,
@@ -447,7 +480,8 @@ public class WeatherStarChannelService
 
             var elapsed = DateTime.UtcNow - started;
             var (screen, radarIndex, screenRepeat) = sequencer.At(elapsed);
-            var jpeg = _compositor.RenderJpeg(current, screen, sequencer.Skin, width, height, sequencer.Scanlines, radarIndex, screenRepeat, elapsed);
+            var skin = ResolveVariant(channel);
+            var jpeg = _compositor.RenderJpeg(current, screen, skin, width, height, sequencer.Scanlines, radarIndex, screenRepeat, elapsed);
             await frameStream.WriteFrameAsync(jpeg, cancellationToken);
             await Task.Delay(frameDelay, cancellationToken);
         }

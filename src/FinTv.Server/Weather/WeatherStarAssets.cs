@@ -85,6 +85,7 @@ public sealed class WeatherStarAssets : IDisposable
             {
                 StarFontFace.Large => ["Star3000 Large.ttf", "Star3000.ttf"],
                 StarFontFace.Small => ["Star3000 Small.ttf", "Star3000.ttf"],
+                StarFontFace.Extended => ["Star3000 Extended.ttf", "Star3000.ttf"],
                 _ => ["Star3000.ttf", "Star3000 Small.ttf"]
             };
         }
@@ -110,8 +111,15 @@ public sealed class WeatherStarAssets : IDisposable
             WeatherStarScreen.SpcOutlook => "6.png",
             _ => wide ? "1-wide.png" : "1.png"
         };
-        var root = skin == WeatherStarDockerVariant.Ws3kp ? _ws3Root : _ws4Root;
-        return Bitmap(FindFile(root, file) ?? FindFile(root, "1.png") ?? FindFile(root, "1-wide.png"));
+        var preferred = skin == WeatherStarDockerVariant.Ws3kp ? _ws3Root : _ws4Root;
+        var path = FindFile(preferred, file)
+            ?? (skin == WeatherStarDockerVariant.Ws3kp ? FindFile(_ws4Root, file) : null)
+            ?? FindFile(preferred, "1.png")
+            ?? FindFile(preferred, "1-wide.png")
+            ?? FindFile(_ws4Root, file)
+            ?? FindFile(_ws4Root, "1.png")
+            ?? FindFile(_ws4Root, "1-wide.png");
+        return Bitmap(path);
     }
 
     public SKBitmap? Icon(string iconKey) => Icon(iconKey, TimeSpan.Zero);
@@ -406,16 +414,23 @@ public sealed class WeatherStarAssets : IDisposable
 
     private static SKTypeface? LoadTypeface(string path)
     {
-        if (path.EndsWith(".woff", StringComparison.OrdinalIgnoreCase))
+        try
         {
-            var ttf = WoffConverter.TryToSfnt(File.ReadAllBytes(path));
-            if (ttf is not null)
+            if (path.EndsWith(".woff", StringComparison.OrdinalIgnoreCase))
             {
-                return SKTypeface.FromData(SKData.CreateCopy(ttf));
+                var ttf = WoffConverter.TryToSfnt(File.ReadAllBytes(path));
+                if (ttf is not null)
+                {
+                    return SKTypeface.FromData(SKData.CreateCopy(ttf));
+                }
             }
-        }
 
-        return SKTypeface.FromFile(path);
+            return SKTypeface.FromFile(path);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static string? FindFile(string root, string fileName)
@@ -449,6 +464,47 @@ public sealed class WeatherStarAssets : IDisposable
         }
 
         return Directory.EnumerateFiles(root, fileName, SearchOption.AllDirectories).FirstOrDefault();
+    }
+
+    public string? PickRandomMusicPath()
+    {
+        var files = EnumerateMusicFiles();
+        if (files.Count == 0)
+        {
+            return null;
+        }
+
+        return files[Random.Shared.Next(files.Count)];
+    }
+
+    private IReadOnlyList<string> EnumerateMusicFiles()
+    {
+        var files = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var folder in MusicFolders())
+        {
+            if (!Directory.Exists(folder))
+            {
+                continue;
+            }
+
+            foreach (var file in Directory.EnumerateFiles(folder, "*.mp3", SearchOption.AllDirectories))
+            {
+                if (seen.Add(file))
+                {
+                    files.Add(file);
+                }
+            }
+        }
+
+        return files;
+    }
+
+    private IEnumerable<string> MusicFolders()
+    {
+        yield return Path.Combine(_ws4Root, "music");
+        yield return Path.Combine(_ws4Root, "music", "default");
+        yield return Path.Combine(_ws4Root, "server", "music", "default");
     }
 }
 

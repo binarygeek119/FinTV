@@ -3392,7 +3392,7 @@
         const source = status?.weatherSource === 'us' ? 'United States (NOAA)'
             : status?.weatherSource === 'world' ? 'World (Open-Meteo)'
             : 'Auto (NOAA in the US, Open-Meteo worldwide)';
-        el.innerHTML = `<div>${escapeHtml(label)} native live stream</div><div class="meta">${escapeHtml(source)} · no Chromium</div>`;
+        el.innerHTML = `<div>${escapeHtml(label)} native live stream</div><div class="meta">${escapeHtml(source)} · live MPEG-TS uses this look</div>`;
         const variantSelect = $('weather-star-variant');
         if (variantSelect) {
             variantSelect.value = variant;

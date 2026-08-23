@@ -734,7 +734,7 @@
             <section id="tab-weather" class="tab-panel hidden" hidden>
                 <div class="card section-card">
                     <h3>WeatherStar live channels</h3>
-                    <p class="hint">Weather channels are a native MPEG-TS loop (Star fonts and screens). No Chromium. Pick WeatherStar 4000 or 3000 per channel name/preset. Location can be a US ZIP, a city, or latitude,longitude.</p>
+                    <p class="hint">Weather channels are a native MPEG-TS loop (Star fonts and screens). No Chromium. The look below switches live WeatherStar 4000 channels to 3000. A WeatherStar3000 preset channel always uses 3000. Location can be a US ZIP, a city, or latitude,longitude.</p>
                     <div id="weather-renderer-status" class="status-card"></div>
                     <label class="field">
                         <span>WeatherStar look</span>
@@ -751,14 +751,15 @@
                             <option value="world">World (Open-Meteo)</option>
                         </select>
                     </label>
-                    <p class="hint">Auto uses NOAA for US locations and Open-Meteo everywhere else. Save here so live weather channels pick it up on the next refresh.</p>
+                    <p class="hint">Auto uses NOAA for US locations and Open-Meteo everywhere else. Save here so the WeatherStar look and source apply to live channels on the next frames.</p>
                     <div class="actions">
                         <button type="button" id="btn-save-weather-source" class="raised button-submit emby-button">Save Weather Source</button>
                     </div>
-                    <p class="hint">Apply a weather preset, then set each channel&apos;s location below. Background music comes from a Jellyfin music library (falls back to Off Air music).</p>
+                    <p class="hint">Apply a weather preset, then set each channel&apos;s location below. Background music comes from a Jellyfin music library, Off Air music, or the built-in WeatherStar tracks.</p>
                 </div>
                 <div class="card section-card">
                     <h3>Background music</h3>
+                    <p class="hint">Jellyfin music if a library is selected and the files are reachable. Otherwise the stream uses the built-in WeatherStar bed tracks.</p>
                     <label class="field">
                         <span>Weather music library</span>
                         <select id="weather-music-library" class="emby-select"></select>

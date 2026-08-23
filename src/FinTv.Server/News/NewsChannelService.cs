@@ -13,7 +13,6 @@ public sealed class NewsChannelService
 {
     private readonly FinTvDbContext _db;
     private readonly IFfmpegLocator _ffmpegLocator;
-    private readonly FfmpegEncodingService _encoding;
     private readonly EbsService _ebs;
     private readonly JellyfinCatalogService _catalog;
     private readonly NewsHeadlineService _headlines;
@@ -27,7 +26,6 @@ public sealed class NewsChannelService
     public NewsChannelService(
         FinTvDbContext db,
         IFfmpegLocator ffmpegLocator,
-        FfmpegEncodingService encoding,
         EbsService ebs,
         JellyfinCatalogService catalog,
         NewsHeadlineService headlines,
@@ -40,7 +38,6 @@ public sealed class NewsChannelService
     {
         _db = db;
         _ffmpegLocator = ffmpegLocator;
-        _encoding = encoding;
         _ebs = ebs;
         _catalog = catalog;
         _headlines = headlines;
@@ -117,12 +114,13 @@ public sealed class NewsChannelService
         if (exit != 0 && !cancellationToken.IsCancellationRequested)
         {
             _logger.LogWarning("News bulletin ASS encode exited {Code}; using drawtext fallback", exit);
+            TryDeleteFile(outputMp4);
             var fallback = BuildDrawtextArgs(width, height, presentation);
             AppendMux(fallback, presentation.Timeline.TotalSeconds, mpegts: false, filePath: outputMp4);
             exit = await RunFfmpegAsync(fallback, output: null, cancellationToken);
         }
 
-        return exit == 0 && File.Exists(outputMp4) && new FileInfo(outputMp4).Length > 1024;
+        return exit == 0 && IsFinishedVideo(outputMp4);
     }
 
     private async Task<NewsPresentation> BuildPresentationAsync(
@@ -203,7 +201,6 @@ public sealed class NewsChannelService
         {
             "-hide_banner", "-loglevel", "warning", "-y"
         };
-        args.AddRange(_encoding.HardwareDeviceArgs);
         args.AddRange(["-f", "lavfi", "-i", $"color=c=0x101010:s={width}x{height}:r=30"]);
         var nextIndex = 1;
         foreach (var image in presentation.ImageWindows)
@@ -273,9 +270,9 @@ public sealed class NewsChannelService
             outroIndex,
             timeline.Outro,
             timeline.SpeechSeconds);
-        var graph = _encoding.AdaptFilterComplexForEncoder($"{video};{audio}", _encoding.Encoder);
+        var graph = $"{video};{audio}";
         args.AddRange(["-filter_complex", graph, "-map", "[vout]", "-map", "[aout]"]);
-        _encoding.AppendVideoEncoder(args, stillImage: presentation.ImageWindows.Count == 0 && !timeline.ShowLogo);
+        args.AddRange(["-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p", "-g", "30", "-bf", "0"]);
         args.AddRange(["-c:a", "aac", "-b:a", "128k", "-ac", "2", "-ar", "48000"]);
         return args;
     }
@@ -425,6 +422,26 @@ public sealed class NewsChannelService
         args.AddRange(["-f", "mp4", "-movflags", "+faststart", filePath!]);
     }
 
+    private static bool IsFinishedVideo(string? path)
+        => !string.IsNullOrWhiteSpace(path)
+           && File.Exists(path)
+           && new FileInfo(path).Length > 1024;
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // leftover staging files are removed by bulletin cleanup
+        }
+    }
+
     private async Task<int> RunFfmpegAsync(IReadOnlyList<string> args, Stream? output, CancellationToken cancellationToken)
     {
         var stderr = new System.Text.StringBuilder();
@@ -486,17 +503,7 @@ public sealed class NewsChannelService
         CancellationToken cancellationToken)
     {
         var result = new string?[articles.Count];
-        var cache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var dir = Path.Combine(workDir, "images");
-        Directory.CreateDirectory(dir);
-        var client = _http.CreateClient();
-        client.Timeout = TimeSpan.FromSeconds(12);
-        if (client.DefaultRequestHeaders.UserAgent.Count == 0)
-        {
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("ChannelFlow-Server/0.0.3 (news)");
-        }
-
-        var saved = 0;
+        var unique = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < articles.Count; i++)
         {
             var url = articles[i].ImageUrl;
@@ -505,18 +512,68 @@ public sealed class NewsChannelService
                 continue;
             }
 
-            if (cache.TryGetValue(url, out var cached))
+            if (!unique.TryGetValue(url, out var indexes))
             {
-                result[i] = cached;
-                continue;
+                unique[url] = indexes = [];
             }
 
+            indexes.Add(i);
+        }
+
+        if (unique.Count == 0)
+        {
+            return result;
+        }
+
+        var dir = Path.Combine(workDir, "images");
+        Directory.CreateDirectory(dir);
+        var client = _http.CreateClient("News");
+        var downloads = unique.Select(async (pair, n) =>
+        {
+            var path = await TryDownloadArticleImageAsync(client, pair.Key, dir, n, cancellationToken);
+            if (path is null)
+            {
+                return;
+            }
+
+            foreach (var index in pair.Value)
+            {
+                result[index] = path;
+            }
+        });
+        await Task.WhenAll(downloads);
+        return result;
+    }
+
+    private async Task<string?> TryDownloadArticleImageAsync(
+        HttpClient client,
+        string url,
+        string dir,
+        int index,
+        CancellationToken cancellationToken)
+    {
+        const int maxAttempts = 2;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(TimeSpan.FromSeconds(20));
+                using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, timeoutCts.Token);
                 if (!response.IsSuccessStatusCode)
                 {
-                    continue;
+                    if (attempt < maxAttempts && ShouldRetryImageStatus(response.StatusCode))
+                    {
+                        _logger.LogDebug(
+                            "News image download got {Status} for {Url}; retrying",
+                            (int)response.StatusCode,
+                            url);
+                        await Task.Delay(TimeSpan.FromMilliseconds(750), cancellationToken);
+                        continue;
+                    }
+
+                    return null;
                 }
 
                 var media = response.Content.Headers.ContentType?.MediaType;
@@ -524,30 +581,58 @@ public sealed class NewsChannelService
                     && (!media.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
                         || media.Contains("svg", StringComparison.OrdinalIgnoreCase)))
                 {
-                    continue;
+                    return null;
                 }
 
-                var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+                var bytes = await response.Content.ReadAsByteArrayAsync(timeoutCts.Token);
                 if (bytes.Length < 32 || bytes.Length > 8_000_000)
                 {
-                    continue;
+                    return null;
                 }
 
                 var ext = GuessImageExtension(media, url);
-                var path = Path.Combine(dir, "story-" + saved.ToString(CultureInfo.InvariantCulture) + ext);
+                var path = Path.Combine(dir, "story-" + index.ToString(CultureInfo.InvariantCulture) + ext);
                 await File.WriteAllBytesAsync(path, bytes, cancellationToken);
-                cache[url] = path;
-                result[i] = path;
-                saved++;
+                if (attempt > 1)
+                {
+                    _logger.LogInformation("News image download succeeded on retry for {Url}", url);
+                }
+
+                return path;
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                if (attempt < maxAttempts)
+                {
+                    _logger.LogDebug("News image download timed out for {Url}; retrying", url);
+                    await Task.Delay(TimeSpan.FromMilliseconds(750), cancellationToken);
+                    continue;
+                }
+
+                _logger.LogWarning("News image download timed out for {Url}; continuing without it", url);
+                return null;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                if (attempt < maxAttempts)
+                {
+                    _logger.LogDebug(ex, "News image download failed for {Url}; retrying", url);
+                    await Task.Delay(TimeSpan.FromMilliseconds(750), cancellationToken);
+                    continue;
+                }
+
                 _logger.LogDebug(ex, "News image download failed for {Url}", url);
+                return null;
             }
         }
 
-        return result;
+        return null;
     }
+
+    private static bool ShouldRetryImageStatus(System.Net.HttpStatusCode status)
+        => (int)status >= 500
+           || status == System.Net.HttpStatusCode.RequestTimeout
+           || status == System.Net.HttpStatusCode.TooManyRequests;
 
     private static string GuessImageExtension(string? mediaType, string url)
     {

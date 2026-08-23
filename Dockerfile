@@ -10,6 +10,7 @@ COPY vendor/ws4kp/server/fonts vendor/ws4kp/server/fonts
 COPY vendor/ws4kp/server/images/backgrounds vendor/ws4kp/server/images/backgrounds
 COPY vendor/ws4kp/server/images/icons/current-conditions vendor/ws4kp/server/images/icons/current-conditions
 COPY vendor/ws4kp/server/images/maps/radar vendor/ws4kp/server/images/maps/radar
+COPY vendor/ws4kp/server/music/default vendor/ws4kp/server/music/default
 COPY vendor/ws3kp/server/fonts vendor/ws3kp/server/fonts
 COPY vendor/ws3kp/server/images/backgrounds vendor/ws3kp/server/images/backgrounds
 RUN python3 scripts/fetch-binarygeek119-logos.py src/FinTv.Server/wwwroot/logos/binarygeek119 \
@@ -58,5 +59,5 @@ ENV CHANNELFLOW_CONFIG=/config \
 EXPOSE 8097
 VOLUME ["/config"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
-    CMD wget -qO- http://127.0.0.1:8097/login >/dev/null || exit 1
+    CMD wget -qO- http://127.0.0.1:8097/health >/dev/null || exit 1
 ENTRYPOINT ["dotnet", "FinTv.Server.dll"]

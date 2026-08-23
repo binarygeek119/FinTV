@@ -101,7 +101,8 @@ public class PluginConfiguration
     public Ws3kpDockerSettings Ws3kp { get; set; } = new();
 
     /// <summary>
-    /// Active WeatherStar engine. Only one of WS4000 or WS3000 runs at a time.
+    /// Live WeatherStar look for MPEG-TS channels that are not a dedicated 3000 preset.
+    /// WeatherStar3000 channels always use 3000 fonts/screens.
     /// </summary>
     public string WeatherStarVariant { get; set; } = "ws4kp";
 
