@@ -6,14 +6,19 @@
   <title>ChannelFlow-Server</title>
   <base href="/">
   <script>window.__CF_BASE__="";</script>
-  <link rel="icon" href="logo.png?v=0a05db77" type="image/png">
+  <link rel="icon" href="favicon.ico?v=d297635d" sizes="any">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png?v=d297635d">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png?v=d297635d">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png?v=d297635d">
+  <link rel="manifest" href="site.webmanifest">
+  <meta name="theme-color" content="#101010">
   <link rel="stylesheet" href="css/legacy-admin.css">
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
   <div id="login-screen" class="auth-screen hidden">
     <form id="login-form" class="auth-card">
-      <img src="logo.png?v=0a05db77" alt="ChannelFlow" class="auth-logo">
+      <img src="logo.png?v=d297635d" alt="ChannelFlow" class="auth-logo">
       <h1 id="auth-title">Sign in</h1>
       <p id="auth-subtitle" class="hidden"></p>
       <label class="field"><span>Username</span><input id="login-user" autocomplete="username" required></label>
@@ -30,7 +35,7 @@
   </div>
   <div id="app-shell" class="hidden">
     <aside class="app-drawer">
-      <a href="channels" class="drawer-brand" data-tab="channels"><img src="logo.png?v=0a05db77" alt="ChannelFlow"></a>
+      <a href="channels" class="drawer-brand" data-tab="channels"><img src="logo.png?v=d297635d" alt="ChannelFlow"></a>
       <nav class="drawer-nav" id="drawer-nav"></nav>
       <button type="button" id="btn-logout" class="drawer-logout">Sign out</button>
     </aside>
@@ -717,7 +722,7 @@
                         </div>
                     </div>
                     <p id="ai-generate-all-status" class="hint hidden"></p>
-                    <p class="hint">Pick a <strong>playout template</strong> to structure dayparts (morning cartoons, primetime, etc.). Channel rules define content scope; fine-tune adds extra instructions. <strong>Generate All</strong> runs in the background, one channel and one day at a time, until each channel has 14 days of playout.</p>
+                    <p class="hint">Pick a <strong>playout template</strong> to structure dayparts (morning cartoons, primetime, etc.). Channel rules define content scope; fine-tune adds extra instructions. <strong>Generate</strong> on a channel (and <strong>Generate All</strong>) writes the lineup and rebuilds Live TV guide playout. Generate All runs in the background, one channel and one day at a time, until each channel has 14 days of playout.</p>
                     <div id="ai-channels-list" class="ai-channels-list"></div>
                 </div>
                 <div id="ai-preview-panel" class="card section-card hidden">
@@ -978,7 +983,7 @@
             <section id="tab-about" class="tab-panel hidden" hidden>
                 <div class="card section-card">
                     <div class="about-hero">
-                        <img src="logo.png?v=0a05db77" alt="ChannelFlow">
+                        <img src="logo.png?v=d297635d" alt="ChannelFlow">
                         <div>
                             <h2>ChannelFlow-Server</h2>
                             <p class="hint">Simulated live TV for Jellyfin. Version, how this instance is running, and the live encoder.</p>

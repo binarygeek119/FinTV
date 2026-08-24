@@ -458,6 +458,7 @@
         const fetchOptions = {
             method: method,
             credentials: 'same-origin',
+            cache: 'no-store',
             headers: {
                 accept: 'application/json'
             }
@@ -2927,6 +2928,9 @@
 
             renderGenerateAllStatus(job);
             if (job.isRunning) {
+                if (isGuideTabVisible()) {
+                    loadGuide({ quiet: true }).catch(() => {});
+                }
                 startGenerateAllPolling();
                 return;
             }
@@ -2948,6 +2952,7 @@
                     );
                 }
                 await loadAi();
+                await refreshGuide();
             }
         } catch (_) {
             startGenerateAllPolling();
@@ -3173,7 +3178,7 @@
                     throw new Error('AI lineup generation finished without a preview.');
                 }
 
-                return status.preview;
+                return status;
             }
 
             await new Promise((resolve) => setTimeout(resolve, 3000));
@@ -3202,9 +3207,15 @@
                 toast('AI lineup generation started…', 'info');
             }
 
-            aiPreview = await waitForChannelGenerate(channelId);
+            const status = await waitForChannelGenerate(channelId);
+            aiPreview = status.preview;
             renderAiPreview();
-            toast('AI lineup generated. Review the preview below.', 'success');
+            if (status.applyError) {
+                toast('AI lineup generated, but the Live TV guide was not rebuilt: ' + status.applyError, 'error');
+            } else {
+                toast('AI lineup generated and Live TV guide rebuilt.', 'success');
+                await refreshGuide();
+            }
         } catch (err) {
             toast(err.message, 'error');
         } finally {
@@ -3220,7 +3231,7 @@
         const templateLabel = aiPreview.playoutTemplateName && aiPreview.playoutTemplateId !== 'none'
             ? ` · Template: ${aiPreview.playoutTemplateName}`
             : '';
-        $('ai-preview-summary').textContent = `AI chose from ${aiPreview.catalogSummary.includedInPrompt} of ${aiPreview.catalogSummary.totalAvailable} tagged items · ${AI_CATALOG_MODES[aiPreview.catalogMode] || 'Mixed'} mode${templateLabel} · builds up to 14 days of playout when applied with rebuild`;
+        $('ai-preview-summary').textContent = `AI chose from ${aiPreview.catalogSummary.includedInPrompt} of ${aiPreview.catalogSummary.totalAvailable} tagged items · ${AI_CATALOG_MODES[aiPreview.catalogMode] || 'Mixed'} mode${templateLabel} · lineup is applied and the Live TV guide is rebuilt (up to 14 days)`;
         const grid = $('ai-preview-grid');
         const occupied = new Array(48).fill(false);
         const blocks = (aiPreview.slots || []).filter((s) => (s.title && s.title !== 'Filter fallback') || s.jellyfinItemId);
@@ -3256,6 +3267,7 @@
             toast('Lineup applied and Live TV guide playout rebuilt.', 'success');
             discardAiPreview();
             await loadAi();
+            await refreshGuide();
         } catch (err) {
             toast(err.message, 'error');
         }
@@ -3300,6 +3312,7 @@
             }
             toast(message, fail ? 'info' : 'success');
             await loadAi();
+            await refreshGuide();
         } catch (err) {
             toast(err.message, 'error');
         } finally {
@@ -5001,13 +5014,29 @@
         }
     }
 
-    async function loadGuide() {
+    function isGuideTabVisible() {
+        const tab = $('tab-guide');
+        return !!(tab && !tab.classList.contains('hidden') && !tab.hidden);
+    }
+
+    function refreshGuide() {
+        if (!isGuideTabVisible()) {
+            return Promise.resolve();
+        }
+
+        return loadGuide();
+    }
+
+    async function loadGuide(options) {
         const root = $('tv-guide');
         if (!root) {
             return;
         }
 
-        root.innerHTML = '<div class="empty-state">Loading guide…</div>';
+        const quiet = !!(options && options.quiet);
+        if (!quiet) {
+            root.innerHTML = '<div class="empty-state">Loading guide…</div>';
+        }
         try {
             const params = new URLSearchParams({ hours: String(GUIDE_HOURS) });
             if (guideFromIso) {
@@ -5015,6 +5044,7 @@
             } else if (guideDateFilter) {
                 params.set('date', guideDateFilter);
             }
+            params.set('_', String(Date.now()));
             guideData = await api('/guide?' + params.toString());
             guideFromIso = guideData.from;
             const dateInput = $('guide-date');

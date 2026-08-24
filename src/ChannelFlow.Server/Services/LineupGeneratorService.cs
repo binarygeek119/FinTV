@@ -50,7 +50,7 @@ public class LineupGeneratorService
         if (mode == PlayoutBuildMode.ReplaceWindow)
         {
             var existing = await _db.PlayoutItems
-                .Where(p => p.ChannelId == channel.Id && p.Start >= startUtc && p.Start < endUtc)
+                .Where(p => p.ChannelId == channel.Id && p.Finish > startUtc && p.Start < endUtc)
                 .ToListAsync(cancellationToken);
 
             _db.PlayoutItems.RemoveRange(existing);

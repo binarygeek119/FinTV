@@ -24,12 +24,14 @@ public sealed class FinTvRuntime
         EbsCustomSlatesFolder = Path.Combine(EbsFolder, "custom");
         WeatherStarFolder = Path.Combine(configDir, "weatherstar");
         NewsFolder = Path.Combine(configDir, "news");
+        LogsFolder = FileLogging.ResolveDirectory(env.ContentRootPath);
         BundledLogosFolder = Path.Combine(env.ContentRootPath, "wwwroot", "logos", "binarygeek119");
         Directory.CreateDirectory(DataFolder);
         Directory.CreateDirectory(LogosFolder);
         Directory.CreateDirectory(EbsCustomSlatesFolder);
         Directory.CreateDirectory(WeatherStarFolder);
         Directory.CreateDirectory(NewsFolder);
+        Directory.CreateDirectory(LogsFolder);
         Current = this;
     }
 
@@ -44,6 +46,8 @@ public sealed class FinTvRuntime
     public string WeatherStarFolder { get; }
 
     public string NewsFolder { get; }
+
+    public string LogsFolder { get; }
 
     public string BundledLogosFolder { get; }
 

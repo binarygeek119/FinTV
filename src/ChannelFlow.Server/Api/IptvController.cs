@@ -54,6 +54,8 @@ public class IptvController : ControllerBase
     {
         var baseUrl = EpgService.GetPublicBaseUrl(Request, _appHost);
         var content = await _epg.GenerateXmlTvBytesAsync(baseUrl, cancellationToken);
+        Response.Headers.CacheControl = "no-cache, no-store, must-revalidate";
+        Response.Headers.Pragma = "no-cache";
         return File(content, "application/xml; charset=utf-8");
     }
 

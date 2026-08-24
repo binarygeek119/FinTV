@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>ChannelFlow</Name>
+  <Repository>ghcr.io/flowmeadow01/channelflow:latest</Repository>
+  <Registry>https://ghcr.io</Registry>
+  <Network>bridge</Network>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/FlowMeadow01/ChannelFlow</Support>
+  <Project>https://github.com/FlowMeadow01/ChannelFlow</Project>
+  <Overview>ChannelFlow-Server — simulated live TV for Jellyfin (channels, EPG, commercials, native WeatherStar, and news). Pair with the ChannelFlow plugin. Mount the same media share Jellyfin uses, then set path remaps in the Web UI. Point POSTGRES_* at PostgreSQL on the same Docker network.</Overview>
+  <Category>MediaApp:Video</Category>
+  <WebUI>http://[IP]:[PORT:8097]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/FlowMeadow01/ChannelFlow/master/unraid/channelflow.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/FlowMeadow01/ChannelFlow/master/logo-plane.png</Icon>
+  <Date>2026-08-24</Date>
+  <Requires>PostgreSQL on the same Docker network as this container and Jellyfin.</Requires>
+  <Config Name="Web UI" Target="8097" Default="8097" Mode="tcp" Description="ChannelFlow Web UI, admin API, M3U/XMLTV, and live streams" Type="Port" Display="always" Required="true" Mask="false">8097</Config>
+  <Config Name="Appdata" Target="/config" Default="/mnt/user/appdata/channelflow" Mode="rw" Description="Config, logos, logs, caches, weather/news working files (CHANNELFLOW_CONFIG). Logs are in logs/channelflow-YYYYMMDD.log" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/channelflow</Config>
+  <Config Name="Media" Target="/media" Default="/mnt/user/media" Mode="rw" Description="Same library share Jellyfin uses; remap Jellyfin prefixes to /media in Settings" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/media</Config>
+  <Config Name="Intel GPU" Target="" Default="" Mode="" Description="Pass /dev/dri for Intel VAAPI encode and decode" Type="Device" Display="always" Required="false" Mask="false">/dev/dri</Config>
+  <Config Name="TZ" Target="TZ" Default="America/Chicago" Mode="" Description="Timezone" Type="Variable" Display="always" Required="false" Mask="false">America/Chicago</Config>
+  <Config Name="Jellyfin URL" Target="JELLYFIN_URL" Default="http://Jellyfin:8096" Mode="" Description="Jellyfin base URL on the shared Docker network" Type="Variable" Display="always" Required="false" Mask="false">http://Jellyfin:8096</Config>
+  <Config Name="Postgres Host" Target="POSTGRES_HOST" Default="postgres" Mode="" Description="PostgreSQL hostname on the Docker network" Type="Variable" Display="always" Required="true" Mask="false">postgres</Config>
+  <Config Name="Postgres Port" Target="POSTGRES_PORT" Default="5432" Mode="" Description="PostgreSQL port" Type="Variable" Display="advanced" Required="false" Mask="false">5432</Config>
+  <Config Name="Postgres Database" Target="POSTGRES_DB" Default="fintv" Mode="" Description="Database name" Type="Variable" Display="advanced" Required="false" Mask="false">fintv</Config>
+  <Config Name="Postgres User" Target="POSTGRES_USER" Default="fintv" Mode="" Description="Database user" Type="Variable" Display="advanced" Required="false" Mask="false">fintv</Config>
+  <Config Name="Postgres Password" Target="POSTGRES_PASSWORD" Default="" Mode="" Description="Database password" Type="Variable" Display="always" Required="true" Mask="true"></Config>
+  <Config Name="FFmpeg path" Target="FFMPEG_PATH" Default="/usr/bin/ffmpeg" Mode="" Description="Path to ffmpeg inside the container" Type="Variable" Display="advanced" Required="false" Mask="false">/usr/bin/ffmpeg</Config>
+  <Config Name="FFmpeg HWAccel" Target="FFMPEG_HWACCEL" Default="vaapi" Mode="" Description="vaapi for Intel Quick Sync, or leave empty for software" Type="Variable" Display="advanced" Required="false" Mask="false">vaapi</Config>
+  <Config Name="FFmpeg VAAPI device" Target="FFMPEG_VAAPI_DEVICE" Default="/dev/dri/renderD128" Mode="" Description="VAAPI render node inside the container" Type="Variable" Display="advanced" Required="false" Mask="false">/dev/dri/renderD128</Config>
+  <Config Name="Public URL" Target="CHANNELFLOW_PUBLIC_URL" Default="" Mode="" Description="Public origin for M3U/XMLTV when reverse-proxied, e.g. https://channelflow.example.duckdns.org" Type="Variable" Display="always" Required="false" Mask="false"></Config>
+  <Config Name="Path base" Target="CHANNELFLOW_PATH_BASE" Default="" Mode="" Description="Only if the UI is under a subpath, e.g. /channelflow" Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+</Container>

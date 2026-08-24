@@ -36,6 +36,7 @@ public class GuideController : ControllerBase
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Guide channels and programmes.</returns>
     [HttpGet]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     public async Task<ActionResult<TvGuidePage>> Get(
         [FromQuery] DateTime? from,
         [FromQuery] string? date,

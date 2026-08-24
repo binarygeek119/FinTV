@@ -9,8 +9,10 @@ using FinTv.Streaming;
 using FinTv.Weather;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
+using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
+FileLogging.Configure(builder);
 
 var connectionString = builder.Configuration.GetConnectionString("ChannelFlow")
     ?? builder.Configuration.GetConnectionString("FinTV")
@@ -170,7 +172,19 @@ app.MapSpaFallback();
 var port = Environment.GetEnvironmentVariable("PORT") ?? "8097";
 app.Urls.Add($"http://0.0.0.0:{port}");
 
-app.Run();
+try
+{
+    app.Run();
+}
+catch (Exception ex)
+{
+    Log.Fatal(ex, "ChannelFlow-Server terminated unexpectedly");
+    throw;
+}
+finally
+{
+    Log.CloseAndFlush();
+}
 
 static string BuildPostgresConnectionString()
 {

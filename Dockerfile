@@ -5,7 +5,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 ca-cert
 COPY global.json ./
 COPY src/ChannelFlow.Server/ src/ChannelFlow.Server/
 COPY scripts/ scripts/
+COPY logo.png logo-plane.png ./
+COPY favicon_io/ favicon_io/
 COPY logo.png src/ChannelFlow.Server/wwwroot/logo.png
+COPY logo-plane.png src/ChannelFlow.Server/wwwroot/logo-plane.png
+COPY favicon_io/favicon.ico favicon_io/favicon-16x16.png favicon_io/favicon-32x32.png favicon_io/apple-touch-icon.png favicon_io/android-chrome-192x192.png favicon_io/android-chrome-512x512.png src/ChannelFlow.Server/wwwroot/
 COPY vendor/ws4kp/server/fonts vendor/ws4kp/server/fonts
 COPY vendor/ws4kp/server/images/backgrounds vendor/ws4kp/server/images/backgrounds
 COPY vendor/ws4kp/server/images/icons/current-conditions vendor/ws4kp/server/images/icons/current-conditions

@@ -49,6 +49,8 @@ public sealed class AiChannelGenerateJobService
             job.IsRunning = true;
             job.Error = null;
             job.Preview = null;
+            job.Applied = false;
+            job.ApplyError = null;
             job.StartedAtUtc = DateTime.UtcNow;
             job.CompletedAtUtc = null;
         }
@@ -60,18 +62,48 @@ public sealed class AiChannelGenerateJobService
             {
                 using var scope = _scopeFactory.CreateScope();
                 var generator = scope.ServiceProvider.GetRequiredService<AiLineupGeneratorService>();
+                var playout = scope.ServiceProvider.GetRequiredService<LineupGeneratorService>();
                 var preview = await generator.GenerateAsync(channelId, providerOverride, CancellationToken.None)
                     .ConfigureAwait(false);
+
+                var applied = false;
+                string? applyError = null;
+                try
+                {
+                    using var gate = await ChannelApplyLocks.AcquireAsync(channelId, CancellationToken.None)
+                        .ConfigureAwait(false);
+                    await generator.ApplyAsync(
+                            channelId,
+                            preview.LineupSlots,
+                            rebuildPlayout: true,
+                            playout,
+                            CancellationToken.None)
+                        .ConfigureAwait(false);
+                    applied = true;
+                }
+                catch (Exception applyEx)
+                {
+                    applyError = applyEx is InvalidOperationException invalid
+                        ? invalid.Message
+                        : $"Playout rebuild failed: {applyEx.Message}";
+                    _logger.LogWarning(
+                        applyEx,
+                        "AI lineup generated for {Channel} but the Live TV guide was not rebuilt",
+                        preview.ChannelName);
+                }
 
                 lock (job)
                 {
                     job.Preview = preview;
+                    job.Applied = applied;
+                    job.ApplyError = applyError;
                     job.CompletedAtUtc = DateTime.UtcNow;
                 }
 
                 _logger.LogInformation(
-                    "AI lineup generation finished for {Channel}",
-                    preview.ChannelName);
+                    "AI lineup generation finished for {Channel} (guide rebuilt={Applied})",
+                    preview.ChannelName,
+                    applied);
             }
             catch (Exception ex)
             {
@@ -105,6 +137,8 @@ public sealed class AiChannelGenerateJobService
                 channelId,
                 isRunning = false,
                 preview = (AiLineupPreviewResult?)null,
+                applied = false,
+                applyError = (string?)null,
                 error = (string?)null
             };
         }
@@ -118,6 +152,8 @@ public sealed class AiChannelGenerateJobService
                 startedAt = job.StartedAtUtc,
                 completedAt = job.CompletedAtUtc,
                 preview = job.Preview,
+                applied = job.Applied,
+                applyError = job.ApplyError,
                 error = job.Error
             };
         }
@@ -128,6 +164,10 @@ public sealed class AiChannelGenerateJobService
         public bool IsRunning { get; set; }
 
         public AiLineupPreviewResult? Preview { get; set; }
+
+        public bool Applied { get; set; }
+
+        public string? ApplyError { get; set; }
 
         public string? Error { get; set; }
 

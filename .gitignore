@@ -59,6 +59,7 @@ Jellyfin.Plugin.FinTV/Assets/tools/yt-dlp/
 release-artifact/
 artifacts/
 .env
+config/logs/
 media/*
 !media/.gitkeep
 
