@@ -35,6 +35,8 @@ public abstract class CatalogMediaRow
 
     public int? Height { get; set; }
 
+    public string? AspectRatio { get; set; }
+
     public string? Path { get; set; }
 
     public Guid JellyfinItemId { get; set; }

@@ -13,6 +13,7 @@ public class LineupGeneratorService
     private readonly CommercialService _commercialService;
     private readonly ChannelService _channelService;
     private readonly HolidayChannelService _holidays;
+    private readonly GuideUpdateTracker _guideUpdates;
 
     public LineupGeneratorService(
         FinTvDbContext db,
@@ -20,7 +21,8 @@ public class LineupGeneratorService
         SmartSelectionService smartSelection,
         CommercialService commercialService,
         ChannelService channelService,
-        HolidayChannelService holidays)
+        HolidayChannelService holidays,
+        GuideUpdateTracker guideUpdates)
     {
         _db = db;
         _lineupService = lineupService;
@@ -28,6 +30,7 @@ public class LineupGeneratorService
         _commercialService = commercialService;
         _channelService = channelService;
         _holidays = holidays;
+        _guideUpdates = guideUpdates;
     }
 
     public async Task BuildPlayoutAsync(
@@ -40,6 +43,7 @@ public class LineupGeneratorService
         if (channel.ContentType is ChannelContentType.Weather or ChannelContentType.News)
         {
             await BuildContinuousPlayoutAsync(channel, startUtc, endUtc, mode, cancellationToken);
+            _guideUpdates.MarkUpdated();
             return;
         }
 
@@ -99,16 +103,17 @@ public class LineupGeneratorService
                         rerunStart = cursor;
                     }
 
-                    if (await TryAddOvernightRerunAsync(
+                    var overnightEnd = await TryAddOvernightRerunAsync(
                         channel,
                         date,
                         tz,
                         rerunStart,
                         rerunEnd,
                         builtPrograms,
-                        cancellationToken).ConfigureAwait(false))
+                        cancellationToken).ConfigureAwait(false);
+                    if (overnightEnd is DateTime paddedOvernightEnd)
                     {
-                        cursor = rerunEnd;
+                        cursor = paddedOvernightEnd;
                         continue;
                     }
 
@@ -182,34 +187,31 @@ public class LineupGeneratorService
             }
 
             var contentStart = slotStart;
-            var maxBlockDuration = blockEnd - contentStart;
-            var contentEnd = blockEnd;
-            if (picked.Duration > TimeSpan.Zero && picked.Duration < maxBlockDuration)
-            {
-                contentEnd = contentStart.Add(picked.Duration);
-            }
+            var contentEnd = picked.Duration > TimeSpan.Zero
+                ? contentStart.Add(picked.Duration)
+                : blockEnd;
+            var padUntil = ResolveSlotPadEnd(contentEnd, blockEnd, tz);
 
             if (channel.ContentType == ChannelContentType.Music && picked.JellyfinItemId.HasValue)
             {
                 await AddMusicPlayoutItemAsync(channel, picked, contentStart, contentEnd, cancellationToken);
+                await _commercialService.PadToSlotAsync(channel, contentEnd, padUntil, cancellationToken);
             }
             else
             {
-                var program = new PlayoutItem
+                var scheduled = await _commercialService.ScheduleProgramWithBreaksAsync(
+                    channel,
+                    picked,
+                    contentStart,
+                    padUntil,
+                    cancellationToken);
+                builtPrograms.AddRange(scheduled.ProgramItems);
+                padUntil = ResolveSlotPadEnd(scheduled.TimelineEnd, blockEnd, tz);
+                if (padUntil > scheduled.TimelineEnd)
                 {
-                    ChannelId = channel.Id,
-                    JellyfinItemId = picked.JellyfinItemId,
-                    Start = contentStart,
-                    Finish = contentEnd,
-                    Title = picked.Title,
-                    IsVirtual = picked.IsVirtual,
-                    VirtualSource = picked.VirtualSource
-                };
-                _db.PlayoutItems.Add(program);
-                builtPrograms.Add(program);
+                    await _commercialService.PadToSlotAsync(channel, scheduled.TimelineEnd, padUntil, cancellationToken);
+                }
             }
-
-            await _commercialService.InsertCommercialsAsync(channel, picked, contentStart, contentEnd, cancellationToken, blockEnd);
 
             _db.PlayoutHistory.Add(new PlayoutHistoryEntry
             {
@@ -219,7 +221,7 @@ public class LineupGeneratorService
                 Title = picked.Title
             });
 
-            cursor = blockEnd;
+            cursor = padUntil;
         }
 
         await _channelService.SaveAnchorAsync(channel.Id, anchor, cancellationToken);
@@ -229,6 +231,7 @@ public class LineupGeneratorService
                 setters => setters.SetProperty(c => c.LastPlayoutBuiltAt, DateTime.UtcNow),
                 cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
+        _guideUpdates.MarkUpdated();
     }
 
     private static bool IsSlotConsumedByEarlierSpan(IReadOnlyList<LineupSlot> slots, int slotIndex)
@@ -412,6 +415,8 @@ public class LineupGeneratorService
             fillStart = fillEnd;
             packed++;
         }
+
+        await _commercialService.PadToSlotAsync(channel, fillStart, blockEnd, cancellationToken);
     }
 
     private async Task PackMusicVideoBlockAsync(
@@ -459,6 +464,8 @@ public class LineupGeneratorService
             fillStart = fillEnd;
             packed++;
         }
+
+        await _commercialService.PadToSlotAsync(channel, fillStart, blockEnd, cancellationToken);
     }
 
     private async Task RewindEpisodeCursorsAsync(
@@ -510,7 +517,13 @@ public class LineupGeneratorService
         }
     }
 
-    private async Task<bool> TryAddOvernightRerunAsync(
+    private static DateTime ResolveSlotPadEnd(DateTime contentEnd, DateTime blockEnd, TimeZoneInfo tz)
+    {
+        var padUntil = ScheduleTimeZoneHelper.CeilToHalfHourUtc(contentEnd, tz);
+        return padUntil > blockEnd ? padUntil : blockEnd;
+    }
+
+    private async Task<DateTime?> TryAddOvernightRerunAsync(
         Channel channel,
         DateOnly localDate,
         TimeZoneInfo tz,
@@ -523,7 +536,7 @@ public class LineupGeneratorService
         var pool = await LoadRerunPoolAsync(channel.Id, previousDate, tz, builtPrograms, cancellationToken);
         if (pool.Count == 0)
         {
-            return false;
+            return null;
         }
 
         var alreadyUsed = builtPrograms
@@ -531,29 +544,35 @@ public class LineupGeneratorService
             .Select(p => p.JellyfinItemId)
             .ToHashSet();
         var pick = pool.FirstOrDefault(p => !alreadyUsed.Contains(p.JellyfinItemId)) ?? pool[0];
-        var duration = pick.Finish - pick.Start;
+        var duration = pick.OutPoint > TimeSpan.Zero
+            ? pick.OutPoint
+            : pick.Finish - pick.Start;
         if (duration <= TimeSpan.Zero)
         {
             duration = TimeSpan.FromMinutes(30);
         }
 
         var contentEnd = slotStart.Add(duration);
-        if (contentEnd > blockEnd)
+        var padUntil = ResolveSlotPadEnd(contentEnd, blockEnd, tz);
+        var scheduled = await _commercialService.ScheduleProgramWithBreaksAsync(
+            channel,
+            new ResolvedCandidate
+            {
+                JellyfinItemId = pick.JellyfinItemId,
+                Title = pick.Title,
+                Duration = duration
+            },
+            slotStart,
+            padUntil,
+            cancellationToken);
+        builtPrograms.AddRange(scheduled.ProgramItems);
+        padUntil = ResolveSlotPadEnd(scheduled.TimelineEnd, blockEnd, tz);
+        if (padUntil > scheduled.TimelineEnd)
         {
-            contentEnd = blockEnd;
+            await _commercialService.PadToSlotAsync(channel, scheduled.TimelineEnd, padUntil, cancellationToken);
         }
 
-        var rerun = new PlayoutItem
-        {
-            ChannelId = channel.Id,
-            JellyfinItemId = pick.JellyfinItemId,
-            Start = slotStart,
-            Finish = contentEnd,
-            Title = pick.Title
-        };
-        _db.PlayoutItems.Add(rerun);
-        builtPrograms.Add(rerun);
-        return true;
+        return padUntil;
     }
 
     private async Task<List<PlayoutItem>> LoadRerunPoolAsync(
@@ -588,8 +607,9 @@ public class LineupGeneratorService
         => !string.Equals(item.GuideGroup, "commercial", StringComparison.OrdinalIgnoreCase)
             && !item.IsVirtual
             && item.JellyfinItemId.HasValue
-            && (item.Finish - item.Start) <= TimeSpan.FromMinutes(45)
-            && (item.Finish - item.Start) >= TimeSpan.FromMinutes(5);
+            && item.InPoint == TimeSpan.Zero
+            && (item.OutPoint > TimeSpan.Zero ? item.OutPoint : item.Finish - item.Start) <= TimeSpan.FromMinutes(45)
+            && (item.OutPoint > TimeSpan.Zero ? item.OutPoint : item.Finish - item.Start) >= TimeSpan.FromMinutes(5);
 
     private static List<PlayoutItem> RankRerunSources(List<PlayoutItem> items, TimeZoneInfo tz)
         => items

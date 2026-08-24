@@ -52,6 +52,8 @@ public class DatabaseInitializer : IHostedService
                 Name = "Default",
                 BreakMode = Domain.CommercialBreakMode.ChaptersThenTimer,
                 TimerIntervalMinutes = 12,
+                PreRollCount = 2,
+                MidRollCount = 2,
                 PostRollCount = 2
             });
             await db.SaveChangesAsync(cancellationToken);
@@ -238,6 +240,7 @@ public class DatabaseInitializer : IHostedService
             "AudioCodec" text NULL,
             "Width" integer NULL,
             "Height" integer NULL,
+            "AspectRatio" text NULL,
             "Path" text NULL,
             "JellyfinItemId" uuid NOT NULL,
             "ImdbId" text NULL,
@@ -304,6 +307,7 @@ public class DatabaseInitializer : IHostedService
             {
                 $"""ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS "IsMissing" boolean NOT NULL DEFAULT FALSE""",
                 $"""ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS "MissingSince" timestamp with time zone NULL""",
+                $"""ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS "AspectRatio" text NULL""",
                 $"""CREATE INDEX IF NOT EXISTS "IX_{table}_IsMissing" ON "{table}" ("IsMissing")"""
             };
 

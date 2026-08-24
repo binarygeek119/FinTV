@@ -196,6 +196,7 @@ public sealed class CatalogTypedStore
         row.AudioCodec = item.AudioCodec;
         row.Width = item.Width;
         row.Height = item.Height;
+        row.AspectRatio = item.AspectRatio;
         row.Path = item.Path;
         row.JellyfinItemId = item.Id;
         row.ImdbId = FindProvider(providers, "imdb", "imdbid");

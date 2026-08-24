@@ -153,7 +153,7 @@ public class EpgService
             {
                 var item = ordered[index];
                 var finish = AsUtc(item.Finish);
-                var padded = CeilToHalfHourUtc(finish, tz);
+                var padded = ScheduleTimeZoneHelper.CeilToHalfHourUtc(finish, tz);
                 if (index + 1 < ordered.Count)
                 {
                     var nextStart = AsUtc(ordered[index + 1].Start);
@@ -169,22 +169,6 @@ public class EpgService
                 }
             }
         }
-    }
-
-    private static DateTime CeilToHalfHourUtc(DateTime utc, TimeZoneInfo tz)
-    {
-        utc = AsUtc(utc);
-        var local = TimeZoneInfo.ConvertTimeFromUtc(utc, tz);
-        if (local.Second == 0 && local.Millisecond == 0 && (local.Minute == 0 || local.Minute == 30))
-        {
-            return utc;
-        }
-
-        var dayStart = new DateTime(local.Year, local.Month, local.Day, 0, 0, 0, DateTimeKind.Unspecified);
-        var elapsedMinutes = (int)Math.Floor((local - dayStart).TotalMinutes);
-        var ceiledMinutes = ((elapsedMinutes / 30) + 1) * 30;
-        var ceiledLocal = DateTime.SpecifyKind(dayStart.AddMinutes(ceiledMinutes), DateTimeKind.Unspecified);
-        return TimeZoneInfo.ConvertTimeToUtc(ceiledLocal, tz);
     }
 
     private async Task<XDocument> BuildXmlTvDocumentAsync(string baseUrl, CancellationToken cancellationToken)

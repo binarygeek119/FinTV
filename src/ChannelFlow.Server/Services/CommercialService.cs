@@ -28,11 +28,101 @@ public class CommercialService
         CancellationToken cancellationToken,
         DateTime? slotEnd = null)
     {
-        if (content.JellyfinItemId is null)
+        await FillSlotPaddingAsync(channel, preset: null, contentEnd, slotEnd, cancellationToken);
+        _ = content;
+        _ = contentStart;
+    }
+
+    public Task PadToSlotAsync(
+        Channel channel,
+        DateTime from,
+        DateTime until,
+        CancellationToken cancellationToken)
+        => FillSlotPaddingAsync(channel, preset: null, from, until, cancellationToken);
+
+    /// <summary>
+    /// Lays out a show/movie with start commercials, chapter mid-breaks, and end-of-slot padding.
+    /// Mid-breaks take clock time (the program is split at chapters) so they help fill the timeslot.
+    /// </summary>
+    public async Task<ScheduledProgramResult> ScheduleProgramWithBreaksAsync(
+        Channel channel,
+        ResolvedCandidate content,
+        DateTime start,
+        DateTime preferredSlotEnd,
+        CancellationToken cancellationToken)
+    {
+        var preset = await ResolvePresetAsync(channel, cancellationToken);
+        var duration = content.Duration > TimeSpan.Zero
+            ? content.Duration
+            : (preferredSlotEnd > start ? preferredSlotEnd - start : TimeSpan.FromMinutes(30));
+        var midBreaks = GetMidBreakOffsets(content.JellyfinItemId, preset, duration);
+        var preCount = preset is null
+            ? 0
+            : (preset.PreRollCount > 0 ? preset.PreRollCount : Math.Max(1, preset.PostRollCount));
+        var midCount = preset is null
+            ? 0
+            : (preset.MidRollCount > 0 ? preset.MidRollCount : Math.Max(1, preset.PostRollCount));
+
+        var cursor = start;
+        var programs = new List<PlayoutItem>();
+
+        if (preCount > 0)
         {
-            return;
+            cursor = await AddCommercialBreakAsync(
+                channel,
+                cursor,
+                preCount,
+                FillerKind.PreRoll,
+                cancellationToken);
         }
 
+        var segmentStart = TimeSpan.Zero;
+        foreach (var breakOffset in midBreaks)
+        {
+            if (breakOffset <= segmentStart || breakOffset >= duration)
+            {
+                continue;
+            }
+
+            var length = breakOffset - segmentStart;
+            programs.Add(AddProgramSegment(channel, content, cursor, segmentStart, length, duration));
+            cursor = cursor.Add(length);
+            segmentStart = breakOffset;
+
+            if (midCount > 0)
+            {
+                cursor = await AddCommercialBreakAsync(
+                    channel,
+                    cursor,
+                    midCount,
+                    FillerKind.MidRoll,
+                    cancellationToken);
+            }
+        }
+
+        var remaining = duration - segmentStart;
+        if (remaining > TimeSpan.FromSeconds(1))
+        {
+            programs.Add(AddProgramSegment(channel, content, cursor, segmentStart, remaining, duration));
+            cursor = cursor.Add(remaining);
+        }
+
+        var padUntil = preferredSlotEnd > cursor ? preferredSlotEnd : cursor;
+        await FillSlotPaddingAsync(channel, preset, cursor, padUntil, cancellationToken);
+        if (padUntil > cursor)
+        {
+            cursor = padUntil;
+        }
+
+        return new ScheduledProgramResult
+        {
+            TimelineEnd = cursor,
+            ProgramItems = programs
+        };
+    }
+
+    private async Task<CommercialPreset?> ResolvePresetAsync(Channel channel, CancellationToken cancellationToken)
+    {
         CommercialPreset? preset = null;
         if (channel.CommercialPresetId is Guid presetId)
         {
@@ -41,42 +131,13 @@ public class CommercialService
                 .FirstOrDefaultAsync(p => p.Id == presetId, cancellationToken);
         }
 
-        preset ??= await _db.CommercialPresets.AsNoTracking().OrderBy(p => p.Name).FirstOrDefaultAsync(cancellationToken);
-        if (preset is null)
-        {
-            return;
-        }
-
-        var item = _libraryManager.GetItemById(content.JellyfinItemId.Value);
-        if (item is null)
-        {
-            return;
-        }
-
-        var breakPoints = GetBreakPoints(item, preset, contentStart, contentEnd);
-        foreach (var point in breakPoints)
-        {
-            var commercials = await PickCommercialsAsync(channel, preset.PostRollCount > 0 ? preset.PostRollCount : 1, cancellationToken);
-            var cursor = point;
-            foreach (var commercial in commercials)
-            {
-                var end = cursor.Add(commercial.Duration);
-                if (end > contentEnd)
-                {
-                    break;
-                }
-
-                AddCommercialPlayoutItem(channel.Id, commercial, cursor, end);
-                cursor = end;
-            }
-        }
-
-        await FillSlotPaddingAsync(channel, preset, contentEnd, slotEnd, cancellationToken);
+        return preset
+            ?? await _db.CommercialPresets.AsNoTracking().OrderBy(p => p.Name).FirstOrDefaultAsync(cancellationToken);
     }
 
     private async Task FillSlotPaddingAsync(
         Channel channel,
-        CommercialPreset preset,
+        CommercialPreset? preset,
         DateTime from,
         DateTime? slotEnd,
         CancellationToken cancellationToken)
@@ -86,49 +147,64 @@ public class CommercialService
             return;
         }
 
-        var perBreak = preset.PostRollCount > 0 ? preset.PostRollCount : 1;
+        preset ??= await ResolvePresetAsync(channel, cancellationToken);
+        if (preset is null)
+        {
+            return;
+        }
+
+        var pool = await PickCommercialsAsync(channel, 32, cancellationToken);
+        if (pool.Count == 0)
+        {
+            return;
+        }
+
         var cursor = from;
         var guard = 0;
-        while (cursor < until && guard++ < 48)
+        while (cursor < until && guard++ < 64)
         {
-            if (until - cursor < TimeSpan.FromSeconds(5))
+            var remaining = until - cursor;
+            if (remaining < TimeSpan.FromSeconds(3))
             {
                 break;
             }
 
-            var commercials = await PickCommercialsAsync(channel, perBreak, cancellationToken);
-            if (commercials.Count == 0)
+            var fitting = pool
+                .Where(commercial => commercial.Duration > TimeSpan.Zero && commercial.Duration <= remaining)
+                .ToList();
+            Commercial pick;
+            DateTime end;
+            if (fitting.Count > 0)
             {
-                break;
+                pick = fitting[Random.Shared.Next(fitting.Count)];
+                end = cursor.Add(pick.Duration);
             }
-
-            var placed = false;
-            foreach (var commercial in commercials)
+            else
             {
-                if (commercial.Duration <= TimeSpan.Zero)
+                pick = pool
+                    .Where(commercial => commercial.Duration > TimeSpan.Zero)
+                    .OrderBy(commercial => commercial.Duration)
+                    .FirstOrDefault()
+                    ?? pool[0];
+                if (pick.Duration <= TimeSpan.Zero)
                 {
-                    continue;
+                    break;
                 }
 
-                var end = cursor.Add(commercial.Duration);
-                if (end > until)
-                {
-                    continue;
-                }
-
-                AddCommercialPlayoutItem(channel.Id, commercial, cursor, end);
-                cursor = end;
-                placed = true;
+                end = until;
             }
 
-            if (!placed)
-            {
-                break;
-            }
+            AddCommercialPlayoutItem(channel.Id, pick, cursor, end, FillerKind.PostRoll);
+            cursor = end;
         }
     }
 
-    private void AddCommercialPlayoutItem(Guid channelId, Commercial commercial, DateTime start, DateTime end)
+    private void AddCommercialPlayoutItem(
+        Guid channelId,
+        Commercial commercial,
+        DateTime start,
+        DateTime end,
+        FillerKind fillerKind)
     {
         _db.PlayoutItems.Add(new PlayoutItem
         {
@@ -140,7 +216,7 @@ public class CommercialService
             Start = start,
             Finish = end,
             Title = commercial.Title,
-            FillerKind = FillerKind.PostRoll,
+            FillerKind = fillerKind,
             GuideGroup = "commercial"
         });
     }
@@ -255,40 +331,135 @@ public class CommercialService
             .ToListAsync(cancellationToken);
     }
 
-    private List<DateTime> GetBreakPoints(BaseItem item, CommercialPreset preset, DateTime contentStart, DateTime contentEnd)
+    private async Task<DateTime> AddCommercialBreakAsync(
+        Channel channel,
+        DateTime start,
+        int count,
+        FillerKind fillerKind,
+        CancellationToken cancellationToken)
     {
-        var points = new List<DateTime>();
-
-        if (preset.BreakMode is CommercialBreakMode.ChaptersThenTimer or CommercialBreakMode.ChaptersOnly)
+        var commercials = await PickCommercialsAsync(channel, Math.Max(1, count), cancellationToken);
+        var cursor = start;
+        foreach (var commercial in commercials)
         {
-            var chapters = _chapterManager.GetChapters(item.Id);
-            foreach (var chapter in chapters.Where(c => !string.IsNullOrWhiteSpace(c.Name)
-                && c.Name.Contains("commercial", StringComparison.OrdinalIgnoreCase)))
+            if (commercial.Duration <= TimeSpan.Zero)
             {
-                var chapterTime = contentStart.AddTicks(chapter.StartPositionTicks);
-                if (chapterTime > contentStart && chapterTime < contentEnd)
+                continue;
+            }
+
+            var end = cursor.Add(commercial.Duration);
+            AddCommercialPlayoutItem(channel.Id, commercial, cursor, end, fillerKind);
+            cursor = end;
+        }
+
+        return cursor;
+    }
+
+    private PlayoutItem AddProgramSegment(
+        Channel channel,
+        ResolvedCandidate content,
+        DateTime start,
+        TimeSpan inPoint,
+        TimeSpan length,
+        TimeSpan fullDuration)
+    {
+        var item = new PlayoutItem
+        {
+            ChannelId = channel.Id,
+            JellyfinItemId = content.JellyfinItemId,
+            Start = start,
+            Finish = start.Add(length),
+            InPoint = inPoint,
+            OutPoint = fullDuration,
+            Title = content.Title,
+            IsVirtual = content.IsVirtual,
+            VirtualSource = content.VirtualSource
+        };
+        _db.PlayoutItems.Add(item);
+        return item;
+    }
+
+    private List<TimeSpan> GetMidBreakOffsets(Guid? jellyfinItemId, CommercialPreset? preset, TimeSpan duration)
+    {
+        if (preset is null || duration < TimeSpan.FromMinutes(8))
+        {
+            return [];
+        }
+
+        var offsets = new List<TimeSpan>();
+        var minLead = TimeSpan.FromSeconds(25);
+        var minTail = TimeSpan.FromSeconds(25);
+        var minGap = TimeSpan.FromMinutes(4);
+
+        if (preset.BreakMode is CommercialBreakMode.ChaptersThenTimer or CommercialBreakMode.ChaptersOnly
+            && jellyfinItemId is Guid itemId)
+        {
+            var chapters = _chapterManager.GetChapters(itemId)
+                .OrderBy(chapter => chapter.StartPositionTicks)
+                .ToList();
+            var namedCommercials = chapters
+                .Where(chapter => IsCommercialChapterName(chapter.Name))
+                .ToList();
+            var source = namedCommercials.Count > 0 ? namedCommercials : chapters;
+
+            foreach (var chapter in source)
+            {
+                var offset = TimeSpan.FromTicks(Math.Max(0, chapter.StartPositionTicks));
+                if (offset < minLead || offset > duration - minTail)
                 {
-                    points.Add(chapterTime);
+                    continue;
+                }
+
+                if (offsets.Count > 0 && offset - offsets[^1] < minGap)
+                {
+                    continue;
+                }
+
+                offsets.Add(offset);
+                if (offsets.Count >= 8)
+                {
+                    break;
                 }
             }
         }
 
-        if (points.Count == 0 && preset.BreakMode is CommercialBreakMode.ChaptersThenTimer or CommercialBreakMode.TimerOnly)
+        if (offsets.Count == 0 && preset.BreakMode is CommercialBreakMode.ChaptersThenTimer or CommercialBreakMode.TimerOnly)
         {
             var interval = TimeSpan.FromMinutes(Math.Max(1, preset.TimerIntervalMinutes));
-            var cursor = contentStart.Add(interval);
-            while (cursor < contentEnd)
+            var cursor = interval;
+            while (cursor < duration - minTail && offsets.Count < 8)
             {
-                points.Add(cursor);
-                cursor = cursor.Add(interval);
+                if (cursor >= minLead)
+                {
+                    offsets.Add(cursor);
+                }
+
+                cursor += interval;
             }
         }
 
-        if (preset.PreRollCount > 0)
+        return offsets;
+    }
+
+    private static bool IsCommercialChapterName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
         {
-            points.Insert(0, contentStart);
+            return false;
         }
 
-        return points.Distinct().OrderBy(p => p).ToList();
+        return name.Contains("commercial", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("mid-break", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("midbreak", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("ad break", StringComparison.OrdinalIgnoreCase)
+            || (name.Contains("break", StringComparison.OrdinalIgnoreCase)
+                && !name.Contains("breakfast", StringComparison.OrdinalIgnoreCase));
     }
+}
+
+public sealed class ScheduledProgramResult
+{
+    public DateTime TimelineEnd { get; init; }
+
+    public List<PlayoutItem> ProgramItems { get; init; } = [];
 }

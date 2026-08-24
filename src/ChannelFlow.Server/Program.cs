@@ -110,6 +110,7 @@ builder.Services.AddSingleton<AiChannelGenerateJobService>();
 builder.Services.AddSingleton<AiLineupAutoApplyTask>();
 builder.Services.AddSingleton<CatalogCleanupTask>();
 builder.Services.AddSingleton<PlayoutBuilderService>();
+builder.Services.AddSingleton<GuideUpdateTracker>();
 builder.Services.AddSingleton<BlackframeChapterTask>();
 
 builder.Services.AddScoped<PathRemapService>();

@@ -198,6 +198,17 @@ public class PluginBridgeController : ControllerBase
         });
     }
 
+    [HttpGet("guide-status")]
+    public ActionResult<object> GuideStatus([FromServices] GuideUpdateTracker guideUpdates)
+    {
+        var status = guideUpdates.Snapshot();
+        return Ok(new
+        {
+            revision = status.Revision,
+            updatedAt = status.UpdatedAt
+        });
+    }
+
     internal static List<Configuration.JellyfinLibraryInfo> SaveReportedLibraries(
         IEnumerable<JellyfinLibraryDto>? libraries)
     {
@@ -539,6 +550,8 @@ public class CatalogItemDto
     public int? Width { get; set; }
 
     public int? Height { get; set; }
+
+    public string? AspectRatio { get; set; }
 
     public string? AlbumArtist { get; set; }
 }

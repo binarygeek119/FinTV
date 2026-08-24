@@ -41,6 +41,31 @@ public static class ScheduleTimeZoneHelper
         return Aliases.TryGetValue(trimmed, out var alias) ? alias : trimmed;
     }
 
+    /// <summary>
+    /// Rounds a UTC instant up to the next 30-minute clock time in the schedule time zone.
+    /// Times already on :00 or :30 are unchanged.
+    /// </summary>
+    public static DateTime CeilToHalfHourUtc(DateTime utc, TimeZoneInfo? timeZone = null)
+    {
+        timeZone ??= ResolveScheduleTimeZone();
+        if (utc.Kind != DateTimeKind.Utc)
+        {
+            utc = DateTime.SpecifyKind(utc, DateTimeKind.Utc);
+        }
+
+        var local = TimeZoneInfo.ConvertTimeFromUtc(utc, timeZone);
+        if (local.Second == 0 && local.Millisecond == 0 && (local.Minute == 0 || local.Minute == 30))
+        {
+            return utc;
+        }
+
+        var dayStart = new DateTime(local.Year, local.Month, local.Day, 0, 0, 0, DateTimeKind.Unspecified);
+        var elapsedMinutes = (int)Math.Floor((local - dayStart).TotalMinutes);
+        var ceiledMinutes = ((elapsedMinutes / 30) + 1) * 30;
+        var ceiledLocal = DateTime.SpecifyKind(dayStart.AddMinutes(ceiledMinutes), DateTimeKind.Unspecified);
+        return TimeZoneInfo.ConvertTimeToUtc(ceiledLocal, timeZone);
+    }
+
     public static TimeZoneInfo ResolveScheduleTimeZone(ILogger? logger = null)
     {
         var configured = FinTvRuntime.Current?.Configuration.ScheduleTimeZone;
