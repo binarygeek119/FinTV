@@ -9,7 +9,8 @@ internal sealed record NewsStoryBeat(
     string Title,
     string Body,
     string? ImagePath,
-    bool ShowOnScreen);
+    bool ShowOnScreen,
+    bool AnchorPortrait = false);
 
 internal sealed record NewsImageWindow(string Path, double Start, double End);
 
@@ -52,7 +53,7 @@ public static class NewsAssBuilder
                 events.Append("Dialogue: 1,")
                     .Append(start).Append(',').Append(stop)
                     .Append(",Caption,,0,0,0,,")
-                    .Append(BuildCaptionCrawl(caption, playX, playY))
+                    .Append(BuildCaptionCrawl(caption, playX, playY, beat.EndSeconds - beat.StartSeconds))
                     .AppendLine();
             }
         }
@@ -78,14 +79,14 @@ public static class NewsAssBuilder
         sb.AppendLine("[Script Info]");
         sb.AppendLine("Title: FlowWire News");
         sb.AppendLine("ScriptType: v4.00+");
-        sb.AppendLine("WrapStyle: 0");
+        sb.AppendLine("WrapStyle: 2");
         sb.AppendLine("PlayResX: " + playX);
         sb.AppendLine("PlayResY: " + playY);
         sb.AppendLine();
         sb.AppendLine("[V4+ Styles]");
         sb.AppendLine("Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding");
         sb.AppendLine("Style: Headline, Liberation Sans, 32, &H00FFFFFF, &H000000FF, &H00000000, &H80000000, 0, 0, 0, 0, 100, 100, 0, 0, 1, 2, 0, 2, 36, 36, 108, 1");
-        sb.AppendLine("Style: Caption, Liberation Sans, 24, &H00FFFFFF, &H000000FF, &H00000000, &H80000000, 0, 0, 0, 0, 100, 100, 0, 0, 1, 2, 0, 7, 0, 0, 0, 1");
+        sb.AppendLine("Style: Caption, Liberation Sans, 40, &H00FFFFFF, &H000000FF, &H00000000, &H80000000, 0, 0, 0, 0, 100, 100, 0, 0, 1, 2, 0, 4, 0, 0, 0, 1");
         sb.AppendLine("Style: Presenter, Liberation Sans, 18, &H00FFFFFF, &H000000FF, &H00000000, &H80000000, 0, 0, 0, 0, 100, 100, 0, 0, 1, 2, 0, 9, 24, 24, 16, 1");
         sb.AppendLine();
         sb.AppendLine("[Events]");
@@ -105,14 +106,43 @@ public static class NewsAssBuilder
             : string.Join(' ', text.Split([' ', '\r', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries));
     }
 
-    private static string BuildCaptionCrawl(string text, int playX, int playY)
+    private static string BuildCaptionCrawl(string text, int playX, int playY, double durationSeconds)
     {
         var line = Escape(text);
-        var width = Math.Max(playX, line.Length * 14);
-        var y = Math.Max(24, playY - 54);
+        const int speedPxPerSec = 70;
+        const int pxPerChar = 24;
+        var y = Math.Max(40, playY - 44);
         var x1 = playX + 48;
-        var x2 = -width;
-        return $"{{\\move({x1},{y},{x2},{y})}}" + line;
+        var textWidth = Math.Max(playX, line.Length * pxPerChar);
+        var fullDistance = x1 + textWidth;
+        var available = Math.Max(durationSeconds, 0.5);
+        var neededSeconds = fullDistance / (double)speedPxPerSec;
+        int x2;
+        string move;
+        if (neededSeconds <= available)
+        {
+            x2 = -textWidth;
+            var endMs = (int)Math.Round(neededSeconds * 1000);
+            move = string.Format(
+                CultureInfo.InvariantCulture,
+                "{{\\q2\\move({0},{1},{2},{1},0,{3})}}",
+                x1,
+                y,
+                x2,
+                endMs);
+        }
+        else
+        {
+            x2 = (int)Math.Round(x1 - (speedPxPerSec * available));
+            move = string.Format(
+                CultureInfo.InvariantCulture,
+                "{{\\q2\\move({0},{1},{2},{1})}}",
+                x1,
+                y,
+                x2);
+        }
+
+        return move + line;
     }
 
     private static string Escape(string text)

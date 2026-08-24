@@ -90,11 +90,13 @@ public class LogoSetService
         var flowWireLogo = Path.Combine(storagePath, "News", "FlowWire.png");
         var flowWireIntro = Path.Combine(storagePath, "News", "FlowWire-intro.mp3");
         var flowWireOutro = Path.Combine(storagePath, "News", "FlowWire-outro.mp3");
+        var catherinePortrait = Path.Combine(storagePath, "News", "Catherine_Wolfe.jpg");
 
         if (localCount == 0
             || !File.Exists(flowWireLogo)
             || !File.Exists(flowWireIntro)
-            || !File.Exists(flowWireOutro))
+            || !File.Exists(flowWireOutro)
+            || !File.Exists(catherinePortrait))
         {
             await DownloadBinarygeek119SetFromGitHubAsync(storagePath, cancellationToken);
         }

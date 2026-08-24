@@ -165,11 +165,21 @@ public sealed class NewsChannelService
             outro,
             musicPath,
             HasAudioFile(speechPath) ? speechPath : null,
-            await ResolveNewsLogoPathAsync(channel, cancellationToken));
+            await ResolveNewsLogoPathAsync(channel, cancellationToken),
+            ResolveAnchorPortraitPath());
 
         var imageFiles = await DownloadArticleImagesAsync(articles, workDir, cancellationToken);
-        var beats = BuildSpokenBeats(header, articles, settings, imageFiles, speechWindow, show, timeline.IntroSeconds);
+        var beats = BuildSpokenBeats(
+            header,
+            articles,
+            settings,
+            imageFiles,
+            speechWindow,
+            show,
+            timeline.IntroSeconds,
+            timeline.AnchorPortraitPath);
         var imageWindows = ImageWindows(beats);
+        var storyWindow = StoryWindow(beats, timeline);
         var assPath = Path.Combine(workDir, "news.ass");
         await File.WriteAllTextAsync(
             assPath,
@@ -178,8 +188,8 @@ public sealed class NewsChannelService
                 height,
                 beats,
                 settings.AiRewrite ? NewsShowWriter.AnchorName : null,
-                timeline.IntroSeconds,
-                timeline.OutroStart),
+                storyWindow.Start,
+                storyWindow.End),
             cancellationToken);
 
         return new NewsPresentation(header, articles, beats, imageWindows, assPath, timeline, workDir);
@@ -188,7 +198,7 @@ public sealed class NewsChannelService
     private List<string> BuildAssEncodeArgs(int width, int height, NewsPresentation presentation)
     {
         var assFilter = NewsAssBuilder.EscapeAssFilterPath(presentation.AssPath);
-        var enable = StoryEnable(presentation.Timeline);
+        var enable = StoryEnable(presentation);
         var filter =
             $"drawbox=x=0:y=ih-176:w=iw:h=80:color=0xe11d48@0.92:t=fill:enable='{enable}'," +
             $"drawbox=x=0:y=ih-88:w=iw:h=88:color=0x111827@0.94:t=fill:enable='{enable}'," +
@@ -202,8 +212,24 @@ public sealed class NewsChannelService
         return BuildEncodeArgs(width, height, presentation, filter);
     }
 
-    private static string StoryEnable(NewsTimeline timeline)
-        => $"gte(t\\,{Fmt(timeline.IntroSeconds)})*lt(t\\,{Fmt(timeline.OutroStart)})";
+    private static string StoryEnable(NewsPresentation presentation)
+    {
+        var window = StoryWindow(presentation.Beats, presentation.Timeline);
+        return $"gte(t\\,{Fmt(window.Start)})*lt(t\\,{Fmt(window.End)})";
+    }
+
+    private static (double Start, double End) StoryWindow(
+        IReadOnlyList<NewsStoryBeat> beats,
+        NewsTimeline timeline)
+    {
+        var stories = beats.Where(beat => beat.ShowOnScreen && !beat.AnchorPortrait).ToList();
+        if (stories.Count == 0)
+        {
+            return (timeline.IntroSeconds, timeline.OutroStart);
+        }
+
+        return (stories[0].StartSeconds, stories[^1].EndSeconds);
+    }
 
     private List<string> BuildEncodeArgs(
         int width,
@@ -230,6 +256,13 @@ public sealed class NewsChannelService
         {
             args.AddRange(["-loop", "1", "-framerate", "30", "-t", clipSeconds, "-i", timeline.LogoPath!]);
             logoIndex = nextIndex++;
+        }
+
+        int? portraitIndex = null;
+        if (timeline.ShowAnchorPortrait)
+        {
+            args.AddRange(["-loop", "1", "-framerate", "30", "-t", clipSeconds, "-i", timeline.AnchorPortraitPath!]);
+            portraitIndex = nextIndex++;
         }
 
         int? bedIndex = null;
@@ -275,6 +308,8 @@ public sealed class NewsChannelService
             presentation.ImageWindows,
             overlayFilter,
             logoIndex,
+            portraitIndex,
+            PortraitEnable(presentation.Beats),
             timeline.IntroSeconds,
             timeline.OutroStart);
         var audio = BuildAudioGraph(
@@ -371,6 +406,8 @@ public sealed class NewsChannelService
         IReadOnlyList<NewsImageWindow> imageWindows,
         string overlayFilter,
         int? logoIndex,
+        int? portraitIndex,
+        string? portraitEnable,
         double introEnd,
         double outroStart)
     {
@@ -404,8 +441,20 @@ public sealed class NewsChannelService
             }
         }
 
+        var afterImages = "[vimg]";
+        if (portraitIndex is int portrait && !string.IsNullOrWhiteSpace(portraitEnable))
+        {
+            var portW = Math.Max(200, (int)(width * 0.82));
+            var portH = Math.Max(160, (int)(height * 0.88));
+            parts.Add(
+                $"[{portrait}:v]scale={portW}:{portH}:force_original_aspect_ratio=decrease:flags=lanczos," +
+                $"format=yuv420p[portv]");
+            parts.Add($"[vimg][portv]overlay=(W-w)/2:(H-h)/2:enable='{portraitEnable}'[vport]");
+            afterImages = "[vport]";
+        }
+
         var afterAss = logoIndex is int ? "[vass]" : "[vout]";
-        parts.Add($"[vimg]{overlayFilter}{afterAss}");
+        parts.Add($"{afterImages}{overlayFilter}{afterAss}");
         if (logoIndex is int logo)
         {
             var logoW = Math.Max(160, (int)(width * 0.72));
@@ -417,6 +466,19 @@ public sealed class NewsChannelService
         }
 
         return string.Join(";", parts);
+    }
+
+    private static string? PortraitEnable(IReadOnlyList<NewsStoryBeat> beats)
+    {
+        var windows = beats.Where(beat => beat.AnchorPortrait).ToList();
+        if (windows.Count == 0)
+        {
+            return null;
+        }
+
+        return string.Join(
+            "+",
+            windows.Select(beat => $"gte(t\\,{Fmt(beat.StartSeconds)})*lt(t\\,{Fmt(beat.EndSeconds)})"));
     }
 
     private static string LogoEnable(double introEnd, double outroStart)
@@ -529,24 +591,25 @@ public sealed class NewsChannelService
         var ticker = SpokenTicker(presentation.Beats, presentation.Articles);
         File.WriteAllText(tickerPath, ticker);
         var tickerFilter = NewsAssBuilder.EscapeAssFilterPath(tickerPath);
-        var storyEnable = StoryEnable(presentation.Timeline);
+        var storyEnable = StoryEnable(presentation);
         var headline = EscapeDraw(FirstHeadline(presentation) ?? presentation.Header);
         var vf =
             $"drawbox=x=0:y=h-176:w=iw:h=80:color=0xe11d48@0.92:t=fill:enable='{storyEnable}'," +
             $"drawtext=text='{headline}':fontcolor=white:fontsize=32:x=(w-text_w)/2:y=h-160:enable='{storyEnable}'," +
             $"drawbox=x=0:y=h-88:w=iw:h=88:color=0x111827@0.94:t=fill:enable='{storyEnable}'," +
-            $"drawtext=textfile='{tickerFilter}':fontcolor=white:fontsize=24:x=w-mod(t*90\\,w+text_w):y=h-58:enable='{storyEnable}'";
+            $"drawtext=textfile='{tickerFilter}':fontcolor=white:fontsize=40:x=w-mod(t*50\\,w+text_w):y=h-64:enable='{storyEnable}'";
 
         return BuildEncodeArgs(width, height, presentation, vf);
     }
 
     private static string? FirstHeadline(NewsPresentation presentation)
-        => presentation.Beats.FirstOrDefault(beat => beat.ShowOnScreen && !string.IsNullOrWhiteSpace(beat.Title))?.Title;
+        => presentation.Beats.FirstOrDefault(beat =>
+            beat.ShowOnScreen && !beat.AnchorPortrait && !string.IsNullOrWhiteSpace(beat.Title))?.Title;
 
     private static string SpokenTicker(IReadOnlyList<NewsStoryBeat> beats, IReadOnlyList<NewsArticle> articles)
     {
         var parts = beats
-            .Where(beat => beat.ShowOnScreen)
+            .Where(beat => beat.ShowOnScreen && !beat.AnchorPortrait)
             .Select(beat => string.IsNullOrWhiteSpace(beat.Body) ? beat.Title : beat.Body)
             .Where(text => !string.IsNullOrWhiteSpace(text))
             .ToList();
@@ -908,6 +971,46 @@ public sealed class NewsChannelService
         return null;
     }
 
+    private static string? ResolveAnchorPortraitPath()
+    {
+        foreach (var dir in GetBumperSearchDirs())
+        {
+            if (!Directory.Exists(dir))
+            {
+                continue;
+            }
+
+            var match = Directory.EnumerateFiles(dir)
+                .FirstOrDefault(path =>
+                    string.Equals(
+                        Path.GetFileNameWithoutExtension(path),
+                        "Catherine_Wolfe",
+                        StringComparison.OrdinalIgnoreCase)
+                    && HasImageFile(path));
+            if (match is not null)
+            {
+                return match;
+            }
+        }
+
+        var runtime = FinTvRuntime.Current;
+        foreach (var root in new[]
+                 {
+                     runtime?.LogosFolder is { Length: > 0 } logos ? Path.Combine(logos, "binarygeek119") : null,
+                     runtime?.BundledLogosFolder
+                 }.Where(path => !string.IsNullOrWhiteSpace(path) && Directory.Exists(path)))
+        {
+            var found = Directory.EnumerateFiles(root!, "Catherine_Wolfe.jpg", SearchOption.AllDirectories)
+                .FirstOrDefault();
+            if (HasImageFile(found))
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
     private static bool HasImageFile(string? path)
         => !string.IsNullOrWhiteSpace(path) && File.Exists(path);
 
@@ -1025,19 +1128,25 @@ public sealed class NewsChannelService
         IReadOnlyList<string?> images,
         int duration,
         NewsShowCopy show,
-        double clockOffset)
+        double clockOffset,
+        string? anchorPortraitPath)
     {
-        var parts = new List<(string Title, string Body, string? Image, bool Show)>();
+        var portrait = HasImageFile(anchorPortraitPath) ? anchorPortraitPath : null;
+        var parts = new List<(string Title, string Body, string? Image, bool Show, bool Anchor, string Weight)>();
         var intro = ResolveIntro(header, settings, show);
         if (!string.IsNullOrWhiteSpace(intro))
         {
-            if (settings.AiRewrite)
+            if (portrait is not null)
             {
-                parts.Add((header, NewsShowWriter.AnchorName, null, settings.ShowHeader));
+                parts.Add((header, intro, portrait, false, true, intro));
+            }
+            else if (settings.AiRewrite)
+            {
+                parts.Add((header, NewsShowWriter.AnchorName, null, settings.ShowHeader, false, intro));
             }
             else
             {
-                parts.Add((intro, "", null, settings.ShowHeader));
+                parts.Add((intro, "", null, settings.ShowHeader, false, intro));
             }
         }
 
@@ -1047,19 +1156,32 @@ public sealed class NewsChannelService
             var body = (settings.AiRewrite || !settings.ReadHeadlinesOnly) && !string.IsNullOrWhiteSpace(article.Summary)
                 ? article.Summary.Trim()
                 : "";
-            var image = i < images.Count ? images[i] : null;
-            parts.Add((article.Title, body, image, true));
+            var image = i < images.Count && HasImageFile(images[i]) ? images[i] : portrait;
+            parts.Add((article.Title, body, image, true, false, article.Title + " " + body));
         }
 
         var outro = ResolveOutro(header, settings, show);
-        parts.Add((settings.AiRewrite ? NewsShowWriter.AnchorName : outro, settings.AiRewrite ? outro : "", null, true));
+        if (portrait is not null)
+        {
+            parts.Add((NewsShowWriter.AnchorName, outro, portrait, false, true, outro));
+        }
+        else
+        {
+            parts.Add((
+                settings.AiRewrite ? NewsShowWriter.AnchorName : outro,
+                settings.AiRewrite ? outro : "",
+                null,
+                true,
+                false,
+                outro));
+        }
 
         if (parts.Count == 0)
         {
             return [new NewsStoryBeat(clockOffset, clockOffset + duration, "FlowWire News", "", null, true)];
         }
 
-        var weights = parts.Select(part => Math.Max(24, (part.Title + " " + part.Body).Length)).ToArray();
+        var weights = parts.Select(part => Math.Max(24, part.Weight.Length)).ToArray();
         var total = (double)weights.Sum();
         var beats = new List<NewsStoryBeat>(parts.Count);
         var t = clockOffset;
@@ -1073,7 +1195,14 @@ public sealed class NewsChannelService
                 end = Math.Min(endAt, start + 1);
             }
 
-            beats.Add(new NewsStoryBeat(start, end, parts[i].Title, parts[i].Body, parts[i].Image, parts[i].Show));
+            beats.Add(new NewsStoryBeat(
+                start,
+                end,
+                parts[i].Title,
+                parts[i].Body,
+                parts[i].Anchor ? null : parts[i].Image,
+                parts[i].Show,
+                parts[i].Anchor));
             t = end;
         }
 
@@ -1082,7 +1211,7 @@ public sealed class NewsChannelService
 
     private static List<NewsImageWindow> ImageWindows(IReadOnlyList<NewsStoryBeat> beats)
         => beats
-            .Where(beat => !string.IsNullOrWhiteSpace(beat.ImagePath))
+            .Where(beat => !beat.AnchorPortrait && !string.IsNullOrWhiteSpace(beat.ImagePath))
             .Select(beat => new NewsImageWindow(beat.ImagePath!, beat.StartSeconds, beat.EndSeconds))
             .ToList();
 
@@ -1113,7 +1242,8 @@ internal sealed record NewsTimeline(
     NewsBumperClip? Outro,
     string? MusicPath,
     string? SpeechPath,
-    string? LogoPath)
+    string? LogoPath,
+    string? AnchorPortraitPath)
 {
     public double IntroSeconds => Intro?.Duration ?? 0;
     public double OutroSeconds => Outro?.Duration ?? 0;
@@ -1123,6 +1253,8 @@ internal sealed record NewsTimeline(
         !string.IsNullOrWhiteSpace(LogoPath)
         && File.Exists(LogoPath)
         && (IntroSeconds > 0.05 || OutroSeconds > 0.05);
+    public bool ShowAnchorPortrait =>
+        !string.IsNullOrWhiteSpace(AnchorPortraitPath) && File.Exists(AnchorPortraitPath);
 }
 
 internal sealed record NewsPresentation(

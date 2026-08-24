@@ -1062,7 +1062,7 @@
             <section id="tab-news" class="tab-panel hidden" hidden>
                 <div class="card section-card">
                     <div class="section-header"><h3>FlowWire News</h3></div>
-                    <p class="hint">Apply the <strong>FlowWire News</strong> preset (or set a channel to content type News). ChannelFlow-Server fetches RSS, scrolls headlines with an ASS overlay, shows story photos when the feed includes them, and optionally reads them with TTS. Intro music plays with the channel logo before Catherine speaks; after her sign-off, outro audio plays with the logo again.</p>
+                    <p class="hint">Apply the <strong>FlowWire News</strong> preset (or set a channel to content type News). ChannelFlow-Server fetches RSS, scrolls headlines with an ASS overlay, shows story photos when the feed includes them, and optionally reads them with TTS. The bulletin opens with intro music and <code>FlowWire.png</code>, then <code>Catherine_Wolfe.jpg</code> while she reads the anchor intro. Story photos play during the newscast, her photo returns for the sign-off, then outro audio plays with the logo again.</p>
                     <label class="field"><span>Header text</span><input id="news-header" type="text" class="emby-input" placeholder="FlowWire News"></label>
                     <label class="field"><span>Article count</span><input id="news-count" type="number" min="1" max="30" value="8" class="emby-input"></label>
                     <label class="field"><span>Refresh interval (minutes)</span><input id="news-refresh" type="number" min="2" max="120" value="10" class="emby-input"></label>
@@ -1083,7 +1083,7 @@
                     </label>
                     <label class="field"><span>Anchor intro</span><textarea id="news-intro" class="emby-input" rows="2" placeholder="I'm Catherine Wolfe. You're watching FlowWire News."></textarea></label>
                     <label class="field"><span>Anchor outro</span><textarea id="news-outro" class="emby-input" rows="2" placeholder="I'm Catherine Wolfe. Stay with FlowWire News."></textarea></label>
-                    <p class="hint">Catherine reads the <strong>anchor intro</strong> before the stories, then the <strong>anchor outro</strong> as her sign-off immediately before outro audio. Leave both blank to use her defaults. Bumper music comes from the ChannelFlow logo set (<code>News/FlowWire-intro.mp3</code> and <code>News/FlowWire-outro.mp3</code>). Override those with <code>intro.mp3</code> and <code>outro.mp3</code> in the server news folder, or a short clip from News music is used if nothing is found.</p>
+                    <p class="hint">Catherine reads the <strong>anchor intro</strong> before the stories, then the <strong>anchor outro</strong> as her sign-off immediately before outro audio. Leave both blank to use her defaults. Her photo is <code>News/Catherine_Wolfe.jpg</code> in the ChannelFlow logo set. Bumper music comes from <code>News/FlowWire-intro.mp3</code> and <code>News/FlowWire-outro.mp3</code>. Override those with <code>intro.mp3</code> and <code>outro.mp3</code> in the server news folder, or a short clip from News music is used if nothing is found.</p>
                     <label class="field checkbox-field"><input id="news-tts" type="checkbox" checked><span class="channelflow-check-box"></span><span>Enable TTS</span></label>
                     <label class="field">
                         <span>TTS engine</span>
