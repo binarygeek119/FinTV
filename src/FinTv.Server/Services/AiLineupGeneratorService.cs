@@ -293,6 +293,15 @@ public class AiLineupGeneratorService
             return $"No content found in the Jellyfin library \"{libraryConstraints.LibraryName}\".";
         }
 
+        if (yearConstraints is not null)
+        {
+            return
+                $"No TV shows or movies were found in the ChannelFlow catalog for {channel.Name} "
+                + $"({yearConstraints.MinYear}–{yearConstraints.MaxYear}). "
+                + "Sync the catalog, confirm TV and movie libraries are selected on the Catalog tab, "
+                + "and make sure series have a premiere or first-episode year.";
+        }
+
         return "No matching content found in your Jellyfin library for this channel. Ensure items have genres, release years, and ratings metadata.";
     }
 

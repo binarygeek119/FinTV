@@ -109,39 +109,21 @@ public static class NewsAssBuilder
     private static string BuildCaptionCrawl(string text, int playX, int playY, double durationSeconds)
     {
         var line = Escape(text);
-        const int speedPxPerSec = 70;
-        const int pxPerChar = 24;
+        const int pxPerChar = 22;
         var y = Math.Max(40, playY - 44);
         var x1 = playX + 48;
-        var textWidth = Math.Max(playX, line.Length * pxPerChar);
-        var fullDistance = x1 + textWidth;
+        var textWidth = Math.Max(playX / 2, line.Length * pxPerChar);
         var available = Math.Max(durationSeconds, 0.5);
-        var neededSeconds = fullDistance / (double)speedPxPerSec;
-        int x2;
-        string move;
-        if (neededSeconds <= available)
-        {
-            x2 = -textWidth;
-            var endMs = (int)Math.Round(neededSeconds * 1000);
-            move = string.Format(
-                CultureInfo.InvariantCulture,
-                "{{\\q2\\move({0},{1},{2},{1},0,{3})}}",
-                x1,
-                y,
-                x2,
-                endMs);
-        }
-        else
-        {
-            x2 = (int)Math.Round(x1 - (speedPxPerSec * available));
-            move = string.Format(
-                CultureInfo.InvariantCulture,
-                "{{\\q2\\move({0},{1},{2},{1})}}",
-                x1,
-                y,
-                x2);
-        }
-
+        var moveSeconds = Math.Max(0.4, available - 0.25);
+        var x2 = -textWidth;
+        var endMs = (int)Math.Round(moveSeconds * 1000);
+        var move = string.Format(
+            CultureInfo.InvariantCulture,
+            "{{\\q2\\move({0},{1},{2},{1},0,{3})}}",
+            x1,
+            y,
+            x2,
+            endMs);
         return move + line;
     }
 

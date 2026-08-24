@@ -108,7 +108,8 @@ public sealed class NewsShowWriter
             Never say FinTV, FinTV News, Fin TV, ChannelFlow, or ChannelFlow News.
             intro must name yourself as {{AnchorName}} and "{{showName}}".
             outro must sign off as {{AnchorName}} from "{{showName}}" right before the outro music.
-            Each story summary is what you read on camera: 2 to 4 spoken sentences, professional TV news delivery, with brief transitions. Do not repeat "I'm {{AnchorName}}" in every story.
+            Each story summary is what you read on camera: 2 to 4 spoken sentences, professional TV news delivery. Do not repeat "I'm {{AnchorName}}" in every story.
+            Do not put between-story bridges in the summaries. The studio adds spoken glue between stories.
             title is the on-screen graphic headline, not spoken if the summary already covers it.
             Reply with JSON only:
             {"intro":"spoken open","outro":"spoken sign-off","stories":[{"title":"on-screen headline","summary":"spoken copy"}]}

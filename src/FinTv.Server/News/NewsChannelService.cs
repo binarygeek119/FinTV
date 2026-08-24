@@ -149,10 +149,11 @@ public sealed class NewsChannelService
             speechPath = await _tts.SynthesizeAsync(script, settings.Voice, workDir, settings.TtsEngine, cancellationToken);
         }
 
+        var speechSeconds = 0d;
         var speechWindow = DurationForSpeech(0, settings);
         if (HasAudioFile(speechPath))
         {
-            var speechSeconds = await _tts.ProbeDurationSecondsAsync(speechPath!, cancellationToken);
+            speechSeconds = await _tts.ProbeDurationSecondsAsync(speechPath!, cancellationToken);
             speechWindow = DurationForSpeech(speechSeconds, settings);
         }
 
@@ -177,7 +178,8 @@ public sealed class NewsChannelService
             speechWindow,
             show,
             timeline.IntroSeconds,
-            timeline.AnchorPortraitPath);
+            timeline.AnchorPortraitPath,
+            speechSeconds);
         var imageWindows = ImageWindows(beats);
         var storyWindow = StoryWindow(beats, timeline);
         var assPath = Path.Combine(workDir, "news.ass");
@@ -597,7 +599,7 @@ public sealed class NewsChannelService
             $"drawbox=x=0:y=h-176:w=iw:h=80:color=0xe11d48@0.92:t=fill:enable='{storyEnable}'," +
             $"drawtext=text='{headline}':fontcolor=white:fontsize=32:x=(w-text_w)/2:y=h-160:enable='{storyEnable}'," +
             $"drawbox=x=0:y=h-88:w=iw:h=88:color=0x111827@0.94:t=fill:enable='{storyEnable}'," +
-            $"drawtext=textfile='{tickerFilter}':fontcolor=white:fontsize=40:x=w-mod(t*50\\,w+text_w):y=h-64:enable='{storyEnable}'";
+            $"drawtext=textfile='{tickerFilter}':fontcolor=white:fontsize=40:x=w-mod(t*110\\,w+text_w):y=h-64:enable='{storyEnable}'";
 
         return BuildEncodeArgs(width, height, presentation, vf);
     }
@@ -1083,6 +1085,72 @@ public sealed class NewsChannelService
         return (int)Math.Clamp(Math.Ceiling(speechSeconds) + 4, 45, max);
     }
 
+    private const string ClosingBridge = "That's our look at those stories.";
+
+    private static readonly string[] StoryBridges =
+    [
+        "In other news.",
+        "Meanwhile.",
+        "Turning now to another story.",
+        "We also have this.",
+        "Next up.",
+        "There's more tonight.",
+        "And this.",
+        "One more story now."
+    ];
+
+    private static string StoryBridge(int storyIndex, IReadOnlyList<NewsArticle> articles)
+    {
+        if (storyIndex < 0 || storyIndex >= articles.Count)
+        {
+            return "";
+        }
+
+        if (storyIndex >= articles.Count - 1)
+        {
+            return ClosingBridge;
+        }
+
+        var next = articles[storyIndex + 1].Title.Trim();
+        if (next.Length is > 8 and <= 64 && storyIndex % 2 == 0)
+        {
+            return "Turning now to " + TrimHeadline(next) + ".";
+        }
+
+        return StoryBridges[storyIndex % StoryBridges.Length];
+    }
+
+    private static string TrimHeadline(string title)
+    {
+        var cut = title.IndexOfAny(['.', '!', '?', ':']);
+        if (cut is > 8 and < 64)
+        {
+            return title[..cut].Trim();
+        }
+
+        return title.TrimEnd('.');
+    }
+
+    private static string SpokenStory(NewsArticle article, NewsSettings settings)
+    {
+        if (settings.AiRewrite)
+        {
+            if (!string.IsNullOrWhiteSpace(article.Summary))
+            {
+                return article.Summary.Trim();
+            }
+
+            return string.IsNullOrWhiteSpace(article.Title) ? "" : article.Title.Trim();
+        }
+
+        if (settings.ReadHeadlinesOnly || string.IsNullOrWhiteSpace(article.Summary))
+        {
+            return article.Title.Trim();
+        }
+
+        return article.Title.Trim() + ". " + article.Summary.Trim();
+    }
+
     private static string BuildScript(string header, IReadOnlyList<NewsArticle> articles, NewsSettings settings, NewsShowCopy show)
     {
         var sb = new System.Text.StringBuilder();
@@ -1092,26 +1160,18 @@ public sealed class NewsChannelService
             sb.Append(intro.Trim()).Append(". ");
         }
 
-        foreach (var article in articles)
+        for (var i = 0; i < articles.Count; i++)
         {
-            if (settings.AiRewrite)
+            var spoken = SpokenStory(articles[i], settings);
+            if (!string.IsNullOrWhiteSpace(spoken))
             {
-                if (!string.IsNullOrWhiteSpace(article.Summary))
-                {
-                    sb.Append(article.Summary.Trim()).Append(". ");
-                }
-                else if (!string.IsNullOrWhiteSpace(article.Title))
-                {
-                    sb.Append(article.Title.Trim()).Append(". ");
-                }
-
-                continue;
+                sb.Append(spoken).Append(". ");
             }
 
-            sb.Append(article.Title).Append(". ");
-            if (!settings.ReadHeadlinesOnly && !string.IsNullOrWhiteSpace(article.Summary))
+            var bridge = StoryBridge(i, articles);
+            if (!string.IsNullOrWhiteSpace(bridge))
             {
-                sb.Append(article.Summary).Append(". ");
+                sb.Append(bridge).Append(' ');
             }
         }
 
@@ -1129,7 +1189,8 @@ public sealed class NewsChannelService
         int duration,
         NewsShowCopy show,
         double clockOffset,
-        string? anchorPortraitPath)
+        string? anchorPortraitPath,
+        double speechSeconds)
     {
         var portrait = HasImageFile(anchorPortraitPath) ? anchorPortraitPath : null;
         var parts = new List<(string Title, string Body, string? Image, bool Show, bool Anchor, string Weight)>();
@@ -1153,14 +1214,28 @@ public sealed class NewsChannelService
         for (var i = 0; i < articles.Count; i++)
         {
             var article = articles[i];
+            var spoken = SpokenStory(article, settings);
             var body = (settings.AiRewrite || !settings.ReadHeadlinesOnly) && !string.IsNullOrWhiteSpace(article.Summary)
                 ? article.Summary.Trim()
                 : "";
             var image = i < images.Count && HasImageFile(images[i]) ? images[i] : portrait;
-            parts.Add((article.Title, body, image, true, false, article.Title + " " + body));
+            parts.Add((article.Title, body, image, true, false, spoken));
+            var bridge = StoryBridge(i, articles);
+            if (!string.IsNullOrWhiteSpace(bridge))
+            {
+                if (portrait is not null)
+                {
+                    parts.Add(("", bridge, portrait, false, true, bridge));
+                }
+                else
+                {
+                    parts.Add(("", bridge, image, false, false, bridge));
+                }
+            }
         }
 
         var outro = ResolveOutro(header, settings, show);
+
         if (portrait is not null)
         {
             parts.Add((NewsShowWriter.AnchorName, outro, portrait, false, true, outro));
@@ -1181,18 +1256,22 @@ public sealed class NewsChannelService
             return [new NewsStoryBeat(clockOffset, clockOffset + duration, "FlowWire News", "", null, true)];
         }
 
-        var weights = parts.Select(part => Math.Max(24, part.Weight.Length)).ToArray();
+        var weights = parts.Select(part => Math.Max(8, part.Weight.Length)).ToArray();
         var total = (double)weights.Sum();
+        var spokenSpan = speechSeconds > 1 ? Math.Min(speechSeconds, duration) : duration;
+        var spokenEnd = clockOffset + spokenSpan;
+        var paddedEnd = clockOffset + duration;
         var beats = new List<NewsStoryBeat>(parts.Count);
         var t = clockOffset;
-        var endAt = clockOffset + duration;
         for (var i = 0; i < parts.Count; i++)
         {
             var start = t;
-            var end = i == parts.Count - 1 ? endAt : t + duration * weights[i] / total;
-            if (end < start + 1)
+            var end = i == parts.Count - 1
+                ? (parts[i].Anchor ? paddedEnd : spokenEnd)
+                : t + spokenSpan * weights[i] / total;
+            if (end < start + 0.4)
             {
-                end = Math.Min(endAt, start + 1);
+                end = Math.Min(paddedEnd, start + 0.4);
             }
 
             beats.Add(new NewsStoryBeat(

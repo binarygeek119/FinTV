@@ -15,7 +15,7 @@
     <form id="login-form" class="auth-card">
       <img src="logo.png" alt="ChannelFlow-Server" class="auth-logo">
       <h1 id="auth-title">Sign in</h1>
-      <p id="auth-subtitle">ChannelFlow-Server</p>
+      <p id="auth-subtitle" class="hidden"></p>
       <label class="field"><span>Username</span><input id="login-user" autocomplete="username" required></label>
       <label class="field"><span>Password</span><input id="login-pass" type="password" autocomplete="current-password" required></label>
       <label class="field hidden" id="login-pass-confirm-field"><span>Confirm password</span><input id="login-pass-confirm" type="password" autocomplete="new-password" minlength="8"></label>
@@ -30,7 +30,7 @@
   </div>
   <div id="app-shell" class="hidden">
     <aside class="app-drawer">
-      <a href="channels" class="drawer-brand" data-tab="channels"><img src="logo.png" alt=""><span>ChannelFlow-Server</span></a>
+      <a href="channels" class="drawer-brand" data-tab="channels"><img src="logo.png" alt="ChannelFlow-Server"></a>
       <nav class="drawer-nav" id="drawer-nav"></nav>
       <button type="button" id="btn-logout" class="drawer-logout">Sign out</button>
     </aside>

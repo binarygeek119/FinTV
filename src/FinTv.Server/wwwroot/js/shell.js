@@ -134,9 +134,11 @@
         document.getElementById('app-shell').classList.add('hidden');
         document.getElementById('auth-title').textContent = needsSetup ? 'Create admin' : 'Sign in';
         document.getElementById('login-submit').textContent = needsSetup ? 'Create account' : 'Sign in';
-        document.getElementById('auth-subtitle').textContent = needsSetup
+        const subtitle = document.getElementById('auth-subtitle');
+        subtitle.textContent = needsSetup
             ? 'First launch — choose a username and password for ChannelFlow-Server'
-            : 'ChannelFlow-Server';
+            : '';
+        subtitle.classList.toggle('hidden', !needsSetup);
         const confirmField = document.getElementById('login-pass-confirm-field');
         const confirmInput = document.getElementById('login-pass-confirm');
         const passInput = document.getElementById('login-pass');

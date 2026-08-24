@@ -119,7 +119,13 @@ public sealed class CatalogLibraryManager : ILibraryManager, IChapterManager
         var librarySync = FinTvRuntime.Current?.Configuration.JellyfinLibraries;
         if (librarySync is not null)
         {
-            items = items.Where(item => librarySync.Allows(item.Kind, item.LibraryId)).ToList();
+            var allowed = items
+                .Where(item => librarySync.Allows(item.Kind, item.LibraryId, item.LibraryName))
+                .ToList();
+            if (allowed.Count > 0 || items.Count == 0)
+            {
+                items = allowed;
+            }
         }
 
         if (query.Tags is { Length: > 0 })

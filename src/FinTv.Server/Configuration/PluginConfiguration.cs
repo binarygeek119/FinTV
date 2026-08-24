@@ -326,6 +326,9 @@ public class JellyfinLibrarySettings
     public List<JellyfinLibraryInfo> Libraries { get; set; } = new();
 
     public bool Allows(BaseItemKind kind, Guid? libraryId)
+        => Allows(kind, libraryId, libraryName: null);
+
+    public bool Allows(BaseItemKind kind, Guid? libraryId, string? libraryName)
     {
         if (kind is BaseItemKind.Folder or BaseItemKind.Playlist)
         {
@@ -347,7 +350,22 @@ public class JellyfinLibrarySettings
             return true;
         }
 
-        return libraryId is Guid id && selected.Contains(id);
+        if (libraryId is Guid id && id != Guid.Empty && selected.Contains(id))
+        {
+            return true;
+        }
+
+        if (!string.IsNullOrWhiteSpace(libraryName)
+            && Libraries.Any(library =>
+                selected.Contains(library.Id)
+                && library.Name.Equals(libraryName, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        // Catalog rows sometimes lack LibraryId after a sync. Don't drop them or year
+        // channels like FlashBack TV end up with an empty AI catalog.
+        return libraryId is null || libraryId == Guid.Empty;
     }
 
     public static List<Guid> Normalize(IEnumerable<Guid>? ids)
