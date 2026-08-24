@@ -19,21 +19,25 @@ public static class AiPlayoutTemplates
         {
             Id = "classic-cable",
             Name = "Classic Cable Dayparts",
-            Description = "Morning cartoons through late-night adult animation with primetime block.",
+            Description = "Morning cartoons, after-school block, teen hour, primetime, 9pm late night, midnight adult cartoons, and 2am reruns.",
             Dayparts =
             [
-                new AiPlayoutDaypart(44, 11, "Late Night",
-                    "Reruns, reshows, replays; adult-oriented animated comedy (e.g. Family Guy, South Park, Rick and Morty). No kids content."),
-                new AiPlayoutDaypart(12, 17, "Morning Cartoons",
-                    "Kids cartoons and animated series for young children."),
-                new AiPlayoutDaypart(18, 29, "Daytime TV",
-                    "General daytime TV: talk, lifestyle, sitcom reruns, game shows as appropriate to channel rules."),
-                new AiPlayoutDaypart(30, 33, "After School Cartoons",
-                    "Kids and tween animated shows for after-school audience."),
-                new AiPlayoutDaypart(34, 37, "Teen Hour",
-                    "Teen-oriented TV and animation; not preschool content."),
-                new AiPlayoutDaypart(38, 43, "Primetime",
-                    "Flagship primetime TV series first; at most one movie as a feature. Longer spanSlots allowed for that feature.", maxSpanSlots: 8)
+                new AiPlayoutDaypart(0, 3, "Adult Cartoons",
+                    "Midnight-2:00am adult animation. No kids content."),
+                new AiPlayoutDaypart(4, 11, "Overnight Reruns",
+                    "2:00-6:00am. Leave empty in the grid; ChannelFlow repeats high-performing shows from the previous afternoon/evening."),
+                new AiPlayoutDaypart(12, 15, "Morning Cartoons",
+                    "Small morning cartoon block that matches the channel (6:00-8:00am)."),
+                new AiPlayoutDaypart(16, 28, "Daytime TV",
+                    "Regular daytime series stripped at the same time each weekday."),
+                new AiPlayoutDaypart(29, 31, "After School Cartoons",
+                    "2:30-4:00pm after-school cartoons matching the channel."),
+                new AiPlayoutDaypart(32, 37, "Teen Hour",
+                    "Teen shows and cartoons from 4:00-7:00pm; not preschool."),
+                new AiPlayoutDaypart(38, 41, "Primetime",
+                    "Flagship 7:00-9:00pm series. Sticky each weeknight.", maxSpanSlots: 8),
+                new AiPlayoutDaypart(42, 47, "Late Night Adult",
+                    "9:00pm-midnight adult-oriented series. No kids content.")
             ]
         },
         new AiPlayoutTemplate
@@ -43,8 +47,8 @@ public static class AiPlayoutTemplates
             Description = "OpenSwim: Nickelodeon, Disney, Fox Kids, and Cartoon Network style kids programming all day.",
             Dayparts =
             [
-                new AiPlayoutDaypart(0, 11, "Overnight",
-                    "Gentle Nick/Disney preschool and cartoon reruns; no adult themes."),
+                new AiPlayoutDaypart(0, 11, "Overnight Reruns",
+                    "2:00-6:00am. Leave empty in the grid; ChannelFlow repeats kids shows from the previous afternoon/evening."),
                 new AiPlayoutDaypart(12, 33, "Kids Block",
                     "Nickelodeon, Disney Channel, Fox Kids, and Cartoon Network style cartoons and live-action kids shows."),
                 new AiPlayoutDaypart(34, 37, "Tween Hour",
@@ -57,11 +61,17 @@ public static class AiPlayoutTemplates
         {
             Id = "movie-marathon",
             Name = "Movie Marathon",
-            Description = "Long movie blocks with minimal daypart variation.",
+            Description = "Movie-network clock: daytime features, primetime double features, and sticky Friday/Saturday nights.",
             Dayparts =
             [
-                new AiPlayoutDaypart(0, 47, "All Day Movies",
-                    "Schedule movies back-to-back from slot 0 with no gaps. Each movie starts immediately after the previous ends. Use spanSlots from runtime.", maxSpanSlots: 8)
+                new AiPlayoutDaypart(0, 11, "Overnight Features",
+                    "Late-night and overnight movies. Shorter or cult titles are fine."),
+                new AiPlayoutDaypart(12, 29, "Daytime Features",
+                    "Afternoon movies. Keep a repeating weekday pattern when possible."),
+                new AiPlayoutDaypart(30, 37, "Early Fringe",
+                    "Lead-in features before primetime."),
+                new AiPlayoutDaypart(38, 47, "Primetime Double Feature",
+                    "Evening movies. Friday and Saturday nights should feel like event night. Use spanSlots from runtime.", maxSpanSlots: 8)
             ]
         },
         new AiPlayoutTemplate
@@ -114,7 +124,7 @@ public static class AiPlayoutTemplates
             Dayparts =
             [
                 new AiPlayoutDaypart(0, 11, "Overnight Reruns",
-                    "Classic quiz and panel reruns; standard 30-minute episodes use spanSlots=1."),
+                    "2:00-6:00am. Leave empty in the grid; ChannelFlow repeats high-performing game shows from the previous day."),
                 new AiPlayoutDaypart(12, 17, "Morning Quick Games",
                     "Fast-paced 22-30 minute game shows; one show per slot."),
                 new AiPlayoutDaypart(18, 29, "Daytime Blocks",
@@ -134,8 +144,8 @@ public static class AiPlayoutTemplates
             Description = "126.2 GET LEARNEDED: group educational TV and documentaries by subject across consecutive slots.",
             Dayparts =
             [
-                new AiPlayoutDaypart(0, 11, "Overnight Encore",
-                    "Gentle science or nature reruns."),
+                new AiPlayoutDaypart(0, 11, "Overnight Reruns",
+                    "2:00-6:00am. Leave empty in the grid; ChannelFlow repeats high-performing educational shows from the previous day."),
                 new AiPlayoutDaypart(12, 17, "Morning Discovery",
                     "Science and nature for a general audience; keep the same subject across 2-4 consecutive slots."),
                 new AiPlayoutDaypart(18, 23, "History Block",
@@ -188,11 +198,15 @@ public static class AiPlayoutTemplates
         {
             Id = "holiday-channel",
             Name = "Holiday Channel · Seasonal Marathon",
-            Description = "203.4 The Holiday Channel: themed marathons during an active holiday window.",
+            Description = "Holiday TV episodes and movies mixed like a seasonal cable network, not a random dump.",
             Dayparts =
             [
-                new AiPlayoutDaypart(0, 47, "Holiday Marathon",
-                    "Only schedule content matching the active holiday. Group episodes of the same show in blocks. Use spanSlots from movie runtime. Vary order like cable TV holiday marathons with smart rotation.", maxSpanSlots: 8)
+                new AiPlayoutDaypart(0, 11, "Overnight Holiday",
+                    "Late-night holiday episodes or movies matching the active holiday."),
+                new AiPlayoutDaypart(12, 29, "Daytime Holiday",
+                    "Holiday TV episode blocks (2-4) mixed with family holiday movies."),
+                new AiPlayoutDaypart(30, 47, "Primetime Holiday",
+                    "Flagship holiday movies and specials in the evening. Repeat titles at the same times through the week when it fits.", maxSpanSlots: 8)
             ]
         }
     ];
@@ -265,10 +279,15 @@ public static class AiPlayoutTemplates
             lines.Add("- Prefer Nickelodeon, Disney Channel, Fox Kids, and Cartoon Network style cartoons and live-action kids shows.");
         }
 
-        if (template.Id is "movie-marathon" or "holiday-channel")
+        if (template.Id is "movie-marathon")
         {
-            lines.Add("- Pack titles back-to-back from slot 0 with zero empty slots between features.");
-            lines.Add("- ChannelFlow repacks movies first in release chronological order (earliest year/date first), then other catalog items.");
+            lines.Add("- Build a weekly movie grid with sticky clock times. Friday/Saturday nights are event double-features.");
+            lines.Add("- Do not dump movies in chronological order from slot 0; schedule them like a movie channel.");
+        }
+        if (template.Id is "holiday-channel")
+        {
+            lines.Add("- Mix holiday TV episode blocks and holiday movies. Keep repeating titles at the same times.");
+            lines.Add("- Only use catalog titles that match the active holiday.");
         }
         else if (template.Id is not "past-tense-news")
         {
@@ -285,7 +304,7 @@ public static class AiPlayoutTemplates
     }
 
     private static bool UsesSeriesEpisodeBlocking(AiPlayoutTemplate template)
-        => template.Id is not ("movie-marathon" or "holiday-channel" or "music-videos" or "past-tense-news");
+        => template.Id is not ("music-videos" or "past-tense-news");
 
     private static string BuildSeriesEpisodeBlockingSection(AiPlayoutTemplate template)
     {

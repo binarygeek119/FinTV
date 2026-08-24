@@ -82,7 +82,8 @@ public class PlayoutBuilderService : BackgroundService
                                 preview.LineupSlots,
                                 rebuildPlayout: false,
                                 generator,
-                                cancellationToken);
+                                cancellationToken,
+                                preview.WeeklyLineups);
                         }
                         catch (Exception ex)
                         {

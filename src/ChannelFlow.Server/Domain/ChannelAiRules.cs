@@ -230,8 +230,11 @@ public static class ChannelAiRules
         ["channelflow-open-swim"] = "kids-all-day",
         ["channelflow-flashback"] = "classic-cable",
         ["channelflow-retro"] = "classic-cable",
+        ["channelflow-reality"] = "classic-cable",
+        ["channelflow-crime"] = "classic-cable",
         ["channelflow-creature"] = "movie-marathon",
         ["channelflow-hero"] = "movie-marathon",
+        ["channelflow-funny"] = "movie-marathon",
         ["channelflow-holiday"] = "holiday-channel",
         ["channelflow-comedy"] = "slappy-comedy",
     };

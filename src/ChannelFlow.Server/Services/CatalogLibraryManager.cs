@@ -438,6 +438,11 @@ public sealed class CatalogLibraryManager : ILibraryManager, IChapterManager
             item.ParentIndexNumber = track.DiscNumber;
         }
 
+        if (row is MusicVideoRow video && item is MusicVideo musicVideo)
+        {
+            musicVideo.Artists = ReadStringArray(video.ArtistsJson);
+        }
+
         return item;
     }
 
@@ -479,6 +484,11 @@ public sealed class CatalogLibraryManager : ILibraryManager, IChapterManager
         item.Studios = ReadStringArray(row.StudiosJson);
         item.CollectionNames = ReadStringArray(row.CollectionNamesJson);
         item.Kind = row.Kind;
+
+        if (item is MusicVideo mappedVideo)
+        {
+            mappedVideo.Artists = ReadStringArray(row.ArtistsJson);
+        }
 
         if (includeSeries && item is Episode episode && row.SeriesId is Guid seriesId && seriesId != Guid.Empty)
         {

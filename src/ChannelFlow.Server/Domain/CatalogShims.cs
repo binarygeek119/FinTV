@@ -84,6 +84,8 @@ public class Series : BaseItem
 public class MusicVideo : BaseItem
 {
     public MusicVideo() => Kind = BaseItemKind.MusicVideo;
+
+    public string[] Artists { get; set; } = [];
 }
 
 public class Audio : BaseItem

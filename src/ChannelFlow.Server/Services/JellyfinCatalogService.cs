@@ -1174,6 +1174,13 @@ public class JellyfinCatalogService
             return [MapItem(pick)];
         }
 
+        if (channel.ContentType == ChannelContentType.MusicVideo
+            || catalogMode == ChannelCatalogMode.MusicVideoOnly
+            || items.All(i => i is MusicVideo))
+        {
+            return [PickMusicVideo(items, channel, anchor)];
+        }
+
         var useEpisodeRotation = catalogMode != ChannelCatalogMode.MovieOnly
             && items.Any(i => i is Episode);
 
@@ -1200,6 +1207,90 @@ public class JellyfinCatalogService
         }
 
         return items.Select(item => MapItem(item)).Take(1).ToList();
+    }
+
+    private ResolvedCandidate PickMusicVideo(
+        IReadOnlyList<BaseItem> items,
+        Channel channel,
+        PlayoutAnchorState anchor)
+    {
+        var recent = anchor.RecentMusicVideoArtists;
+        var lastArtist = recent.Count > 0 ? recent[^1] : null;
+        var rng = new Random(HashCode.Combine(channel.PlayoutSeed, recent.Count, items.Count));
+
+        var ranked = items
+            .Select((item, index) =>
+            {
+                var artist = GetMusicVideoArtist(item);
+                var distance = DistanceSinceArtist(recent, artist);
+                var penalty = string.Equals(artist, lastArtist, StringComparison.OrdinalIgnoreCase) ? -10_000 : 0;
+                return (item, artist, score: distance + penalty, jitter: rng.Next());
+            })
+            .OrderByDescending(x => x.score)
+            .ThenBy(x => x.jitter)
+            .ThenBy(x => x.item.Id)
+            .ToList();
+
+        var pick = ranked[0];
+        if (!string.IsNullOrWhiteSpace(pick.artist))
+        {
+            recent.Add(pick.artist);
+            if (recent.Count > 48)
+            {
+                recent.RemoveRange(0, recent.Count - 48);
+            }
+        }
+
+        return MapItem(pick.item);
+    }
+
+    private static int DistanceSinceArtist(List<string> recent, string artist)
+    {
+        if (string.IsNullOrWhiteSpace(artist))
+        {
+            return recent.Count + 1;
+        }
+
+        for (var i = recent.Count - 1; i >= 0; i--)
+        {
+            if (string.Equals(recent[i], artist, StringComparison.OrdinalIgnoreCase))
+            {
+                return recent.Count - 1 - i;
+            }
+        }
+
+        return recent.Count + 8;
+    }
+
+    private static string GetMusicVideoArtist(BaseItem item)
+    {
+        if (item is MusicVideo video)
+        {
+            var named = video.Artists.FirstOrDefault(a => !string.IsNullOrWhiteSpace(a));
+            if (!string.IsNullOrWhiteSpace(named))
+            {
+                return named.Trim();
+            }
+        }
+
+        var studio = item.Studios.FirstOrDefault(s => !string.IsNullOrWhiteSpace(s));
+        if (!string.IsNullOrWhiteSpace(studio))
+        {
+            return studio.Trim();
+        }
+
+        var name = item.Name ?? string.Empty;
+        var separators = new[] { " - ", " – ", " — " };
+        foreach (var separator in separators)
+        {
+            var at = name.IndexOf(separator, StringComparison.Ordinal);
+            if (at > 0)
+            {
+                return name[..at].Trim();
+            }
+        }
+
+        return name.Trim();
     }
 }
 

@@ -145,7 +145,8 @@ public class AiChannelAutoApplyService
                 preview.LineupSlots,
                 rebuildPlayout: rebuildPlayout,
                 _playoutGenerator,
-                cancellationToken);
+                cancellationToken,
+                preview.WeeklyLineups);
 
             return AiAutoApplyChannelResult.Succeeded(channelId, channel.Name);
         }
@@ -306,8 +307,8 @@ public class AiChannelAutoApplyService
     }
 
     /// <summary>
-    /// Generates AI lineups and builds playout one calendar day at a time across all channels:
-    /// day 1 for every channel (lineup + playout), then day 2 for every channel, and so on.
+    /// Generates AI lineups and full 14-day playout one channel at a time:
+    /// finish channel A completely, then channel B, and so on.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task RunStaggeredGenerateAllAsync(CancellationToken cancellationToken = default)
@@ -350,11 +351,11 @@ public class AiChannelAutoApplyService
                 eligibleChannels.Count,
                 channelRows.Count,
                 daysToBuild,
-                eligibleChannels.Count * daysToBuild);
+                eligibleChannels.Count);
 
             state.TotalDays = daysToBuild;
             state.TotalChannels = eligibleChannels.Count;
-            state.TotalSteps = eligibleChannels.Count * daysToBuild;
+            state.TotalSteps = eligibleChannels.Count;
             SaveGenerateAllState(state);
 
             if (eligibleChannels.Count == 0)
@@ -363,111 +364,64 @@ public class AiChannelAutoApplyService
                 return;
             }
 
-            var lineupGenerated = new HashSet<Guid>();
-            var excludedChannels = new HashSet<Guid>();
-
-            for (var dayIndex = 0; dayIndex < daysToBuild; dayIndex++)
+            foreach (var (channelId, channelName) in eligibleChannels)
             {
-                foreach (var (channelId, channelName) in eligibleChannels)
+                cancellationToken.ThrowIfCancellationRequested();
+
+                state.CurrentDay = daysToBuild;
+                state.CurrentChannelName = channelName;
+                SaveGenerateAllState(state);
+
+                try
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
+                    using var lineupScope = _scopeFactory.CreateScope();
+                    var lineupService = lineupScope.ServiceProvider.GetRequiredService<AiChannelAutoApplyService>();
+                    var lineupResult = await lineupService.ApplyChannelLineupAsync(
+                        channelId,
+                        rebuildPlayout: true,
+                        cancellationToken).ConfigureAwait(false);
 
-                    state.CurrentDay = dayIndex + 1;
-                    state.CurrentChannelName = channelName;
-                    SaveGenerateAllState(state);
-
-                    if (excludedChannels.Contains(channelId))
+                    if (lineupResult.Ok)
+                    {
+                        state.LineupsGenerated++;
+                        state.PlayoutDaysBuilt += daysToBuild;
+                        _logger.LogInformation(
+                            "AI generate-all finished channel {ChannelName} with a full playout rebuild.",
+                            channelName);
+                    }
+                    else if (!lineupResult.WasSkipped)
+                    {
+                        state.LineupsFailed++;
+                        state.LastError = $"{channelName}: {lineupResult.Error}";
+                        _logger.LogWarning(
+                            "AI lineup generation failed for {ChannelName}: {Error}",
+                            channelName,
+                            lineupResult.Error);
+                    }
+                    else
                     {
                         FinTvDebugLog.Ai(
                             _logger,
-                            "Generate-all skipping excluded channel {ChannelName} on day {Day}",
+                            "Generate-all skipped ineligible channel {ChannelName}: {Reason}",
                             channelName,
-                            dayIndex + 1);
-                        state.CompletedSteps++;
-                        SaveGenerateAllState(state);
-                        continue;
+                            lineupResult.Error ?? "(none)");
                     }
-
-                    if (!lineupGenerated.Contains(channelId))
-                    {
-                        using var lineupScope = _scopeFactory.CreateScope();
-                        var lineupService = lineupScope.ServiceProvider.GetRequiredService<AiChannelAutoApplyService>();
-                        var lineupResult = await lineupService.ApplyChannelLineupAsync(
-                            channelId,
-                            rebuildPlayout: false,
-                            cancellationToken).ConfigureAwait(false);
-
-                        if (lineupResult.Ok)
-                        {
-                            lineupGenerated.Add(channelId);
-                            state.LineupsGenerated++;
-                            _logger.LogInformation(
-                                "AI generate-all day {Day}: generated lineup for {ChannelName}.",
-                                dayIndex + 1,
-                                channelName);
-
-                            using var clearScope = _scopeFactory.CreateScope();
-                            var clearService = clearScope.ServiceProvider.GetRequiredService<AiChannelAutoApplyService>();
-                            await clearService.ClearChannelPlayoutFromTodayAsync(channelId, cancellationToken)
-                                .ConfigureAwait(false);
-                        }
-                        else if (!lineupResult.WasSkipped)
-                        {
-                            state.LineupsFailed++;
-                            state.LastError = $"{channelName}: {lineupResult.Error}";
-                            excludedChannels.Add(channelId);
-                            _logger.LogWarning(
-                                "AI lineup generation failed for {ChannelName}: {Error}",
-                                channelName,
-                                lineupResult.Error);
-                            state.CompletedSteps++;
-                            SaveGenerateAllState(state);
-                            continue;
-                        }
-                        else
-                        {
-                            FinTvDebugLog.Ai(
-                                _logger,
-                                "Generate-all skipped ineligible channel {ChannelName}: {Reason}",
-                                channelName,
-                                lineupResult.Error ?? "(none)");
-                            excludedChannels.Add(channelId);
-                            state.CompletedSteps++;
-                            SaveGenerateAllState(state);
-                            continue;
-                        }
-                    }
-
-                    try
-                    {
-                        using var playoutScope = _scopeFactory.CreateScope();
-                        var playoutService = playoutScope.ServiceProvider.GetRequiredService<AiChannelAutoApplyService>();
-                        await playoutService.BuildChannelPlayoutDayAsync(channelId, dayIndex, cancellationToken)
-                            .ConfigureAwait(false);
-                        state.PlayoutDaysBuilt++;
-                        _logger.LogInformation(
-                            "AI generate-all day {Day}: built playout for {ChannelName}.",
-                            dayIndex + 1,
-                            channelName);
-                    }
-                    catch (Exception ex)
-                    {
-                        state.PlayoutDaysFailed++;
-                        state.LastError = $"{channelName} day {dayIndex + 1}: {ex.Message}";
-                        _logger.LogWarning(
-                            ex,
-                            "AI generate-all playout build failed for {ChannelName} day {Day}",
-                            channelName,
-                            dayIndex + 1);
-                    }
-
-                    state.CompletedSteps++;
-                    SaveGenerateAllState(state);
                 }
+                catch (Exception ex)
+                {
+                    state.LineupsFailed++;
+                    state.PlayoutDaysFailed += daysToBuild;
+                    state.LastError = $"{channelName}: {ex.Message}";
+                    _logger.LogWarning(ex, "AI generate-all failed for {ChannelName}", channelName);
+                }
+
+                state.CompletedSteps++;
+                SaveGenerateAllState(state);
             }
 
             _logger.LogInformation(
-                "Staggered AI generate-all finished: {Lineups} lineups, {PlayoutDays} playout days built across {Channels} channels and {Days} days.",
+                "AI generate-all finished: {Lineups} lineups, {PlayoutDays} playout days built across {Channels} channels and {Days} days.",
+
                 state.LineupsGenerated,
                 state.PlayoutDaysBuilt,
                 eligibleChannels.Count,

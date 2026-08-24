@@ -72,8 +72,8 @@
     let guideFromIso = null;
     let guideDateFilter = null;
     let guideTimer = null;
-    const GUIDE_HOURS = 6;
     const GUIDE_PX_PER_MIN = 4;
+    const GUIDE_CHANNEL_COL = 168;
 
     function $(id) {
         if (configPage) {
@@ -5019,12 +5019,44 @@
         return !!(tab && !tab.classList.contains('hidden') && !tab.hidden);
     }
 
+    function todayGuideDate() {
+        return formatGuideDate(new Date().toISOString());
+    }
+
+    function isGuideViewingToday() {
+        if (guideDateFilter) {
+            return guideDateFilter === todayGuideDate();
+        }
+        return !guideFromIso;
+    }
+
+    function addGuideDate(ymd, days) {
+        const parts = (ymd || todayGuideDate()).split('-').map(Number);
+        const dt = new Date(Date.UTC(parts[0], (parts[1] || 1) - 1, (parts[2] || 1) + days));
+        const month = String(dt.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(dt.getUTCDate()).padStart(2, '0');
+        return dt.getUTCFullYear() + '-' + month + '-' + day;
+    }
+
+    function formatGuideDayHeading(iso) {
+        try {
+            return new Date(iso).toLocaleDateString([], {
+                weekday: 'long',
+                month: 'short',
+                day: 'numeric',
+                timeZone: guideTimeZone()
+            });
+        } catch (ignore) {
+            return formatGuideDate(iso);
+        }
+    }
+
     function refreshGuide() {
         if (!isGuideTabVisible()) {
             return Promise.resolve();
         }
 
-        return loadGuide();
+        return loadGuide({ quiet: true });
     }
 
     async function loadGuide(options) {
@@ -5034,56 +5066,84 @@
         }
 
         const quiet = !!(options && options.quiet);
+        const scroller = root.querySelector('.tv-guide-scroll');
+        const savedScroll = quiet && scroller
+            ? { left: scroller.scrollLeft, top: scroller.scrollTop }
+            : null;
         if (!quiet) {
             root.innerHTML = '<div class="empty-state">Loading guide…</div>';
         }
         try {
-            const params = new URLSearchParams({ hours: String(GUIDE_HOURS) });
-            if (guideFromIso) {
-                params.set('from', guideFromIso);
-            } else if (guideDateFilter) {
+            const params = new URLSearchParams();
+            if (guideDateFilter) {
                 params.set('date', guideDateFilter);
             }
             params.set('_', String(Date.now()));
             guideData = await api('/guide?' + params.toString());
-            guideFromIso = guideData.from;
+            guideFromIso = null;
+            guideDateFilter = formatGuideDate(guideData.from);
             const dateInput = $('guide-date');
             if (dateInput) {
-                dateInput.value = formatGuideDate(guideData.from);
+                dateInput.value = guideDateFilter;
             }
             const range = $('guide-range-label');
             if (range) {
-                range.textContent = formatGuideClock(guideData.from) + ' – ' + formatGuideClock(guideData.to)
+                range.textContent = formatGuideDayHeading(guideData.from)
                     + (guideData.timeZone ? ' · ' + guideData.timeZone : '');
             }
             renderGuide();
             startGuideClock();
+            if (options && options.scrollToNow) {
+                scrollGuideToNow();
+            } else if (savedScroll) {
+                const next = root.querySelector('.tv-guide-scroll');
+                if (next) {
+                    next.scrollLeft = savedScroll.left;
+                    next.scrollTop = savedScroll.top;
+                }
+            }
         } catch (err) {
             reportApiError(err, 'Could not load the TV guide.');
             root.innerHTML = '<div class="empty-state">Could not load the TV guide.</div>';
         }
     }
 
-    function shiftGuide(hours) {
-        if (!guideData || !guideData.from) {
-            return;
-        }
-        const next = new Date(new Date(guideData.from).getTime() + hours * 3600000);
-        guideFromIso = next.toISOString();
-        guideDateFilter = null;
-        loadGuide();
+    function shiftGuideDays(days) {
+        const current = guideDateFilter || (guideData ? formatGuideDate(guideData.from) : todayGuideDate());
+        guideDateFilter = addGuideDate(current, days);
+        guideFromIso = null;
+        loadGuide({ scrollToNow: guideDateFilter === todayGuideDate() });
     }
 
     function jumpGuideToNow() {
         guideFromIso = null;
         guideDateFilter = null;
-        loadGuide();
+        loadGuide({ scrollToNow: true });
     }
 
     function jumpGuideToDate(date) {
         guideFromIso = null;
         guideDateFilter = date || null;
-        loadGuide();
+        loadGuide({ scrollToNow: !date || date === todayGuideDate() });
+    }
+
+    function scrollGuideToNow() {
+        const root = $('tv-guide');
+        const scroller = root && root.querySelector('.tv-guide-scroll');
+        if (!scroller || !guideData) {
+            return;
+        }
+        const from = new Date(guideData.from).getTime();
+        const to = new Date(guideData.to).getTime();
+        const now = Date.now();
+        if (now < from || now > to) {
+            return;
+        }
+        const nowX = ((now - from) / 60000) * GUIDE_PX_PER_MIN;
+        const pastPx = 60 * GUIDE_PX_PER_MIN;
+        requestAnimationFrame(() => {
+            scroller.scrollLeft = Math.max(0, nowX - pastPx);
+        });
     }
 
     function positionGuideNowLine() {
@@ -5169,18 +5229,16 @@
                 + '</div>';
         }).join('');
 
-        root.innerHTML = '<div class="tv-guide-header">'
+        const dayWidth = GUIDE_CHANNEL_COL + width;
+        root.innerHTML = '<div class="tv-guide-scroll">'
+            + '<div class="tv-guide-header" style="width:' + dayWidth + 'px">'
             + '<div class="tv-guide-corner">Channel</div>'
             + '<div class="tv-guide-times"><div class="tv-guide-times-inner" style="width:' + width + 'px">'
             + ticks + '<div class="tv-guide-now"></div></div></div>'
             + '</div>'
-            + '<div class="tv-guide-body">' + rows + '</div>';
+            + '<div class="tv-guide-body">' + rows + '</div>'
+            + '</div>';
 
-        const body = root.querySelector('.tv-guide-body');
-        const times = root.querySelector('.tv-guide-times');
-        if (body && times) {
-            body.addEventListener('scroll', () => { times.scrollLeft = body.scrollLeft; });
-        }
         root.querySelectorAll('[data-program]').forEach((btn) => {
             btn.onclick = () => openGuideProgram(btn.dataset.program);
         });
@@ -5408,7 +5466,10 @@
         stopOnAirPolling();
         stopGuideClock();
         if (name === 'channels') startOnAirPolling();
-        if (name === 'guide') loadGuide();
+        document.body.classList.toggle('guide-tab-open', name === 'guide');
+        if (name === 'guide') {
+            loadGuide({ scrollToNow: isGuideViewingToday() });
+        }
         if (name === 'general') loadGeneral();
         if (name === 'ebs') loadEbs();
         if (name === 'emergency') loadWeather();
@@ -5508,8 +5569,8 @@
         }
 
         bindTabRoutes();
-        click('btn-guide-prev', () => shiftGuide(-3));
-        click('btn-guide-next', () => shiftGuide(3));
+        click('btn-guide-prev', () => shiftGuideDays(-1));
+        click('btn-guide-next', () => shiftGuideDays(1));
         click('btn-guide-now', () => jumpGuideToNow());
         change('guide-date', (e) => jumpGuideToDate(e.target.value));
         click('btn-new-channel', () => openNewChannelForm());

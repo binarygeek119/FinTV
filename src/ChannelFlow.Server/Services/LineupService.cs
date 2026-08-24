@@ -76,6 +76,43 @@ public class LineupService
         }
     }
 
+    public async Task ReplaceWeeklyDayLineupsAsync(
+        Guid channelId,
+        IReadOnlyDictionary<DayOfWeek, List<LineupSlotDto>> weekly,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureNotWeatherChannelAsync(channelId, cancellationToken);
+
+        var existing = await _db.LineupOverrides
+            .Where(o => o.ChannelId == channelId && o.Kind == LineupOverrideKind.DayOfWeek)
+            .ToListAsync(cancellationToken);
+        if (existing.Count > 0)
+        {
+            _db.LineupOverrides.RemoveRange(existing);
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+
+        foreach (var (day, slots) in weekly.OrderBy(kv => kv.Key))
+        {
+            var entity = new LineupOverride
+            {
+                ChannelId = channelId,
+                Kind = LineupOverrideKind.DayOfWeek,
+                DayOfWeek = day,
+                Name = day.ToString(),
+                Slots = slots.Select(s => MapSlot(s, null, null)).ToList()
+            };
+            foreach (var slot in entity.Slots)
+            {
+                slot.LineupOverrideId = entity.Id;
+            }
+
+            _db.LineupOverrides.Add(entity);
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<LineupOverride> CreateOverrideAsync(Guid channelId, LineupOverrideDto dto, CancellationToken cancellationToken = default)
     {
         await EnsureNotWeatherChannelAsync(channelId, cancellationToken);

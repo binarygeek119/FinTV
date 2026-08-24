@@ -102,38 +102,63 @@ public class AiLineupGeneratorService
             userPrompt.Length,
             playoutTemplate.Id);
 
-        var rawJson = await _llm.CompleteJsonAsync(provider, systemPrompt, userPrompt, cancellationToken);
-        var aiResponse = ParseAiResponse(rawJson);
-        FinTvDebugLog.Ai(
-            _logger,
-            "LLM response for {Channel}: {ResponseChars} chars, slotsReturned={Slots}",
-            channel.Name,
-            rawJson.Length,
-            aiResponse.Slots?.Count ?? 0);
+        Dictionary<DayOfWeek, List<LineupSlotDto>> weekly;
+        List<LineupSlotDto> slots;
 
-        var validIds = manifest.Catalog.Select(c => c.Id).ToHashSet();
-        var catalogById = manifest.Catalog.ToDictionary(c => c.Id);
-        var yearConstraints = ChannelAiRules.GetYearConstraints(channel);
-        var slots = ValidateAndBuildSlots(
-            aiResponse.Slots,
-            validIds,
-            catalogById,
-            manifest.Catalog,
-            channel.FilterJson,
-            yearConstraints,
-            playoutTemplate,
-            catalogMode);
+        if (channel.ContentType == ChannelContentType.MusicVideo)
+        {
+            slots = NetworkSchedulePlanner.CreateFilterSlots(channel.FilterJson);
+            weekly = NetworkSchedulePlanner.CloneDailyToWeek(slots);
+        }
+        else
+        {
+            var rawJson = await _llm.CompleteJsonAsync(provider, systemPrompt, userPrompt, cancellationToken);
+            var aiResponse = ParseAiResponse(rawJson);
+            FinTvDebugLog.Ai(
+                _logger,
+                "LLM response for {Channel}: {ResponseChars} chars, slotsReturned={Slots}, blocksReturned={Blocks}",
+                channel.Name,
+                rawJson.Length,
+                aiResponse.Slots?.Count ?? 0,
+                aiResponse.Blocks?.Count ?? 0);
+
+            var validIds = manifest.Catalog.Select(c => c.Id).ToHashSet();
+            var catalogById = manifest.Catalog.ToDictionary(c => c.Id);
+            var yearConstraints = ChannelAiRules.GetYearConstraints(channel);
+            slots = ValidateAndBuildSlots(
+                aiResponse.Slots,
+                validIds,
+                catalogById,
+                manifest.Catalog,
+                channel.FilterJson,
+                yearConstraints,
+                playoutTemplate,
+                catalogMode);
+
+            weekly = aiResponse.Blocks is { Count: > 0 }
+                ? NetworkSchedulePlanner.ExpandBlocks(aiResponse.Blocks, manifest.Catalog, catalogMode, channel.ContentType)
+                : NetworkSchedulePlanner.CloneDailyToWeek(slots);
+
+            NetworkSchedulePlanner.SprinkleMovies(weekly, manifest.Catalog, catalogMode);
+            if (channel.ContentType == ChannelContentType.TvShow)
+            {
+                NetworkSchedulePlanner.ClearOvernightSlots(weekly);
+            }
+
+            slots = weekly.GetValueOrDefault(DayOfWeek.Monday) ?? slots;
+        }
 
         var filledBlocks = slots.Count(s => s.Candidates.Count > 0);
         var coveredHalfHours = slots.Where(s => s.Candidates.Count > 0).Sum(s => Math.Clamp(s.SpanSlots, 1, 48));
         FinTvDebugLog.Ai(
             _logger,
-            "Validated lineup for {Channel}: {FilledBlocks} blocks covering {Covered}/48 half-hours",
+            "Validated lineup for {Channel}: {FilledBlocks} blocks covering {Covered}/48 half-hours, weeklyDays={Days}",
             channel.Name,
             filledBlocks,
-            Math.Min(48, coveredHalfHours));
+            Math.Min(48, coveredHalfHours),
+            weekly.Count);
 
-        return BuildPreview(channel, slots, manifest, provider, playoutTemplate);
+        return BuildPreview(channel, slots, manifest, provider, playoutTemplate, weekly);
     }
 
     public async Task ApplyAsync(
@@ -141,17 +166,25 @@ public class AiLineupGeneratorService
         IReadOnlyList<LineupSlotDto> slots,
         bool rebuildPlayout,
         LineupGeneratorService generator,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyDictionary<DayOfWeek, List<LineupSlotDto>>? weeklyLineups = null)
     {
         EnsureAiEnabled();
         FinTvDebugLog.Ai(
             _logger,
-            "Applying AI lineup to {ChannelId}: {SlotCount} slots, rebuildPlayout={Rebuild}",
+            "Applying AI lineup to {ChannelId}: {SlotCount} slots, rebuildPlayout={Rebuild}, weeklyDays={Days}",
             channelId,
             slots.Count,
-            rebuildPlayout);
+            rebuildPlayout,
+            weeklyLineups?.Count ?? 0);
 
-        await _lineups.UpdateDefaultSlotsAsync(channelId, NormalizeSlots(slots), cancellationToken);
+        var weekly = weeklyLineups is { Count: > 0 }
+            ? weeklyLineups.ToDictionary(kv => kv.Key, kv => NormalizeSlots(kv.Value))
+            : NetworkSchedulePlanner.CloneDailyToWeek(NormalizeSlots(slots));
+        var defaultSlots = weekly.GetValueOrDefault(DayOfWeek.Monday) ?? NormalizeSlots(slots);
+
+        await _lineups.UpdateDefaultSlotsAsync(channelId, defaultSlots, cancellationToken);
+        await _lineups.ReplaceWeeklyDayLineupsAsync(channelId, weekly, cancellationToken);
         _db.ChangeTracker.Clear();
 
         if (!rebuildPlayout)
@@ -203,7 +236,8 @@ public class AiLineupGeneratorService
         List<LineupSlotDto> slots,
         AiCatalogManifest manifest,
         AiProvider provider,
-        AiPlayoutTemplate playoutTemplate)
+        AiPlayoutTemplate playoutTemplate,
+        Dictionary<DayOfWeek, List<LineupSlotDto>>? weeklyLineups = null)
     {
         var previewSlots = slots
             .OrderBy(s => s.SlotIndex)
@@ -243,7 +277,8 @@ public class AiLineupGeneratorService
                 IncludedInPrompt = manifest.IncludedInPrompt
             },
             Slots = previewSlots,
-            LineupSlots = slots
+            LineupSlots = slots,
+            WeeklyLineups = weeklyLineups
         };
     }
 
@@ -413,8 +448,7 @@ public class AiLineupGeneratorService
     }
 
     private static bool ShouldPackMarathon(AiPlayoutTemplate? template, ChannelCatalogMode catalogMode)
-        => template?.Id is "movie-marathon" or "holiday-channel"
-            || catalogMode == ChannelCatalogMode.MovieOnly;
+        => false;
 
     private static int GetMaxSpanSlots(AiPlayoutTemplate? template)
     {
@@ -781,25 +815,46 @@ public class AiLineupGeneratorService
 
         var mixedRule = catalogMode == ChannelCatalogMode.Mixed
             ? contentType == ChannelContentType.Movie
-                ? "\n- Mixed mode on a movie channel: movies are the default. TV series are optional filler only."
-                : "\n- Mixed mode on a TV channel: fill most of the 48 slots with TV series (consecutive episode blocks). Movies are occasional primetime or late-night features only (about 1-3 per day). Do not build a movie-majority lineup."
+                ? "\n- Mixed movie channel: movies are the default. TV series are optional holiday/thematic filler only."
+                : "\n- Mixed TV channel: series are the default. After the weekly grid is set, ChannelFlow may add at most 1-2 movies on Friday night and/or weekend. Do not load weekdays with movies."
             : string.Empty;
 
+        var formatHint = contentType == ChannelContentType.Movie
+            ? """
+            Prefer `blocks` for a weekly movie grid (double features, Friday/Saturday nights sticky).
+            Movies use spanSlots from runtime. Keep the same titles in the same clock times each week.
+            """
+            : """
+            Prefer `blocks` for a weekly TV grid. ChannelFlow expands this to 14 days and plays episodes in order (S01E01 onward, continuing from the last generated episode).
+            - episodeBlock: consecutive 30-minute episodes of the same series (usually 2-4; a theme day may use 2-6).
+            - days: weekdays, daily, weekends, or a list such as ["mon","tue","wed","thu","fri"] or ["fri"].
+            - If Show X is on at 11:00 every Monday, list only Monday for that block. If Show Y is on at noon every day, use daily.
+            - Leave overnight rerun slots 4-11 (2:00-6:00am) empty; ChannelFlow fills those with the previous day's primetime reruns.
+            """ + (playoutTemplate.Id is "classic-cable" or "kids-all-day" or "slappy-comedy"
+                ? """
+
+            - Morning: a small cartoon block that matches the channel, then regular daytime series.
+            - 2:30-4:00pm (slots 29-31): after-school cartoons. Then teen hour. Then primetime. 9:00pm late-night adult. 12:00am adult cartoons.
+            """
+                : """
+
+            - Follow the playout template dayparts for this channel. Keep the same series in the same clock times each weekday or each week.
+            """);
+
         return """
-            You are a TV channel scheduling assistant for ChannelFlow.
-            Build a 48-slot daily lineup (each base slot is 30 minutes, slotIndex 0 = midnight).
-            Reply with JSON only using this shape:
-            {"slots":[{"slotIndex":0,"spanSlots":1,"n":1,"jellyfinItemId":"guid","title":"Show Name"}, ...]}
+            You are a cable-network scheduler for ChannelFlow.
+            Build a STICKY weekly programming grid, not a one-off random day.
+            Reply with JSON only.
+            Preferred shape:
+            {"blocks":[{"n":1,"title":"Show Name","startSlot":18,"episodeBlock":2,"days":["mon","tue","wed","thu","fri"],"kind":"series"}]}
+            Fallback daily shape (cloned to every weekday if blocks are missing):
+            {"slots":[{"slotIndex":0,"spanSlots":1,"n":1,"jellyfinItemId":"guid","title":"Show Name"}]}
             Rules:
-            - Every slot must identify a catalog row with n (preferred), jellyfinItemId, or title copied from the catalog. Do not invent GUIDs.
-            - spanSlots = number of consecutive 30-minute blocks (1-8). Use ceil(runtimeMinutes / 30) for movies and long episodes.
-            - Assign enough spanSlots to cover the item runtime; under-sized spans truncate content during playout.
-            - Do not overlap spans. slotIndex + spanSlots must be <= 48.
-            - Group TV series into consecutive episode blocks (same jellyfinItemId in back-to-back slots); typical blocks are 1-4 episodes, with one 5-6 episode mini-marathon in a flagship daypart.
-            - Vary series across the day; switch shows between blocks instead of isolating single random episodes.
-            - Schedule movies in release chronological order using catalog year and premiere date (earliest first).
-            - Catalog modes: TvOnly (series), MovieOnly, Mixed (TV+movies), MusicVideoOnly (music videos).
-            """ + mixedRule + $"\nCatalog mode: {catalogMode}." + templateBlock;
+            - Identify catalog rows with n (preferred), jellyfinItemId, or exact title. Do not invent GUIDs.
+            - Keep shows in the same time slot across days/weeks unless it is a weekly special (Monday-only, Friday movie, theme day).
+            - Typical series blocks are 2-4 episodes. Include at most one theme-day mini-marathon of 2-6 episodes per week.
+            - Schedule like a real TV network using the playout template dayparts.
+            """ + mixedRule + "\n" + formatHint + $"\nCatalog mode: {catalogMode}." + templateBlock;
     }
 
     private string BuildUserPrompt(
@@ -925,6 +980,8 @@ public class AiLineupPreviewResult
     public List<AiLineupPreviewSlot> Slots { get; set; } = new();
 
     public List<LineupSlotDto> LineupSlots { get; set; } = new();
+
+    public Dictionary<DayOfWeek, List<LineupSlotDto>>? WeeklyLineups { get; set; }
 }
 
 public class AiLineupPreviewSlot
@@ -954,6 +1011,34 @@ public class AiCatalogSummary
 internal class AiLineupAiResponse
 {
     public List<AiGeneratedSlot>? Slots { get; set; }
+
+    public List<AiGeneratedBlock>? Blocks { get; set; }
+}
+
+internal class AiGeneratedBlock
+{
+    [JsonPropertyName("n")]
+    public int? N { get; set; }
+
+    public Guid? JellyfinItemId { get; set; }
+
+    public Guid? Id { get; set; }
+
+    public Guid? ItemId { get; set; }
+
+    public string? Title { get; set; }
+
+    public int StartSlot { get; set; }
+
+    public int? EpisodeBlock { get; set; }
+
+    public int? SpanSlots { get; set; }
+
+    public List<string>? Days { get; set; }
+
+    public string? Kind { get; set; }
+
+    public bool ThemeDay { get; set; }
 }
 
 internal class AiGeneratedSlot

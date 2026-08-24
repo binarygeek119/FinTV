@@ -77,7 +77,8 @@ public sealed class AiChannelGenerateJobService
                             preview.LineupSlots,
                             rebuildPlayout: true,
                             playout,
-                            CancellationToken.None)
+                            CancellationToken.None,
+                            preview.WeeklyLineups)
                         .ConfigureAwait(false);
                     applied = true;
                 }

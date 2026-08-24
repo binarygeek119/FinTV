@@ -49,6 +49,57 @@ html, body { margin: 0; height: 100%; background: var(--page-bg); color: var(--t
 .drawer-logout { background: transparent; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; padding: 0.5rem; cursor: pointer; }
 
 .app-main { flex: 1; min-width: 0; }
+
+body.guide-tab-open {
+    overflow: hidden;
+}
+body.guide-tab-open #app-shell,
+body.guide-tab-open .app-shell {
+    height: 100%;
+    min-height: 100%;
+    overflow: hidden;
+}
+body.guide-tab-open .app-main {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+body.guide-tab-open .app-topbar {
+    flex-shrink: 0;
+}
+body.guide-tab-open #ChannelFlowConfigPage {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 0 0 0 1.5rem;
+}
+body.guide-tab-open #channelflow-app {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    max-width: none;
+}
+body.guide-tab-open #tab-guide.active {
+    display: flex !important;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+}
+body.guide-tab-open .tv-guide-toolbar,
+body.guide-tab-open #tab-guide > .hint {
+    flex-shrink: 0;
+    padding-right: 1.5rem;
+}
+body.guide-tab-open .tv-guide {
+    flex: 1;
+    min-height: 0;
+    border-right: 0;
+    border-bottom: 0;
+    border-radius: var(--radius) 0 0 0;
+}
 .app-topbar { display: flex; justify-content: space-between; align-items: flex-start; padding: 1.25rem 1.5rem 0.5rem; }
 .app-topbar h1 { margin: 0; font-size: 1.6rem; }
 .muted { color: var(--muted); margin: 0.2rem 0 0; }
@@ -128,8 +179,48 @@ input, select, textarea {
 .news-preview-thumb { width: 96px; height: 72px; object-fit: cover; border-radius: 4px; flex-shrink: 0; background: #1a1a1a; }
 
 .tv-guide-toolbar { display: flex; flex-wrap: wrap; gap: 0.65rem; align-items: end; margin-bottom: 0.75rem; }
-.tv-guide { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: #141414; }
-.tv-guide-header, .tv-guide-row { display: flex; min-width: 0; }
+.tv-guide {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: #141414;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+.tv-guide-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow: scroll;
+    overscroll-behavior: contain;
+    scrollbar-width: auto;
+    scrollbar-color: var(--accent) #161616;
+}
+.tv-guide-scroll::-webkit-scrollbar {
+    width: 14px;
+    height: 14px;
+}
+.tv-guide-scroll::-webkit-scrollbar-track {
+    background: #161616;
+}
+.tv-guide-scroll::-webkit-scrollbar-thumb {
+    background: var(--accent);
+    border-radius: 8px;
+    border: 3px solid #161616;
+}
+.tv-guide-scroll::-webkit-scrollbar-thumb:hover {
+    background: var(--accent-hover);
+}
+.tv-guide-scroll::-webkit-scrollbar-corner {
+    background: #161616;
+}
+.tv-guide-header, .tv-guide-row { display: flex; min-width: max-content; }
+.tv-guide-header {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: #141414;
+}
 .tv-guide-corner, .tv-guide-channel {
     flex: 0 0 168px;
     width: 168px;
@@ -141,6 +232,7 @@ input, select, textarea {
     border-right: 1px solid var(--border);
 }
 .tv-guide-corner {
+    z-index: 6;
     padding: 0.65rem 0.75rem;
     font-size: 0.75rem;
     font-weight: 700;
@@ -171,10 +263,8 @@ input, select, textarea {
 }
 .tv-guide-channel .num { font-size: 0.72rem; color: var(--accent); font-weight: 700; }
 .tv-guide-channel .name { font-size: 0.82rem; line-height: 1.2; }
-.tv-guide-times, .tv-guide-body { flex: 1; min-width: 0; overflow-x: auto; }
-.tv-guide-times { overflow-y: hidden; border-bottom: 1px solid var(--border); scrollbar-width: none; }
-.tv-guide-times::-webkit-scrollbar { display: none; }
-.tv-guide-body { max-height: calc(100vh - 240px); overflow: auto; }
+.tv-guide-times { min-width: 0; border-bottom: 1px solid var(--border); }
+.tv-guide-body { min-width: max-content; }
 .tv-guide-times-inner, .tv-guide-track { position: relative; height: 40px; }
 .tv-guide-track { height: 56px; border-bottom: 1px solid var(--border); background:
     repeating-linear-gradient(90deg, transparent 0, transparent calc(4px * 30 - 1px), #232323 calc(4px * 30 - 1px), #232323 calc(4px * 30)); }

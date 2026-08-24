@@ -16,6 +16,12 @@ public class PlayoutAnchorState
     public Dictionary<Guid, DateTime> LastAired { get; set; } = new();
 
     public string? LastHolidayId { get; set; }
+
+    /// <summary>
+    /// Recently played music-video artists, oldest first. Used to avoid back-to-back repeats
+    /// and to maximize spacing before the same artist returns.
+    /// </summary>
+    public List<string> RecentMusicVideoArtists { get; set; } = new();
 }
 
 public class SmartSelectionService
