@@ -162,7 +162,11 @@ public class AiCatalogManifestBuilder
     {
         if (series.RunTimeTicks.HasValue)
         {
-            return (int)Math.Max(1, Math.Round(TimeSpan.FromTicks(series.RunTimeTicks.Value).TotalMinutes));
+            var minutes = TimeSpan.FromTicks(series.RunTimeTicks.Value).TotalMinutes;
+            if (minutes is > 5 and <= 90)
+            {
+                return (int)Math.Max(1, Math.Round(minutes));
+            }
         }
 
         return 30;

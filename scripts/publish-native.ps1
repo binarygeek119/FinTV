@@ -1,5 +1,4 @@
 # Publish self-contained ChannelFlow-Server apps for Linux and Windows.
-# Native apps are not the default distribution yet (Docker still is).
 param(
     [ValidateSet("linux-x64", "win-x64", "all")]
     [string]$Rid = "all",
@@ -9,7 +8,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
-$project = Join-Path $root "src/FinTv.Server/FinTv.Server.csproj"
+$project = Join-Path $root "src/ChannelFlow.Server/ChannelFlow.Server.csproj"
 
 function Publish-Rid([string]$Target) {
     $out = Join-Path $root "artifacts/native/$Target"

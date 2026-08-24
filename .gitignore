@@ -51,7 +51,7 @@ msbuild.wrn
 
 # Bundled logos fetched at build time
 Jellyfin.Plugin.FinTV/Assets/logos/
-src/FinTv.Server/wwwroot/logos/
+src/ChannelFlow.Server/wwwroot/logos/
 vendor/**/node_modules/
 
 # Bundled yt-dlp fetched at build time

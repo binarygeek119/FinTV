@@ -21,12 +21,12 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Restore
-        run: dotnet restore src/FinTv.Server/FinTv.Server.csproj
+        run: dotnet restore src/ChannelFlow.Server/ChannelFlow.Server.csproj
 
       - name: Check for outdated packages
         run: |
           set -euo pipefail
-          dotnet list src/FinTv.Server/FinTv.Server.csproj package --outdated --format json | tee outdated.json
+          dotnet list src/ChannelFlow.Server/ChannelFlow.Server.csproj package --outdated --format json | tee outdated.json
           python3 - <<'PY'
           import json
           import os

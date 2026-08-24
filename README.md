@@ -4,7 +4,7 @@
 
 # ChannelFlow-Server
 
-Simulated live TV for [Jellyfin](https://jellyfin.org). This repository is **ChannelFlow-Server** — a .NET 10 Docker app with a red Jellyfin-style Web UI, PostgreSQL, local library playback, WeatherStar, and news.
+Simulated live TV for [Jellyfin](https://jellyfin.org). This repository is **ChannelFlow-Server** — a .NET 10 app with a red Jellyfin-style Web UI, PostgreSQL, local library playback, WeatherStar, and news.
 
 Home: [github.com/FlowMeadow01/ChannelFlow](https://github.com/FlowMeadow01/ChannelFlow)
 
@@ -17,40 +17,41 @@ The Jellyfin plugin (GUID `f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b`) syncs library 
 | Channels, lineups, playout, FFmpeg MPEG-TS | Server URL + API key |
 | Commercials / CommercialBrainz | Catalog metadata sync (IDs, tags, duration, **path**, **chapters**) |
 | EBS, logos, AI lineups | Live TV tuner + XMLTV registration |
-| WeatherStar 4000/3000 (in-image ws4kp/ws3kp) | Blackframe scan + optional write chapters |
+| WeatherStar 4000/3000 (native compositor, vendored ws4kp/ws3kp) | Blackframe scan + optional write chapters |
 | News RSS + TTS channel | |
 | Web UI (username/password) | |
 
-Playback reads **local files** from mounted library shares. Configure **path remaps** in Settings (Jellyfin prefix → ChannelFlow-Server prefix), for example `/data/media` → `/media`.
+Playback reads **local files**. Configure **path remaps** in Settings (Jellyfin prefix → ChannelFlow-Server prefix), for example `/data/media` → `/media`.
 
 ## Requirements
 
-- Docker (Unraid Community Apps template in [`unraid/channelflow.xml`](unraid/channelflow.xml))
+- .NET 10 SDK to build, or a self-contained publish from `scripts/publish-native.sh`
 - PostgreSQL (your own instance)
+- FFmpeg on PATH (or set `FFMPEG_PATH`)
 - Jellyfin 12 + the ChannelFlow plugin
-- The same media shares mounted into Jellyfin and ChannelFlow-Server
+- The same media paths readable by Jellyfin and ChannelFlow-Server
 
-## Docker
-
-Image: `ghcr.io/flowmeadow01/channelflow:latest` (built from this repo). Unraid template: [`unraid/channelflow.xml`](unraid/channelflow.xml).
+## Run
 
 ```bash
 cp .env.example .env
-# set CHANNELFLOW_MEDIA and POSTGRES_* for your existing database
-docker compose up -d --build
+# set POSTGRES_* and JELLYFIN_URL for your host
+dotnet publish src/ChannelFlow.Server/ChannelFlow.Server.csproj -c Release
+# or: bash scripts/publish-native.sh linux-x64
 ```
+
+Load the `.env` values into the process environment, then run `ChannelFlow.Server` (from `bin/.../publish` or `artifacts/native/linux-x64`). Listen port is `PORT` (default `8097`). Config, logos, weather, and news files live under `CHANNELFLOW_CONFIG` (default `config` next to the app).
 
 Then:
 
 1. Open `http://<host>:8097` and create the admin username and password on first launch
 2. Copy the plugin API key from **General** (created automatically on first boot)
-3. Add path remaps under General (Jellyfin prefix → `/media` or your mount)
+3. Add path remaps under General (Jellyfin prefix → the local path ChannelFlow-Server can read)
 4. Install the ChannelFlow plugin, set Server URL + API key, run **ChannelFlow Catalog Sync**
-5. Join ChannelFlow-Server and Jellyfin to the **same Docker network** as your PostgreSQL instance
 
 Items removed from Jellyfin, or whose remapped local file is gone, are marked missing, then deleted by **Tasks → Catalog cleanup** after the grace period (default 7 days). **Scan Local Files** checks each catalog path after remap.
 
-Unraid: point `POSTGRES_HOST` at your existing Postgres container on a custom network with Jellyfin. Pass `/dev/dri` into the container for Intel VAAPI encode/decode (enabled by default as `FFMPEG_HWACCEL=vaapi`).
+Set `FFMPEG_HWACCEL=vaapi` and pass `/dev/dri` access for Intel VAAPI encode/decode.
 
 The plugin registers the Live TV tuner and XMLTV guide automatically when you set the ChannelFlow-Server URL and API key.
 
@@ -60,18 +61,18 @@ ChannelFlow expects to sit behind Nginx Proxy Manager, SWAG, Caddy, or Traefik o
 
 Optional env vars:
 
-- `CHANNELFLOW_PUBLIC_URL` — public origin used in M3U/XMLTV when Jellyfin fetches them from the Docker network (example: `https://channelflow.example.duckdns.org`)
+- `CHANNELFLOW_PUBLIC_URL` — public origin used in M3U/XMLTV when Jellyfin fetches them from another host (example: `https://channelflow.example.duckdns.org`)
 - `CHANNELFLOW_PATH_BASE` — only if the UI is served under a subpath such as `/channelflow`
 
 Legacy `FINTV_*` names for those same variables still work.
 
-You can also set **Public base URL** on the General tab. Login cookies stay valid across container rebuilds (keys live in `/config/dataprotection`).
+You can also set **Public base URL** on the General tab. Login cookies stay valid across restarts (keys live in the config folder under `dataprotection`).
 
 Nginx:
 
 ```nginx
 location / {
-    proxy_pass http://channelflow:8097;
+    proxy_pass http://127.0.0.1:8097;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -88,7 +89,7 @@ Caddy:
 
 ```caddy
 channelflow.example.duckdns.org {
-    reverse_proxy channelflow:8097 {
+    reverse_proxy 127.0.0.1:8097 {
         flush_interval -1
     }
 }
@@ -96,7 +97,7 @@ channelflow.example.duckdns.org {
 
 ## Weather and news
 
-WeatherStar graphics are vendored from [ws4kp](https://github.com/netbymatt/ws4kp) and [ws3kp](https://github.com/netbymatt/ws3kp) (MIT) and served on loopback inside the container, then encoded to MPEG-TS with optional Jellyfin music as a bed.
+WeatherStar graphics are vendored from [ws4kp](https://github.com/netbymatt/ws4kp) and [ws3kp](https://github.com/netbymatt/ws3kp) (MIT) and rendered by the native compositor, then encoded to MPEG-TS with optional Jellyfin music as a bed.
 
 News is a 24/7 channel: RSS feeds from the **News** page, optional TTS, FFmpeg overlay, and bed music.
 

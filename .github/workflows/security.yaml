@@ -41,7 +41,7 @@ jobs:
 
       - name: Build ChannelFlow-Server
         if: matrix.language == 'csharp'
-        run: dotnet build src/FinTv.Server/FinTv.Server.csproj -c Release /p:SkipLogoFetch=true
+        run: dotnet build src/ChannelFlow.Server/ChannelFlow.Server.csproj -c Release /p:SkipLogoFetch=true
 
       - uses: github/codeql-action/analyze@v4
         with:
@@ -58,12 +58,12 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Restore
-        run: dotnet restore src/FinTv.Server/FinTv.Server.csproj
+        run: dotnet restore src/ChannelFlow.Server/ChannelFlow.Server.csproj
 
       - name: Check for vulnerable packages
         run: |
           set -euo pipefail
-          dotnet list src/FinTv.Server/FinTv.Server.csproj package --vulnerable --include-transitive --format json | tee vulnerable.json
+          dotnet list src/ChannelFlow.Server/ChannelFlow.Server.csproj package --vulnerable --include-transitive --format json | tee vulnerable.json
           python3 - <<'PY'
           import json
           import os

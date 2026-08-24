@@ -1,6 +1,6 @@
 name: Native apps
 
-# Self-contained Windows and Linux builds. Manual only — not shipped, not on push.
+# Self-contained Windows and Linux builds. Manual only — not on push.
 on:
   workflow_dispatch:
     inputs:
@@ -15,8 +15,6 @@ on:
 
 jobs:
   publish:
-    # Flip to true when native Windows/Linux apps should be built from Actions.
-    if: ${{ false }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

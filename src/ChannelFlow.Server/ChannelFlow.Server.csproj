@@ -5,7 +5,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>FinTv</RootNamespace>
-    <AssemblyName>FinTv.Server</AssemblyName>
+    <AssemblyName>ChannelFlow.Server</AssemblyName>
     <Authors>binarygeek119</Authors>
     <Product>ChannelFlow-Server</Product>
     <AssemblyTitle>ChannelFlow-Server</AssemblyTitle>

@@ -1,16 +1,7 @@
 version: 2
 updates:
   - package-ecosystem: nuget
-    directory: /src/FinTv.Server
-    schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 5
-    labels:
-      - dependencies
-
-  - package-ecosystem: docker
-    directory: /
+    directory: /src/ChannelFlow.Server
     schedule:
       interval: weekly
       day: monday

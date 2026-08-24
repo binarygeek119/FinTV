@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using FinTv.Configuration;
 using FinTv.Data;
 using FinTv.Domain;
@@ -116,17 +118,20 @@ public class AiLineupGeneratorService
             aiResponse.Slots,
             validIds,
             catalogById,
+            manifest.Catalog,
             channel.FilterJson,
             yearConstraints,
             playoutTemplate,
             catalogMode);
 
-        var filledSlots = slots.Count(s => s.Candidates.Count > 0);
+        var filledBlocks = slots.Count(s => s.Candidates.Count > 0);
+        var coveredHalfHours = slots.Where(s => s.Candidates.Count > 0).Sum(s => Math.Clamp(s.SpanSlots, 1, 48));
         FinTvDebugLog.Ai(
             _logger,
-            "Validated lineup for {Channel}: {Filled}/48 slots with candidates",
+            "Validated lineup for {Channel}: {FilledBlocks} blocks covering {Covered}/48 half-hours",
             channel.Name,
-            filledSlots);
+            filledBlocks,
+            Math.Min(48, coveredHalfHours));
 
         return BuildPreview(channel, slots, manifest, provider, playoutTemplate);
     }
@@ -309,6 +314,7 @@ public class AiLineupGeneratorService
         List<AiGeneratedSlot>? aiSlots,
         HashSet<Guid> validIds,
         Dictionary<Guid, AiCatalogEntry> catalogById,
+        IReadOnlyList<AiCatalogEntry> catalogInPromptOrder,
         string? channelFilterJson,
         ChannelCatalogYearConstraints? yearConstraints,
         AiPlayoutTemplate? playoutTemplate = null,
@@ -338,8 +344,8 @@ public class AiLineupGeneratorService
                 continue;
             }
 
-            var candidateId = aiSlot.JellyfinItemId ?? aiSlot.Candidates?.FirstOrDefault()?.JellyfinItemId;
-            if (!candidateId.HasValue || !validIds.Contains(candidateId.Value))
+            var candidateId = ResolveCatalogId(aiSlot, validIds, catalogInPromptOrder);
+            if (!candidateId.HasValue)
             {
                 continue;
             }
@@ -353,9 +359,7 @@ public class AiLineupGeneratorService
                     continue;
                 }
 
-                span = entry.RuntimeMinutes > 0
-                    ? ComputeSpanFromRuntime(entry.RuntimeMinutes, GetMaxSpanSlots(playoutTemplate))
-                    : Math.Clamp(aiSlot.SpanSlots ?? 1, 1, GetMaxSpanSlots(playoutTemplate));
+                span = ComputePlayoutSpan(entry, aiSlot.SpanSlots, GetMaxSpanSlots(playoutTemplate));
                 if (aiSlot.SlotIndex + span > 48)
                 {
                     span = 48 - aiSlot.SlotIndex;
@@ -602,6 +606,105 @@ public class AiLineupGeneratorService
     private static int ComputeSpanFromRuntime(int runtimeMinutes, int maxSpan = 8)
         => Math.Clamp((int)Math.Ceiling(runtimeMinutes / 30.0), 1, maxSpan);
 
+    /// <summary>
+    /// Series IDs play the next episode per slot, so span is one episode (30 or 60 min),
+    /// not the full-series runtime Jellyfin sometimes stores on the series record.
+    /// </summary>
+    private static int ComputePlayoutSpan(AiCatalogEntry entry, int? requestedSpan, int maxSpan)
+    {
+        if (string.Equals(entry.Type, "Series", StringComparison.OrdinalIgnoreCase))
+        {
+            var episodeMinutes = entry.RuntimeMinutes is > 5 and <= 90 ? entry.RuntimeMinutes : 30;
+            return ComputeSpanFromRuntime(episodeMinutes, Math.Min(2, maxSpan));
+        }
+
+        if (entry.RuntimeMinutes > 0)
+        {
+            return ComputeSpanFromRuntime(entry.RuntimeMinutes, maxSpan);
+        }
+
+        return Math.Clamp(requestedSpan ?? 1, 1, maxSpan);
+    }
+
+    private static Guid? ResolveCatalogId(
+        AiGeneratedSlot slot,
+        HashSet<Guid> validIds,
+        IReadOnlyList<AiCatalogEntry> catalogInPromptOrder)
+    {
+        var id = slot.JellyfinItemId
+            ?? slot.Id
+            ?? slot.ItemId
+            ?? slot.Candidates?.FirstOrDefault()?.JellyfinItemId
+            ?? slot.Candidates?.FirstOrDefault()?.Id;
+        if (id is Guid guid && validIds.Contains(guid))
+        {
+            return guid;
+        }
+
+        if (slot.N is int n && n >= 1 && n <= catalogInPromptOrder.Count)
+        {
+            return catalogInPromptOrder[n - 1].Id;
+        }
+
+        var title = slot.Title ?? slot.Name;
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return null;
+        }
+
+        var needle = NormalizeTitle(title);
+        if (needle.Length < 3)
+        {
+            return null;
+        }
+
+        AiCatalogEntry? fallback = null;
+        foreach (var entry in catalogInPromptOrder)
+        {
+            var haystack = NormalizeTitle(entry.Title);
+            if (haystack.Length == 0)
+            {
+                continue;
+            }
+
+            if (haystack != needle && !haystack.Contains(needle, StringComparison.Ordinal) && !needle.Contains(haystack, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(slot.Type)
+                && !string.Equals(entry.Type, slot.Type, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (slot.Year is int year && entry.Year is int entryYear && year != entryYear)
+            {
+                continue;
+            }
+
+            if (haystack == needle)
+            {
+                return entry.Id;
+            }
+
+            fallback ??= entry;
+        }
+
+        return fallback?.Id;
+    }
+
+    private static string NormalizeTitle(string title)
+    {
+        var trimmed = title.Trim();
+        if (trimmed.StartsWith("the ", StringComparison.OrdinalIgnoreCase))
+        {
+            trimmed = trimmed[4..];
+        }
+
+        return Regex.Replace(trimmed, @"[^a-z0-9]+", "", RegexOptions.IgnoreCase).ToLowerInvariant();
+    }
+
     private static bool IsRangeOccupied(bool[] occupied, int start, int span)
     {
         for (var i = start; i < start + span && i < occupied.Length; i++)
@@ -671,9 +774,9 @@ public class AiLineupGeneratorService
             You are a TV channel scheduling assistant for ChannelFlow.
             Build a 48-slot daily lineup (each base slot is 30 minutes, slotIndex 0 = midnight).
             Reply with JSON only using this shape:
-            {"slots":[{"slotIndex":0,"spanSlots":1,"jellyfinItemId":"guid"}, ...]}
+            {"slots":[{"slotIndex":0,"spanSlots":1,"n":1,"jellyfinItemId":"guid","title":"Show Name"}, ...]}
             Rules:
-            - Only use jellyfinItemId values from the provided catalog
+            - Every slot must identify a catalog row with n (preferred), jellyfinItemId, or title copied from the catalog. Do not invent GUIDs.
             - spanSlots = number of consecutive 30-minute blocks (1-8). Use ceil(runtimeMinutes / 30) for movies and long episodes.
             - Assign enough spanSlots to cover the item runtime; under-sized spans truncate content during playout.
             - Do not overlap spans. slotIndex + spanSlots must be <= 48.
@@ -763,16 +866,15 @@ public class AiLineupGeneratorService
                     })
                 },
             fineTune = channel.AiFineTunePrompt ?? string.Empty,
-            catalog = manifest.Catalog.Select(c => new
+            catalog = manifest.Catalog.Select((c, index) => new
             {
-                id = c.Id,
+                n = index + 1,
+                jellyfinItemId = c.Id,
                 title = c.Title,
                 type = c.Type,
                 year = c.Year,
                 runtimeMinutes = c.RuntimeMinutes,
-                genres = c.Genres,
-                tags = c.Tags,
-                plot = c.Plot
+                genres = c.Genres
             }),
             totalAvailable = manifest.TotalAvailable
         };
@@ -845,7 +947,22 @@ internal class AiGeneratedSlot
 
     public int? SpanSlots { get; set; }
 
+    [JsonPropertyName("n")]
+    public int? N { get; set; }
+
     public Guid? JellyfinItemId { get; set; }
+
+    public Guid? Id { get; set; }
+
+    public Guid? ItemId { get; set; }
+
+    public string? Title { get; set; }
+
+    public string? Name { get; set; }
+
+    public string? Type { get; set; }
+
+    public int? Year { get; set; }
 
     public List<AiGeneratedCandidate>? Candidates { get; set; }
 }
@@ -853,4 +970,6 @@ internal class AiGeneratedSlot
 internal class AiGeneratedCandidate
 {
     public Guid? JellyfinItemId { get; set; }
+
+    public Guid? Id { get; set; }
 }

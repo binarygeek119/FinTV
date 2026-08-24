@@ -18,4 +18,4 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - name: Publish server
-        run: dotnet publish src/FinTv.Server/FinTv.Server.csproj -c Release /p:SkipLogoFetch=true
+        run: dotnet publish src/ChannelFlow.Server/ChannelFlow.Server.csproj -c Release /p:SkipLogoFetch=true
