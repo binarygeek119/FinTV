@@ -33,7 +33,7 @@ public static class AiPlayoutTemplates
                 new AiPlayoutDaypart(34, 37, "Teen Hour",
                     "Teen-oriented TV and animation; not preschool content."),
                 new AiPlayoutDaypart(38, 43, "Primetime",
-                    "Flagship primetime shows and movies; longer spanSlots allowed for features.", maxSpanSlots: 8)
+                    "Flagship primetime TV series first; at most one movie as a feature. Longer spanSlots allowed for that feature.", maxSpanSlots: 8)
             ]
         },
         new AiPlayoutTemplate

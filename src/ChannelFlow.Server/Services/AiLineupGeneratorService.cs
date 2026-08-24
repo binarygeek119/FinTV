@@ -91,7 +91,7 @@ public class AiLineupGeneratorService
         var playoutTemplate = AiPlayoutTemplates.Resolve(channel);
         var provider = providerOverride ?? FinTvRuntime.Current?.Configuration.Ai.DefaultProvider ?? AiProvider.OpenAi;
 
-        var systemPrompt = BuildSystemPrompt(catalogMode, playoutTemplate);
+        var systemPrompt = BuildSystemPrompt(catalogMode, channel.ContentType, playoutTemplate);
         var userPrompt = BuildUserPrompt(channel, manifest, ruleBrief, catalogMode, playoutTemplate);
         FinTvDebugLog.Ai(
             _logger,
@@ -404,7 +404,11 @@ public class AiLineupGeneratorService
             return PackMarathonSlots(catalogById, channelFilterJson, yearConstraints, playoutTemplate);
         }
 
-        FillEmptySlotsFromCatalog(result, occupied, catalogById);
+        FillEmptySlotsFromCatalog(
+            result,
+            occupied,
+            catalogById,
+            preferSeries: catalogMode is ChannelCatalogMode.TvOnly or ChannelCatalogMode.Mixed);
         return FillEmptySlotsWithFilterFallback(result, occupied, channelFilterJson);
     }
 
@@ -484,7 +488,7 @@ public class AiLineupGeneratorService
             cursor += span;
         }
 
-        FillEmptySlotsFromCatalog(result, occupied, catalogById);
+        FillEmptySlotsFromCatalog(result, occupied, catalogById, preferSeries: true);
         return FillEmptySlotsWithFilterFallback(result, occupied, channelFilterJson);
     }
 
@@ -521,7 +525,8 @@ public class AiLineupGeneratorService
     private static List<LineupSlotDto> FillEmptySlotsFromCatalog(
         Dictionary<int, LineupSlotDto> result,
         bool[] occupied,
-        Dictionary<Guid, AiCatalogEntry> catalogById)
+        Dictionary<Guid, AiCatalogEntry> catalogById,
+        bool preferSeries = false)
     {
         if (catalogById.Count == 0)
         {
@@ -529,7 +534,8 @@ public class AiLineupGeneratorService
         }
 
         var fillQueue = catalogById.Values
-            .OrderBy(e => e.Year ?? int.MaxValue)
+            .OrderBy(e => preferSeries && e.Type is "Movie" or "Clip" ? 1 : 0)
+            .ThenBy(e => e.Year ?? int.MaxValue)
             .ThenBy(e => e.PremiereDate ?? DateTime.MaxValue)
             .ThenBy(e => e.Title, StringComparer.OrdinalIgnoreCase)
             .Select(e => e.Id)
@@ -763,12 +769,21 @@ public class AiLineupGeneratorService
         }
     }
 
-    private static string BuildSystemPrompt(ChannelCatalogMode catalogMode, AiPlayoutTemplate playoutTemplate)
+    private static string BuildSystemPrompt(
+        ChannelCatalogMode catalogMode,
+        ChannelContentType contentType,
+        AiPlayoutTemplate playoutTemplate)
     {
         var templateSection = AiPlayoutTemplates.BuildPromptSection(playoutTemplate);
         var templateBlock = string.IsNullOrWhiteSpace(templateSection)
             ? string.Empty
             : "\n" + templateSection;
+
+        var mixedRule = catalogMode == ChannelCatalogMode.Mixed
+            ? contentType == ChannelContentType.Movie
+                ? "\n- Mixed mode on a movie channel: movies are the default. TV series are optional filler only."
+                : "\n- Mixed mode on a TV channel: fill most of the 48 slots with TV series (consecutive episode blocks). Movies are occasional primetime or late-night features only (about 1-3 per day). Do not build a movie-majority lineup."
+            : string.Empty;
 
         return """
             You are a TV channel scheduling assistant for ChannelFlow.
@@ -784,7 +799,7 @@ public class AiLineupGeneratorService
             - Vary series across the day; switch shows between blocks instead of isolating single random episodes.
             - Schedule movies in release chronological order using catalog year and premiere date (earliest first).
             - Catalog modes: TvOnly (series), MovieOnly, Mixed (TV+movies), MusicVideoOnly (music videos).
-            """ + $"\nCatalog mode: {catalogMode}." + templateBlock;
+            """ + mixedRule + $"\nCatalog mode: {catalogMode}." + templateBlock;
     }
 
     private string BuildUserPrompt(

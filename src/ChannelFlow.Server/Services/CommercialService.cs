@@ -25,7 +25,8 @@ public class CommercialService
         ResolvedCandidate content,
         DateTime contentStart,
         DateTime contentEnd,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        DateTime? slotEnd = null)
     {
         if (content.JellyfinItemId is null)
         {
@@ -65,23 +66,83 @@ public class CommercialService
                     break;
                 }
 
-                _db.PlayoutItems.Add(new PlayoutItem
-                {
-                    ChannelId = channel.Id,
-                    CommercialId = commercial.Id,
-                    JellyfinItemId = commercial.Source == CommercialSource.Jellyfin && commercial.JellyfinItemId != Guid.Empty
-                        ? commercial.JellyfinItemId
-                        : null,
-                    Start = cursor,
-                    Finish = end,
-                    Title = commercial.Title,
-                    FillerKind = FillerKind.PostRoll,
-                    GuideGroup = "commercial"
-                });
-
+                AddCommercialPlayoutItem(channel.Id, commercial, cursor, end);
                 cursor = end;
             }
         }
+
+        await FillSlotPaddingAsync(channel, preset, contentEnd, slotEnd, cancellationToken);
+    }
+
+    private async Task FillSlotPaddingAsync(
+        Channel channel,
+        CommercialPreset preset,
+        DateTime from,
+        DateTime? slotEnd,
+        CancellationToken cancellationToken)
+    {
+        if (slotEnd is not DateTime until || until <= from)
+        {
+            return;
+        }
+
+        var perBreak = preset.PostRollCount > 0 ? preset.PostRollCount : 1;
+        var cursor = from;
+        var guard = 0;
+        while (cursor < until && guard++ < 48)
+        {
+            if (until - cursor < TimeSpan.FromSeconds(5))
+            {
+                break;
+            }
+
+            var commercials = await PickCommercialsAsync(channel, perBreak, cancellationToken);
+            if (commercials.Count == 0)
+            {
+                break;
+            }
+
+            var placed = false;
+            foreach (var commercial in commercials)
+            {
+                if (commercial.Duration <= TimeSpan.Zero)
+                {
+                    continue;
+                }
+
+                var end = cursor.Add(commercial.Duration);
+                if (end > until)
+                {
+                    continue;
+                }
+
+                AddCommercialPlayoutItem(channel.Id, commercial, cursor, end);
+                cursor = end;
+                placed = true;
+            }
+
+            if (!placed)
+            {
+                break;
+            }
+        }
+    }
+
+    private void AddCommercialPlayoutItem(Guid channelId, Commercial commercial, DateTime start, DateTime end)
+    {
+        _db.PlayoutItems.Add(new PlayoutItem
+        {
+            ChannelId = channelId,
+            CommercialId = commercial.Id,
+            JellyfinItemId = commercial.Source == CommercialSource.Jellyfin && commercial.JellyfinItemId != Guid.Empty
+                ? commercial.JellyfinItemId
+                : null,
+            Start = start,
+            Finish = end,
+            Title = commercial.Title,
+            FillerKind = FillerKind.PostRoll,
+            GuideGroup = "commercial"
+        });
     }
 
     public async Task<List<Commercial>> PickCommercialsAsync(Channel channel, int count, CancellationToken cancellationToken)

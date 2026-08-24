@@ -162,7 +162,7 @@ public class LineupGeneratorService
                 });
             }
 
-            await _commercialService.InsertCommercialsAsync(channel, picked, contentStart, contentEnd, cancellationToken);
+            await _commercialService.InsertCommercialsAsync(channel, picked, contentStart, contentEnd, cancellationToken, blockEnd);
 
             _db.PlayoutHistory.Add(new PlayoutHistoryEntry
             {

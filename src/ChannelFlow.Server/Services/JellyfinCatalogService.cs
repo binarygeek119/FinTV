@@ -157,7 +157,10 @@ public class JellyfinCatalogService
             query.Name = collectionName;
         }
 
-        var requiredTags = CollectRequiredTags(channel, filter);
+        // Episode rows rarely copy series tags. Once we already chose a series, play its episodes.
+        var requiredTags = parentId.HasValue
+            ? Array.Empty<string>()
+            : CollectRequiredTags(channel, filter);
         var items = GetItemsWithTagFallback(
             query,
             requiredTags,
@@ -196,10 +199,24 @@ public class JellyfinCatalogService
     public AiCatalogBrowseStats BrowseForAiManifestWithStats(Channel channel, ChannelCatalogMode catalogMode, int limit)
     {
         var scheduleDate = _holidays.GetScheduleDateUtc(DateTime.UtcNow);
-        var kinds = GetManifestItemTypes(channel, catalogMode);
         var requiredTags = CollectRequiredTags(channel, slotFilter: null);
         var clampedLimit = Math.Clamp(limit, 1, 1000);
 
+        if (catalogMode == ChannelCatalogMode.Mixed
+            && !PastTenseNewsCatalog.IsPastTenseNewsChannel(channel)
+            && channel.ContentType is not ChannelContentType.Music and not ChannelContentType.MusicVideo)
+        {
+            var series = BrowseManifestKind(channel, [BaseItemKind.Series], requiredTags, scheduleDate, clampedLimit);
+            var movies = BrowseManifestKind(channel, [BaseItemKind.Movie], requiredTags, scheduleDate, clampedLimit);
+            return new AiCatalogBrowseStats
+            {
+                Items = TakeBalancedMixedCatalog(series, movies, channel.ContentType, clampedLimit),
+                TagMatchedCount = series.Count + movies.Count,
+                AfterConstraintCount = series.Count + movies.Count
+            };
+        }
+
+        var kinds = GetManifestItemTypes(channel, catalogMode);
         var query = CreateManifestBrowseQuery(kinds, channel, clampedLimit);
         var items = GetItemsWithTagFallback(
             query,
@@ -217,6 +234,65 @@ public class JellyfinCatalogService
             TagMatchedCount = libraryItemCount,
             AfterConstraintCount = filtered.Count
         };
+    }
+
+    private IReadOnlyList<BaseItem> BrowseManifestKind(
+        Channel channel,
+        BaseItemKind[] kinds,
+        IReadOnlyList<string> requiredTags,
+        DateOnly scheduleDate,
+        int cap)
+    {
+        var query = CreateManifestBrowseQuery(kinds, channel, cap);
+        var items = GetItemsWithTagFallback(
+            query,
+            requiredTags,
+            () => CreateManifestBrowseQuery(kinds, channel, cap));
+        return ApplyChannelFilterMetadata(
+            ApplyCatalogConstraints(items, channel, scheduleDate),
+            channel);
+    }
+
+    private static IReadOnlyList<BaseItem> TakeBalancedMixedCatalog(
+        IReadOnlyList<BaseItem> series,
+        IReadOnlyList<BaseItem> movies,
+        ChannelContentType contentType,
+        int limit)
+    {
+        var preferShows = contentType != ChannelContentType.Movie;
+        var primary = preferShows ? series : movies;
+        var secondary = preferShows ? movies : series;
+        var primaryTake = primary.Count == 0
+            ? 0
+            : Math.Min(primary.Count, Math.Max(1, (int)Math.Round(limit * 0.7)));
+        var secondaryTake = Math.Min(secondary.Count, Math.Max(0, limit - primaryTake));
+        if (primaryTake + secondaryTake < limit)
+        {
+            primaryTake = Math.Min(primary.Count, limit - secondaryTake);
+        }
+
+        return InterleaveCatalog(primary.Take(primaryTake).ToList(), secondary.Take(secondaryTake).ToList());
+    }
+
+    private static List<BaseItem> InterleaveCatalog(IReadOnlyList<BaseItem> first, IReadOnlyList<BaseItem> second)
+    {
+        var mixed = new List<BaseItem>(first.Count + second.Count);
+        var i = 0;
+        var j = 0;
+        while (i < first.Count || j < second.Count)
+        {
+            if (i < first.Count)
+            {
+                mixed.Add(first[i++]);
+            }
+
+            if (j < second.Count)
+            {
+                mixed.Add(second[j++]);
+            }
+        }
+
+        return mixed;
     }
 
     public int CountForAiManifest(Channel channel, ChannelCatalogMode catalogMode)
@@ -274,24 +350,28 @@ public class JellyfinCatalogService
     {
         if (item is Episode episode)
         {
-            if (!constraints.UseFirstEpisodeYearForSeries)
+            if (constraints.UseFirstEpisodeYearForSeries)
             {
-                return false;
+                var series = ResolveSeriesForEpisode(episode);
+                if (series is not null)
+                {
+                    var seriesYear = GetCatalogReleaseYear(series, constraints);
+                    if (!seriesYear.HasValue)
+                    {
+                        return true;
+                    }
+
+                    return constraints.ContainsYear(seriesYear);
+                }
             }
 
-            var series = ResolveSeriesForEpisode(episode);
-            if (series is null)
-            {
-                return false;
-            }
-
-            var seriesYear = GetCatalogReleaseYear(series, constraints);
-            if (!seriesYear.HasValue)
+            var episodeYear = GetReleaseYear(episode);
+            if (!episodeYear.HasValue)
             {
                 return true;
             }
 
-            return constraints.ContainsYear(seriesYear);
+            return constraints.ContainsYear(episodeYear);
         }
 
         var year = GetCatalogReleaseYear(item, constraints);

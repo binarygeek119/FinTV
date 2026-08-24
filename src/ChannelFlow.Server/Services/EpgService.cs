@@ -68,6 +68,7 @@ public class EpgService
                 && (p.GuideGroup == null || p.GuideGroup != "commercial"))
             .AsNoTracking()
             .ToListAsync(cancellationToken);
+        PadProgramsToTimeSlots(items, tz);
 
         var metadataByItemId = _guideMetadata.ResolveBatch(items.Select(i => i.JellyfinItemId));
         var channelsById = channels.ToDictionary(c => c.Id);
@@ -139,6 +140,53 @@ public class EpgService
     private static DateTime AsUtc(DateTime value)
         => value.Kind == DateTimeKind.Utc ? value : DateTime.SpecifyKind(value, DateTimeKind.Utc);
 
+    /// <summary>
+    /// Extends programme stops to the next 30-minute clock slot so commercial padding
+    /// does not leave holes in the guide. Never overlaps the following programme.
+    /// </summary>
+    private static void PadProgramsToTimeSlots(List<PlayoutItem> items, TimeZoneInfo tz)
+    {
+        foreach (var channelItems in items.GroupBy(item => item.ChannelId))
+        {
+            var ordered = channelItems.OrderBy(item => item.Start).ThenBy(item => item.Finish).ToList();
+            for (var index = 0; index < ordered.Count; index++)
+            {
+                var item = ordered[index];
+                var finish = AsUtc(item.Finish);
+                var padded = CeilToHalfHourUtc(finish, tz);
+                if (index + 1 < ordered.Count)
+                {
+                    var nextStart = AsUtc(ordered[index + 1].Start);
+                    if (padded > nextStart)
+                    {
+                        padded = nextStart;
+                    }
+                }
+
+                if (padded > finish)
+                {
+                    item.Finish = padded;
+                }
+            }
+        }
+    }
+
+    private static DateTime CeilToHalfHourUtc(DateTime utc, TimeZoneInfo tz)
+    {
+        utc = AsUtc(utc);
+        var local = TimeZoneInfo.ConvertTimeFromUtc(utc, tz);
+        if (local.Second == 0 && local.Millisecond == 0 && (local.Minute == 0 || local.Minute == 30))
+        {
+            return utc;
+        }
+
+        var dayStart = new DateTime(local.Year, local.Month, local.Day, 0, 0, 0, DateTimeKind.Unspecified);
+        var elapsedMinutes = (int)Math.Floor((local - dayStart).TotalMinutes);
+        var ceiledMinutes = ((elapsedMinutes / 30) + 1) * 30;
+        var ceiledLocal = DateTime.SpecifyKind(dayStart.AddMinutes(ceiledMinutes), DateTimeKind.Unspecified);
+        return TimeZoneInfo.ConvertTimeToUtc(ceiledLocal, tz);
+    }
+
     private async Task<XDocument> BuildXmlTvDocumentAsync(string baseUrl, CancellationToken cancellationToken)
     {
         var channels = await _db.Channels.Where(c => c.Enabled).OrderBy(c => c.Number).AsNoTracking().ToListAsync(cancellationToken);
@@ -168,6 +216,7 @@ public class EpgService
                 && (p.GuideGroup == null || p.GuideGroup != "commercial"))
             .AsNoTracking()
             .ToListAsync(cancellationToken);
+        PadProgramsToTimeSlots(items, ScheduleTimeZoneHelper.ResolveScheduleTimeZone());
 
         var metadataByItemId = _guideMetadata.ResolveBatch(items.Select(i => i.JellyfinItemId));
         var channelsById = channels.ToDictionary(c => c.Id);
