@@ -68,6 +68,7 @@ public class EpgService
                 && (p.GuideGroup == null || p.GuideGroup != "commercial"))
             .AsNoTracking()
             .ToListAsync(cancellationToken);
+        items = MergeSplitPrograms(items);
         PadProgramsToTimeSlots(items, tz);
 
         var metadataByItemId = _guideMetadata.ResolveBatch(items.Select(i => i.JellyfinItemId));
@@ -141,6 +142,38 @@ public class EpgService
         => value.Kind == DateTimeKind.Utc ? value : DateTime.SpecifyKind(value, DateTimeKind.Utc);
 
     /// <summary>
+    /// Combines chapter-split segments of the same show so the guide shows one programme.
+    /// Mid-break commercials are already excluded from <paramref name="items"/>.
+    /// </summary>
+    private static List<PlayoutItem> MergeSplitPrograms(List<PlayoutItem> items)
+    {
+        var merged = new List<PlayoutItem>();
+        foreach (var item in items.OrderBy(i => i.ChannelId).ThenBy(i => i.Start))
+        {
+            if (merged.Count > 0)
+            {
+                var last = merged[^1];
+                if (last.ChannelId == item.ChannelId
+                    && last.JellyfinItemId.HasValue
+                    && last.JellyfinItemId == item.JellyfinItemId
+                    && item.Start <= last.Finish.AddMinutes(8))
+                {
+                    if (item.Finish > last.Finish)
+                    {
+                        last.Finish = item.Finish;
+                    }
+
+                    continue;
+                }
+            }
+
+            merged.Add(item);
+        }
+
+        return merged;
+    }
+
+    /// <summary>
     /// Extends programme stops to the next 30-minute clock slot so commercial padding
     /// does not leave holes in the guide. Never overlaps the following programme.
     /// </summary>
@@ -200,6 +233,7 @@ public class EpgService
                 && (p.GuideGroup == null || p.GuideGroup != "commercial"))
             .AsNoTracking()
             .ToListAsync(cancellationToken);
+        items = MergeSplitPrograms(items);
         PadProgramsToTimeSlots(items, ScheduleTimeZoneHelper.ResolveScheduleTimeZone());
 
         var metadataByItemId = _guideMetadata.ResolveBatch(items.Select(i => i.JellyfinItemId));

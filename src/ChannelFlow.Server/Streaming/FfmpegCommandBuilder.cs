@@ -755,8 +755,8 @@ public class FfmpegCommandBuilder
             BugPlacementMode.BottomLeft => $"{margin}:H-h-{margin}",
             BugPlacementMode.BottomRight => $"W-w-{margin}:H-h-{margin}",
             BugPlacementMode.None => string.Empty,
-            BugPlacementMode.Auto => $"W-w-{margin}:{margin}",
-            _ => $"W-w-{margin}:{margin}"
+            BugPlacementMode.Auto => $"W-w-{margin}:H-h-{margin}",
+            _ => $"W-w-{margin}:H-h-{margin}"
         };
     }
 

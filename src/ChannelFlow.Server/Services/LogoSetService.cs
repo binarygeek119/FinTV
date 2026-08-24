@@ -286,7 +286,7 @@ public class LogoSetService
         channel.LogoSetId = logoSet.Id;
         channel.LogoFileName = entry.FileName;
         channel.ChannelLogoPath = ResolveLogoPath(logoSet, entry.RelativePath);
-        channel.BugPlacement = BugPlacementMode.Auto;
+        channel.BugPlacement = BugPlacementMode.BottomRight;
     }
 
     private async Task ApplyFlowWireLogoAsync(LogoSet logoSet, CancellationToken cancellationToken)

@@ -24,7 +24,7 @@ public class Channel
 
     public string? LogoFileName { get; set; }
 
-    public BugPlacementMode BugPlacement { get; set; } = BugPlacementMode.Auto;
+    public BugPlacementMode BugPlacement { get; set; } = BugPlacementMode.BottomRight;
 
     public Guid? CommercialPresetId { get; set; }
 
@@ -279,11 +279,11 @@ public class CommercialPreset
 
     public int TimerIntervalMinutes { get; set; } = 12;
 
-    public int PreRollCount { get; set; }
+    public int PreRollCount { get; set; } = 2;
 
     public int PostRollCount { get; set; } = 2;
 
-    public int MidRollCount { get; set; } = 1;
+    public int MidRollCount { get; set; } = 2;
 
     [JsonIgnore]
     public ICollection<Channel> Channels { get; set; } = new List<Channel>();

@@ -20,7 +20,7 @@ public class ChannelUpsertRequest
 
     public bool ScanlinesEnabled { get; set; }
 
-    public BugPlacementMode BugPlacement { get; set; }
+    public BugPlacementMode BugPlacement { get; set; } = BugPlacementMode.BottomRight;
 
     public Guid? LogoSetId { get; set; }
 

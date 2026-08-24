@@ -39,6 +39,7 @@
         auto: 0, topLeft: 1, topRight: 2, bottomLeft: 3, bottomRight: 4, none: 5,
         Auto: 0, TopLeft: 1, TopRight: 2, BottomLeft: 3, BottomRight: 4, None: 5
     };
+    const DEFAULT_BUG_PLACEMENT = BUG_PLACEMENT_VALUES.BottomRight;
 
     let channels = [];
     let logoSets = [];
@@ -244,7 +245,7 @@
 
         channel.contentType = resolveEnumValue(CONTENT_TYPE_VALUES, channel.contentType, 0);
         channel.aspectRatio = resolveEnumValue(ASPECT_RATIO_VALUES, channel.aspectRatio, 0);
-        channel.bugPlacement = resolveEnumValue(BUG_PLACEMENT_VALUES, channel.bugPlacement, 0);
+        channel.bugPlacement = resolveEnumValue(BUG_PLACEMENT_VALUES, channel.bugPlacement, DEFAULT_BUG_PLACEMENT);
         channel.commercialSearchPlaylistIds = Array.isArray(channel.commercialSearchPlaylistIds)
             ? channel.commercialSearchPlaylistIds
             : [];
@@ -999,7 +1000,7 @@
         setSelectEnum('ch-content-type', CONTENT_TYPE_VALUES, c.contentType, 0);
         setSelectEnum('ch-aspect', ASPECT_RATIO_VALUES, c.aspectRatio, 0);
         $('ch-scanlines').checked = c.scanlinesEnabled;
-        setSelectEnum('ch-bug', BUG_PLACEMENT_VALUES, c.bugPlacement, 0);
+        setSelectEnum('ch-bug', BUG_PLACEMENT_VALUES, c.bugPlacement, DEFAULT_BUG_PLACEMENT);
         $('ch-audio').value = c.audioLanguage || 'eng';
         if ($('ch-weather-location')) {
             $('ch-weather-location').value = parseWeatherLocationQuery(c.weatherLocationQuery) || '';
@@ -1052,7 +1053,7 @@
             contentType: readSelectEnum('ch-content-type', CONTENT_TYPE_VALUES, 0),
             aspectRatio: readSelectEnum('ch-aspect', ASPECT_RATIO_VALUES, 0),
             scanlinesEnabled: !!$('ch-scanlines')?.checked,
-            bugPlacement: readSelectEnum('ch-bug', BUG_PLACEMENT_VALUES, 0),
+            bugPlacement: readSelectEnum('ch-bug', BUG_PLACEMENT_VALUES, DEFAULT_BUG_PLACEMENT),
             audioLanguage: $('ch-audio')?.value.trim() || 'eng',
             logoSetId: $('ch-logo-set')?.value ? $('ch-logo-set').value : null,
             logoFileName: $('ch-logo-file')?.value || null,
@@ -1254,7 +1255,7 @@
         setSelectEnum('deep-ch-content-type', CONTENT_TYPE_VALUES, channel.contentType, 0);
         setSelectEnum('deep-ch-aspect', ASPECT_RATIO_VALUES, channel.aspectRatio, 0);
         $('deep-ch-scanlines').checked = !!channel.scanlinesEnabled;
-        setSelectEnum('deep-ch-bug', BUG_PLACEMENT_VALUES, channel.bugPlacement, 0);
+        setSelectEnum('deep-ch-bug', BUG_PLACEMENT_VALUES, channel.bugPlacement, DEFAULT_BUG_PLACEMENT);
         $('deep-ch-audio').value = channel.audioLanguage || 'eng';
         if ($('deep-ch-weather-location')) {
             $('deep-ch-weather-location').value = parseWeatherLocationQuery(channel.weatherLocationQuery) || '';
@@ -1369,7 +1370,7 @@
             contentType: readSelectEnum('deep-ch-content-type', CONTENT_TYPE_VALUES, 0),
             aspectRatio: readSelectEnum('deep-ch-aspect', ASPECT_RATIO_VALUES, 0),
             scanlinesEnabled: !!$('deep-ch-scanlines')?.checked,
-            bugPlacement: readSelectEnum('deep-ch-bug', BUG_PLACEMENT_VALUES, 0),
+            bugPlacement: readSelectEnum('deep-ch-bug', BUG_PLACEMENT_VALUES, DEFAULT_BUG_PLACEMENT),
             audioLanguage: $('deep-ch-audio')?.value.trim() || 'eng',
             logoSetId: $('deep-ch-logo-set')?.value ? $('deep-ch-logo-set').value : null,
             logoFileName: $('deep-ch-logo-file')?.value || null,
