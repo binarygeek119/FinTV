@@ -79,7 +79,7 @@ public static class AiPlayoutTemplates
             Description = "Network clock: Early Bird encore of yesterday Prime Time, morning through teen blocks, 6–10pm flagship, and late night wrapping midnight.",
             Dayparts = CreateNetworkClockDayparts(
                 lateNight: "22:00-02:00 uncut / edgy / experimental. Prefer TV-MA or UR series and R/UR movies. No kids content.",
-                earlyBird: "02:00-05:00 encore. Mark as rerun slots (kind rerun). ChannelFlow repeats yesterday's Prime Time (18:00-22:00). Do not assign catalog titles.",
+                earlyBird: "02:00-05:00 encore. Mark as rerun slots (kind rerun). ChannelFlow repeats yesterday's Prime Time TV series only (18:00-22:00). Movies are not encored overnight. Do not assign catalog titles.",
                 beforeSchool: "05:00-06:00 high-energy cartoons to wake the audience. Prefer TV-Y7/TV-G and G/PG.",
                 morning: "06:00-12:00 educational, family-friendly programming. Prefer TV-G/TV-PG and G/PG.",
                 midDay: "12:00-15:00 thematic / casual viewing. No reruns. Prefer TV-PG/TV-14 and PG/PG-13.",
@@ -192,7 +192,7 @@ public static class AiPlayoutTemplates
             Description = "126.2 GET LEARNEDED: educational network clock from Early Bird lecture encore through late-night deep dives.",
             Dayparts = CreateNetworkClockDayparts(
                 lateNight: "22:00-02:00 complex sociology, dark history, and metaphysical theories. Prefer TV-PG/TV-14.",
-                earlyBird: "02:00-05:00 encore. Mark as rerun slots (kind rerun). ChannelFlow repeats yesterday's Prime Time lectures. Do not assign catalog titles.",
+                earlyBird: "02:00-05:00 encore. Mark as rerun slots (kind rerun). ChannelFlow repeats yesterday's Prime Time lectures and series only. Movies are not encored overnight. Do not assign catalog titles.",
                 beforeSchool: "05:00-06:00 Fact of the Day animated shorts. Prefer TV-Y/G.",
                 morning: "06:00-12:00 science for kids and basic tutorials. Prefer TV-G/G.",
                 midDay: "12:00-15:00 nature and history documentaries. No reruns. Prefer TV-G/PG.",
@@ -219,7 +219,7 @@ public static class AiPlayoutTemplates
             Description = "124.3 Slappy: comedy network clock with a Friday 5–8pm kid-cartoon Toon Takeover.",
             Dayparts = CreateNetworkClockDayparts(
                 lateNight: "22:00-02:00 uncensored adult stand-up and surrealist experimental comedy. Prefer TV-MA/UR.",
-                earlyBird: "02:00-05:00 encore. Mark as rerun slots (kind rerun). ChannelFlow repeats yesterday's Prime Time. Do not assign catalog titles.",
+                earlyBird: "02:00-05:00 encore. Mark as rerun slots (kind rerun). ChannelFlow repeats yesterday's Prime Time TV series only. Movies are not encored overnight. Do not assign catalog titles.",
                 beforeSchool: "05:00-06:00 classic slapstick animated shorts. Prefer TV-G/G.",
                 morning: "06:00-12:00 clean stand-up and family sketches. Prefer TV-G/G.",
                 midDay: "12:00-15:00 thematic sitcom marathons. No reruns. Prefer TV-PG/PG.",
@@ -395,7 +395,7 @@ public static class AiPlayoutTemplates
         if (template.Dayparts.Any(d => d.Name.Contains("rerun", StringComparison.OrdinalIgnoreCase)))
         {
             lines.Add(UsesNetworkClock(template.Id)
-                ? "- Early Bird Reruns must use kind \"rerun\" (no catalog titles). ChannelFlow fills them with yesterday's Prime Time (18:00-22:00)."
+                ? "- Early Bird Reruns must use kind \"rerun\" (no catalog titles). ChannelFlow fills them with yesterday's Prime Time TV series (18:00-22:00). Movies from last night are not repeated."
                 : "- Overnight Reruns dayparts must use kind \"rerun\" (no catalog titles). ChannelFlow fills them with yesterday's primetime.");
         }
 
@@ -406,7 +406,8 @@ public static class AiPlayoutTemplates
             lines.Add("- Do not place kids content in Late Night.");
             lines.Add("- Do not place adult-only titles in Before School, Morning, or After School.");
             lines.Add("- Do not run a series block across a daypart boundary. Typical series blocks are 1-2 episodes, not multi-hour dumps of the same show.");
-            lines.Add("- Put movies in Prime Time when this channel's daypart guide asks for features/blockbusters. Do not fill Late Night with Saturday-morning cartoons.");
+            lines.Add("- Put movies only where this channel's daypart guide asks for features/blockbusters (usually Prime Time). At most two unique movies per day. Do not fill Morning, Mid-Day, or After School with movies, and do not repeat a movie the same day.");
+            lines.Add("- Do not fill Late Night with Saturday-morning cartoons.");
         }
 
         if (template.Id is "kids-all-day")
@@ -420,16 +421,13 @@ public static class AiPlayoutTemplates
         if (template.Id is "movie-marathon")
         {
             lines.Add("- Build a weekly movie grid with sticky clock times. Friday/Saturday nights are event double-features.");
-            lines.Add("- Do not dump movies in chronological order from slot 0; schedule them like a movie channel.");
+            lines.Add("- Do not dump the same movie across leftover half-hours; each title uses spanSlots from runtime, then pick a different title.");
+            lines.Add("- Within each daypart, prefer movies in release chronological order (earliest catalog year first), rotating titles so the same film is not scheduled twice the same day.");
         }
         if (template.Id is "holiday-channel")
         {
             lines.Add("- Mix holiday TV episode blocks and holiday movies. Keep repeating titles at the same times.");
             lines.Add("- Only use catalog titles that match the active holiday.");
-        }
-        else if (template.Id is not "past-tense-news")
-        {
-            lines.Add("- Within each daypart, schedule movies in release chronological order (earliest catalog year first).");
         }
 
         if (UsesSeriesEpisodeBlocking(template))

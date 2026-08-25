@@ -54,13 +54,15 @@ public class SmartSelectionService
             .ToListAsync(cancellationToken);
 
         var resolved = new List<(SlotCandidate Candidate, ResolvedCandidate Item, double Score)>();
+        var preferSeries = channel.ContentType == ChannelContentType.TvShow
+            && ChannelAiRules.ResolveCatalogMode(channel) != ChannelCatalogMode.MovieOnly;
 
         foreach (var candidate in slot.Candidates.OrderBy(c => c.SortOrder))
         {
             var items = await ResolveCandidateAsync(channel, candidate, scheduleDate, anchor, slot.SlotIndex, cancellationToken);
             foreach (var item in items)
             {
-                var score = ComputeScore(item, candidate.Weight, recentIds, anchor);
+                var score = ComputeScore(item, candidate.Weight, recentIds, anchor, scheduleDate, preferSeries);
                 resolved.Add((candidate, item, score));
             }
         }
@@ -74,7 +76,11 @@ public class SmartSelectionService
         var maxScore = resolved.Max(r => r.Score);
         var top = resolved.Where(r => r.Score >= maxScore - 0.001).ToList();
         var pick = top[rng.Next(top.Count)].Item;
-        anchor.LastAired[pick.JellyfinItemId ?? Guid.Empty] = scheduleDate.ToDateTime(TimeOnly.MinValue);
+        if (pick.JellyfinItemId is Guid pickedId)
+        {
+            anchor.LastAired[pickedId] = scheduleDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+        }
+
         return pick;
     }
 
@@ -214,9 +220,20 @@ public class SmartSelectionService
         return name;
     }
 
-    private static double ComputeScore(ResolvedCandidate item, int weight, List<Guid?> recentIds, PlayoutAnchorState anchor)
+    private static double ComputeScore(
+        ResolvedCandidate item,
+        int weight,
+        List<Guid?> recentIds,
+        PlayoutAnchorState anchor,
+        DateOnly scheduleDate,
+        bool preferSeries)
     {
         var score = weight * 10.0;
+        if (preferSeries && item.SeriesId is null)
+        {
+            score -= 25;
+        }
+
         if (item.JellyfinItemId.HasValue && recentIds.Contains(item.JellyfinItemId))
         {
             score -= 50;
@@ -225,7 +242,25 @@ public class SmartSelectionService
         if (item.JellyfinItemId.HasValue
             && anchor.LastAired.TryGetValue(item.JellyfinItemId.Value, out var last))
         {
-            score -= (DateTime.UtcNow - last).TotalDays;
+            DateOnly lastDay;
+            try
+            {
+                lastDay = DateOnly.FromDateTime(last);
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                lastDay = scheduleDate;
+            }
+
+            var days = scheduleDate.DayNumber - lastDay.DayNumber;
+            if (days <= 0)
+            {
+                score -= item.SeriesId is null ? 120 : 40;
+            }
+            else if (days < 7)
+            {
+                score -= (7 - days) * (item.SeriesId is null ? 16 : 6);
+            }
         }
 
         return score;

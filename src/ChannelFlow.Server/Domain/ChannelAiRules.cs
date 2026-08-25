@@ -252,7 +252,7 @@ public static class ChannelAiRules
 
     private static string BuildFlashBackDaypartGuide() => NetworkDaypartGuide(
         "FlashBack TV (1970s–2000s)",
-        ("Early Bird", "(TV-MA / R) Reruns of yesterday's blockbuster movies."),
+        ("Early Bird", "(TV-MA / R) Reruns of yesterday's Prime Time TV series. Movies are not encored."),
         ("Before School", "(TV-Y7 / G) 80s Saturday-morning cartoon shorts."),
         ("Morning", "(TV-G / PG) Family sitcoms from the 70s/80s."),
         ("Mid-Day", "(TV-PG / PG) Original curated 90s soap-opera arcs."),
@@ -263,7 +263,7 @@ public static class ChannelAiRules
 
     private static string BuildRetroDaypartGuide() => NetworkDaypartGuide(
         "Retro TV (1910s–1960s)",
-        ("Early Bird", "(TV-PG / PG) Reruns of yesterday's Hollywood features."),
+        ("Early Bird", "(TV-PG / PG) Reruns of yesterday's Prime Time TV series. Movies are not encored."),
         ("Before School", "(TV-G / G) Early animation shorts (Popeye, Betty Boop)."),
         ("Morning", "(TV-G / G) Mid-century variety shows."),
         ("Mid-Day", "(TV-G / G) Early sitcoms and radio-style plays."),

@@ -8,6 +8,9 @@ public static class NetworkClockDaypartMatcher
 {
     public const int HardReject = -10_000;
 
+    /// <summary>Mixed TV network-clock days keep at most this many movie starts.</summary>
+    public const int MaxMoviesPerDay = 2;
+
     public static bool IsRerunDaypartName(string? daypartName)
         => !string.IsNullOrWhiteSpace(daypartName)
             && daypartName.Contains("rerun", StringComparison.OrdinalIgnoreCase);
@@ -32,6 +35,20 @@ public static class NetworkClockDaypartMatcher
     {
         var taste = ResolveTaste(libraryTag, daypartName);
         return taste?.PreferMovies == true;
+    }
+
+    /// <summary>
+    /// Prime Time may run a double feature; other movie-friendly dayparts get one title.
+    /// </summary>
+    public static int MaxMoviesForDaypart(string? libraryTag, string? daypartName)
+    {
+        if (!PrefersMovies(libraryTag, daypartName))
+        {
+            return 0;
+        }
+
+        var key = Normalize(daypartName);
+        return key.Contains("prime") ? 2 : 1;
     }
 
     public static int Score(
@@ -90,11 +107,11 @@ public static class NetworkClockDaypartMatcher
         var score = 0;
         if (taste.PreferMovies)
         {
-            score += movie ? 24 : -16;
+            score += movie ? 12 : 0;
         }
         else if (movie)
         {
-            score -= 4;
+            score -= 18;
         }
 
         if (taste.PreferAnimation)

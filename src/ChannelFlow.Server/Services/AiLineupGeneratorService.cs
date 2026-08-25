@@ -152,10 +152,28 @@ public class AiLineupGeneratorService
                 weekly[day] = LineupSlotSpans.ExpandUsingRuntimes(weekly[day], runtimeById);
             }
 
-            NetworkSchedulePlanner.LimitMixedTvMovies(weekly, manifest.Catalog, catalogMode, channel.ContentType, playoutTemplate);
-            NetworkSchedulePlanner.SprinkleMovies(weekly, manifest.Catalog, catalogMode);
             NetworkSchedulePlanner.ApplyTemplateRerunDayparts(weekly, playoutTemplate);
             NetworkSchedulePlanner.ApplyDaypartFit(weekly, manifest.Catalog, playoutTemplate, libraryTag);
+            foreach (var day in weekly.Keys.ToList())
+            {
+                NetworkSchedulePlanner.FillRemainingGaps(
+                    weekly[day],
+                    manifest.Catalog,
+                    catalogMode,
+                    channel.ContentType,
+                    playoutTemplate,
+                    libraryTag,
+                    day);
+            }
+
+            NetworkSchedulePlanner.LimitMixedTvMovies(
+                weekly,
+                manifest.Catalog,
+                catalogMode,
+                channel.ContentType,
+                playoutTemplate,
+                libraryTag);
+            NetworkSchedulePlanner.SprinkleMovies(weekly, manifest.Catalog, catalogMode);
             foreach (var day in weekly.Keys.ToList())
             {
                 NetworkSchedulePlanner.FillRemainingGaps(
@@ -626,6 +644,7 @@ public class AiLineupGeneratorService
             return result.Values.OrderBy(s => s.SlotIndex).ToList();
         }
 
+        var used = new HashSet<Guid>();
         var queueIndex = 0;
         for (var slotIndex = 0; slotIndex < 48; slotIndex++)
         {
@@ -645,6 +664,11 @@ public class AiLineupGeneratorService
                     continue;
                 }
 
+                if (used.Contains(entry.Id) && used.Count < fillQueue.Count)
+                {
+                    continue;
+                }
+
                 span = SpanThatFits(entry, slotIndex, occupied);
                 if (span <= 0)
                 {
@@ -660,6 +684,7 @@ public class AiLineupGeneratorService
                 continue;
             }
 
+            used.Add(chosen.Id);
             MarkOccupied(occupied, slotIndex, span);
             result[slotIndex] = new LineupSlotDto
             {
@@ -941,7 +966,7 @@ public class AiLineupGeneratorService
         var mixedRule = catalogMode == ChannelCatalogMode.Mixed
             ? contentType == ChannelContentType.Movie
                 ? "\n- Mixed movie channel: movies are the default. TV series are optional holiday/thematic filler only. Each movie uses spanSlots from runtime so a 90-minute title occupies three half-hours. Do not start another movie until that runtime ends."
-                : "\n- Mixed TV channel: series are the default. After the weekly grid is set, ChannelFlow may add at most 1-2 movies on Friday night and/or weekend. Do not load weekdays with movies. Never place a movie in a leftover 30-minute hole; movies occupy spanSlots from runtime."
+                : "\n- Mixed TV channel (content mix Both): series are the default and movies are allowed in Prime Time (at most two unique titles per day). Early Bird / overnight reruns encore yesterday's TV series only — never movies. Never place a movie in a leftover 30-minute hole; movies occupy spanSlots from runtime."
             : string.Empty;
 
         var formatHint = contentType == ChannelContentType.Movie
@@ -954,7 +979,7 @@ public class AiLineupGeneratorService
 
         var rerunExample = AiPlayoutTemplates.UsesNetworkClock(playoutTemplate.Id)
             ? """
-            - Rerun slots: {"kind":"rerun","startSlot":4,"spanSlots":6,"days":["daily"]}. ChannelFlow fills those with yesterday's Prime Time. Do not assign catalog titles to rerun slots. You may also set "rerun":true on a daily slot.
+            - Rerun slots: {"kind":"rerun","startSlot":4,"spanSlots":6,"days":["daily"]}. ChannelFlow fills those with yesterday's Prime Time TV series only. Movies are not encored the next morning. Do not assign catalog titles to rerun slots. You may also set "rerun":true on a daily slot.
             """
             : """
             - Rerun slots: {"kind":"rerun","startSlot":4,"spanSlots":8,"days":["daily"]}. ChannelFlow fills those with yesterday's primetime. Do not assign catalog titles to rerun slots. You may also set "rerun":true on a daily slot.
@@ -982,7 +1007,7 @@ public class AiLineupGeneratorService
     {
         var overnight = AiPlayoutTemplates.UsesNetworkClock(playoutTemplate.Id)
             ? """
-            - Early Bird (slots 4-9, 2:00-5:00am) should be rerun slots (kind rerun, spanSlots 6) so yesterday's Prime Time (18:00-22:00, slots 36-43) plays back. You may also mark other encore half-hours as rerun.
+            - Early Bird (slots 4-9, 2:00-5:00am) should be rerun slots (kind rerun, spanSlots 6) so yesterday's Prime Time TV series (18:00-22:00, slots 36-43) play back. Movies from last night are not encored. You may also mark other encore half-hours as rerun.
             """
             : """
             - Overnight (slots 4-11, 2:00-6:00am) should usually be rerun slots (kind rerun) so yesterday's primetime plays back. You may also mark other encore half-hours as rerun.

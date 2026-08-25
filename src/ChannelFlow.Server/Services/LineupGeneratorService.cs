@@ -149,6 +149,13 @@ public class LineupGeneratorService
                     cursor = paddedOvernightEnd;
                     continue;
                 }
+
+                if (ExcludeMoviesFromReruns(channel))
+                {
+                    await _commercialService.PadToSlotAsync(channel, rerunStart, rerunEnd, cancellationToken);
+                    cursor = rerunEnd > cursor ? rerunEnd : cursor.AddMinutes(30);
+                    continue;
+                }
             }
 
             var stolePrimetime = false;
@@ -897,9 +904,13 @@ public class LineupGeneratorService
         CancellationToken cancellationToken)
     {
         var (primeStart, primeEnd) = AiPlayoutTemplates.GetPrimetimeSlotRange(channel);
+        var skipMovies = ExcludeMoviesFromReruns(channel);
+        var movieIds = skipMovies
+            ? await LoadMovieIdsAsync(builtPrograms.Select(p => p.JellyfinItemId), cancellationToken)
+            : [];
         var fromBuilt = builtPrograms
             .Where(p => DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(p.Start, tz)) == localDate)
-            .Where(IsProgramRerunSource)
+            .Where(p => IsProgramRerunSource(p, movieIds))
             .ToList();
         if (fromBuilt.Count > 0)
         {
@@ -912,21 +923,67 @@ public class LineupGeneratorService
         var fromDb = await _db.PlayoutItems
             .Where(p => p.ChannelId == channel.Id && p.Start >= startUtc && p.Start < endUtc)
             .ToListAsync(cancellationToken);
+        if (skipMovies)
+        {
+            movieIds = await LoadMovieIdsAsync(
+                fromDb.Select(p => p.JellyfinItemId).Concat(builtPrograms.Select(p => p.JellyfinItemId)),
+                cancellationToken);
+        }
 
         return RankRerunSources(
-            fromDb.Where(p => _db.Entry(p).State != EntityState.Deleted && IsProgramRerunSource(p)).ToList(),
+            fromDb.Where(p => _db.Entry(p).State != EntityState.Deleted && IsProgramRerunSource(p, movieIds)).ToList(),
             tz,
             primeStart,
             primeEnd);
     }
 
-    private static bool IsProgramRerunSource(PlayoutItem item)
-        => !LogoBumperService.IsHiddenFromGuide(item.GuideGroup)
-            && !item.IsVirtual
-            && item.JellyfinItemId.HasValue
-            && item.InPoint == TimeSpan.Zero
-            && (item.OutPoint > TimeSpan.Zero ? item.OutPoint : item.Finish - item.Start) <= TimeSpan.FromMinutes(45)
-            && (item.OutPoint > TimeSpan.Zero ? item.OutPoint : item.Finish - item.Start) >= TimeSpan.FromMinutes(5);
+    private static bool ExcludeMoviesFromReruns(Channel channel)
+    {
+        var mix = ChannelAiRules.ResolveCatalogMode(channel);
+        return mix is ChannelCatalogMode.Mixed or ChannelCatalogMode.TvOnly;
+    }
+
+    private async Task<HashSet<Guid>> LoadMovieIdsAsync(
+        IEnumerable<Guid?> itemIds,
+        CancellationToken cancellationToken)
+    {
+        var ids = itemIds.Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToList();
+        if (ids.Count == 0)
+        {
+            return [];
+        }
+
+        var rows = await _db.Movies.AsNoTracking()
+            .Where(row => ids.Contains(row.Id) || ids.Contains(row.JellyfinItemId))
+            .Select(row => new { row.Id, row.JellyfinItemId })
+            .ToListAsync(cancellationToken);
+        var movieIds = new HashSet<Guid>();
+        foreach (var row in rows)
+        {
+            movieIds.Add(row.Id);
+            if (row.JellyfinItemId != Guid.Empty)
+            {
+                movieIds.Add(row.JellyfinItemId);
+            }
+        }
+
+        return movieIds;
+    }
+
+    private static bool IsProgramRerunSource(PlayoutItem item, HashSet<Guid> movieIds)
+    {
+        if (LogoBumperService.IsHiddenFromGuide(item.GuideGroup)
+            || item.IsVirtual
+            || item.JellyfinItemId is not Guid itemId
+            || item.InPoint != TimeSpan.Zero
+            || movieIds.Contains(itemId))
+        {
+            return false;
+        }
+
+        var duration = item.OutPoint > TimeSpan.Zero ? item.OutPoint : item.Finish - item.Start;
+        return duration >= TimeSpan.FromMinutes(5) && duration <= TimeSpan.FromMinutes(45);
+    }
 
     private static List<PlayoutItem> RankRerunSources(
         List<PlayoutItem> items,
