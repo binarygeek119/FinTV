@@ -105,15 +105,8 @@ public class AiController : ControllerBase
             ai.SimulateOriginalBroadcasting = request.SimulateOriginalBroadcasting.Value;
         }
 
-        if (!string.IsNullOrWhiteSpace(request.OpenAiApiKey))
-        {
-            ai.OpenAiApiKey = request.OpenAiApiKey.Trim();
-        }
-
-        if (!string.IsNullOrWhiteSpace(request.VeniceApiKey))
-        {
-            ai.VeniceApiKey = request.VeniceApiKey.Trim();
-        }
+        ai.OpenAiApiKey = CoalesceApiKey(request.OpenAiApiKey, ai.OpenAiApiKey, plugin.Configuration.ApiKey);
+        ai.VeniceApiKey = CoalesceApiKey(request.VeniceApiKey, ai.VeniceApiKey, plugin.Configuration.ApiKey);
 
         plugin.SaveConfiguration();
 
@@ -162,8 +155,8 @@ public class AiController : ControllerBase
         {
             await _llm.TestConnectionAsync(
                 provider,
-                request?.OpenAiApiKey,
-                request?.VeniceApiKey,
+                CoalesceApiKey(request?.OpenAiApiKey, null, plugin.Configuration.ApiKey),
+                CoalesceApiKey(request?.VeniceApiKey, null, plugin.Configuration.ApiKey),
                 cancellationToken);
             return Ok(new { ok = true, provider = provider.ToString() });
         }
@@ -428,6 +421,61 @@ public class AiController : ControllerBase
     {
         var cleared = _weatherGuide.ClearCache();
         return Ok(new { cleared });
+    }
+
+    private static string? CoalesceApiKey(string? incoming, string? current, string? pluginApiKey)
+    {
+        var next = NormalizeIncomingApiKey(incoming);
+        if (string.IsNullOrWhiteSpace(next))
+        {
+            return current;
+        }
+
+        if (string.Equals(next, current, StringComparison.Ordinal)
+            || string.Equals(next, MaskKey(current), StringComparison.Ordinal)
+            || (!string.IsNullOrWhiteSpace(pluginApiKey)
+                && string.Equals(next, pluginApiKey, StringComparison.Ordinal)))
+        {
+            return current;
+        }
+
+        return next;
+    }
+
+    private static string? NormalizeIncomingApiKey(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var trimmed = value.Trim().Trim('"', '\'');
+        if (trimmed.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            trimmed = trimmed[7..].Trim();
+        }
+
+        if (LooksLikeMaskedOrPlaceholder(trimmed))
+        {
+            return null;
+        }
+
+        return trimmed;
+    }
+
+    private static bool LooksLikeMaskedOrPlaceholder(string key)
+    {
+        if (key is "****" or "*" or "•" or "••••")
+        {
+            return true;
+        }
+
+        if (key.Contains("...", StringComparison.Ordinal) && key.Length <= 16)
+        {
+            return true;
+        }
+
+        return key.All(character => character is '*' or '•' or '.');
     }
 
     private static string MaskKey(string? key)

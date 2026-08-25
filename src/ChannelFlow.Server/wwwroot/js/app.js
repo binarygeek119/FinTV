@@ -3716,9 +3716,75 @@
             openAiModel: $('ai-openai-model')?.value?.trim() || 'gpt-4o-mini',
             veniceModel: $('ai-venice-model')?.value?.trim() || 'gpt-4o-mini',
             ttsVoice: $('ai-tts-voice')?.value?.trim() || 'nova',
-            openAiApiKey: normalizeApiKeyInput($('ai-openai-key')?.value) || null,
-            veniceApiKey: normalizeApiKeyInput($('ai-venice-key')?.value) || null
+            openAiApiKey: readEditedApiKey('ai-openai-key'),
+            veniceApiKey: readEditedApiKey('ai-venice-key')
         };
+    }
+
+    function resetAiApiKeyField(id) {
+        const el = $(id);
+        if (!el) {
+            return;
+        }
+
+        el.value = '';
+        delete el.dataset.userEdited;
+        el.readOnly = true;
+    }
+
+    function readEditedApiKey(id) {
+        const el = $(id);
+        if (!el || el.dataset.userEdited !== '1') {
+            return null;
+        }
+
+        const key = normalizeApiKeyInput(el.value);
+        if (!key || looksLikeMaskedApiKey(key) || key === (aiSettings && (id === 'ai-openai-key' ? aiSettings.openAiApiKeyMasked : aiSettings.veniceApiKeyMasked))) {
+            return null;
+        }
+
+        return key;
+    }
+
+    function looksLikeMaskedApiKey(value) {
+        const key = String(value || '');
+        if (key === '****' || /^[.*•]+$/.test(key)) {
+            return true;
+        }
+
+        return key.includes('...') && key.length <= 16;
+    }
+
+    function bindAiApiKeyFields() {
+        ['ai-openai-key', 'ai-venice-key'].forEach((id) => {
+            const el = $(id);
+            if (!el || el.dataset.guardBound === '1') {
+                return;
+            }
+
+            el.dataset.guardBound = '1';
+            el.readOnly = true;
+            el.addEventListener('focus', () => {
+                el.readOnly = false;
+            });
+            el.addEventListener('keydown', (event) => {
+                if (event.metaKey || event.ctrlKey || event.altKey) {
+                    return;
+                }
+                if (event.key.length === 1 || event.key === 'Backspace' || event.key === 'Delete') {
+                    el.dataset.userEdited = '1';
+                }
+            });
+            el.addEventListener('paste', () => {
+                el.dataset.userEdited = '1';
+            });
+            el.addEventListener('input', (event) => {
+                const type = event.inputType || '';
+                if (type === 'insertText' || type === 'insertFromPaste' || type === 'insertFromDrop' || type === 'insertFromYank') {
+                    el.dataset.userEdited = '1';
+                }
+            });
+        });
     }
 
     async function loadAi() {
@@ -3736,8 +3802,8 @@
             if ($('ai-openai-model')) $('ai-openai-model').value = aiSettings.openAiModel || 'gpt-4o-mini';
             if ($('ai-venice-model')) $('ai-venice-model').value = aiSettings.veniceModel || 'gpt-4o-mini';
             if ($('ai-tts-voice')) $('ai-tts-voice').value = aiSettings.ttsVoice || 'nova';
-            if ($('ai-openai-key')) $('ai-openai-key').value = '';
-            if ($('ai-venice-key')) $('ai-venice-key').value = '';
+            resetAiApiKeyField('ai-openai-key');
+            resetAiApiKeyField('ai-venice-key');
             const keyStatus = $('ai-key-status');
             if (keyStatus) {
                 keyStatus.textContent = `OpenAI key: ${aiSettings.hasOpenAiApiKey ? aiSettings.openAiApiKeyMasked : 'not set'} · Venice key: ${aiSettings.hasVeniceApiKey ? aiSettings.veniceApiKeyMasked : 'not set'}`;
@@ -4063,6 +4129,7 @@
         }
 
         list.innerHTML = aiChannels.map((ch) => {
+            const mix = ch.catalogMode == null ? 2 : Number(ch.catalogMode);
             const templateOptions = (aiPlayoutTemplates || []).map((t) =>
                 `<option value="${escapeHtml(t.id)}" ${(ch.aiPlayoutTemplateId || 'none') === t.id ? 'selected' : ''}>${escapeHtml(t.name)}</option>`
             ).join('');
@@ -4077,10 +4144,10 @@
                         <label class="field" style="margin:0">
                             <span>Content mix</span>
                             <select class="emby-input ai-catalog-mode" data-channel="${ch.id}">
-                                <option value="0" ${ch.catalogMode === 0 ? 'selected' : ''}>TV only</option>
-                                <option value="1" ${ch.catalogMode === 1 ? 'selected' : ''}>Movies only</option>
-                                <option value="2" ${ch.catalogMode === 2 ? 'selected' : ''}>Both</option>
-                                <option value="3" ${ch.catalogMode === 3 ? 'selected' : ''}>Music videos only</option>
+                                <option value="0" ${mix === 0 ? 'selected' : ''}>TV only</option>
+                                <option value="1" ${mix === 1 ? 'selected' : ''}>Movies only</option>
+                                <option value="2" ${mix === 2 ? 'selected' : ''}>Both</option>
+                                <option value="3" ${mix === 3 ? 'selected' : ''}>Music videos only</option>
                             </select>
                         </label>
                         <label class="field" style="margin:0">
@@ -4092,6 +4159,7 @@
                     </div>
                 </div>
                 ${ch.aiRuleBrief ? `<p class="hint">${escapeHtml(ch.aiRuleBrief)}</p>` : ''}
+                <p class="hint">Both means TV plus Prime Time movies. Early Bird / next-day reruns encore last night's TV series only — movies are not repeated.</p>
                 <p class="hint ai-channel-generate-status hidden"></p>
                 <label class="field">
                     <span>Fine-tune prompt</span>
@@ -5398,6 +5466,15 @@
             return wanted;
         }
 
+        if (wanted) {
+            const extra = document.createElement('option');
+            extra.value = wanted;
+            extra.textContent = wanted;
+            select.appendChild(extra);
+            select.value = wanted;
+            return wanted;
+        }
+
         select.value = select.options[0].value;
         return select.value;
     }
@@ -5432,8 +5509,11 @@
         }
 
         const selected = selectedAccelOption();
-        if (showVaapi && selected?.devices?.length) {
-            replaceSelectOptions('transcode-vaapi-device', selected.devices, $('transcode-vaapi-device')?.value);
+        const devices = (showVaapi && selected?.devices?.length)
+            ? selected.devices
+            : (gpuCapabilities?.vaapiDevices || []);
+        if (showVaapi && devices.length) {
+            replaceSelectOptions('transcode-vaapi-device', devices, $('transcode-vaapi-device')?.value);
         }
 
         const format = gpuCapabilities?.formats?.[accel];
@@ -7150,6 +7230,7 @@
         }
         click('btn-save-ai-settings', () => saveAiSettings().catch((e) => toast(e.message, 'error')));
         click('btn-test-ai', () => { void testAiConnection(); });
+        bindAiApiKeyFields();
         click('btn-ai-generate-all', () => generateAllAiLineups().catch((e) => toast(e.message, 'error')));
         click('btn-ai-cancel-generate-all', () => cancelGenerateAll().catch((e) => toast(e.message, 'error')));
         click('btn-weather-guide-cache-generate', () => generateWeatherGuideCache().catch((e) => toast(e.message, 'error')));

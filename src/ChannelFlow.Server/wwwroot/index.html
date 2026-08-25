@@ -774,7 +774,7 @@
                     </label>
                     <label class="field">
                         <span>OpenAI API key</span>
-                        <input id="ai-openai-key" type="password" class="emby-input" autocomplete="off" placeholder="Leave blank to keep existing key">
+                        <input id="ai-openai-key" type="password" class="emby-input" name="cf-ai-openai-token" autocomplete="new-password" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" readonly placeholder="Leave blank to keep the saved key">
                     </label>
                     <label class="field">
                         <span>OpenAI model</span>
@@ -782,7 +782,7 @@
                     </label>
                     <label class="field">
                         <span>Venice API key</span>
-                        <input id="ai-venice-key" type="password" class="emby-input" autocomplete="off" placeholder="Leave blank to keep existing key">
+                        <input id="ai-venice-key" type="password" class="emby-input" name="cf-ai-venice-token" autocomplete="new-password" autocapitalize="off" autocorrect="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" data-bwignore="true" readonly placeholder="Leave blank to keep the saved key">
                     </label>
                     <label class="field">
                         <span>Venice model</span>
@@ -794,6 +794,7 @@
                     </label>
                     <p class="hint">Voice id for AI text-to-speech (FlowWire, Catherine Wolfe, and any other AI speech). OpenAI and Venice use different names — pick one that matches the default provider. See <a href="https://platform.openai.com/docs/guides/text-to-speech#voice-options" target="_blank" rel="noopener">OpenAI voices</a> and <a href="https://docs.venice.ai/models/text-to-speech" target="_blank" rel="noopener">Venice voices</a>.</p>
                     <p id="ai-key-status" class="hint"></p>
+                    <p class="hint">Leave a key field blank to keep what is already saved. Password managers often dump the ChannelFlow login into these boxes; ChannelFlow ignores that unless you paste a new key yourself.</p>
                     <p class="hint">AI lineups build up to <strong>14 days</strong> of playout. ChannelFlow-Server auto-extends the schedule as each day ends. Auto-apply sets content mix and playout template from channel rules, generates the lineup, and rebuilds playout. The scheduled task adds <strong>one day</strong> when the horizon drops to 13 days instead of rebuilding all 14. Queued new channels can also be processed from <strong>Dashboard → Scheduled Tasks → ChannelFlow-Server AI Lineup Auto-Apply (Channel Add)</strong>.</p>
                 </div>
                 <div class="card section-card">
@@ -1072,9 +1073,10 @@
                         <span>VAAPI device</span>
                         <select id="transcode-vaapi-device" class="emby-select">
                             <option value="/dev/dri/renderD128">/dev/dri/renderD128</option>
+                            <option value="/dev/dri/renderD129">/dev/dri/renderD129</option>
                         </select>
                     </label>
-                    <p class="hint" id="transcode-vaapi-hint">Render nodes ChannelFlow found under <code>/dev/dri</code>. Pass <code>/dev/dri</code> into the container for Intel Quick Sync or AMD VAAPI.</p>
+                    <p class="hint" id="transcode-vaapi-hint">Pick a render node under <code>/dev/dri</code> (renderD128, renderD129, and any others the container can see). Intel Quick Sync is often D128; a second GPU may be D129 and still listed even if a probe says it cannot encode. Pass the whole <code>/dev/dri</code> folder into the container.</p>
                     <p class="hint" id="stream-encoder-hint">Encoder: matching the Normalization codec to this acceleration.</p>
                     <label class="field">
                         <span>Run-ahead buffer (seconds)</span>
