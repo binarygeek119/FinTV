@@ -11,6 +11,8 @@ public class EbsService
 {
     public const string EbsFolderName = "EBS";
 
+    public const string OfflineFolderName = "OFFLINE";
+
     private static readonly string UsaSlateFile = "offlineusa.jpg";
 
     private static readonly string InternationalSlateFile = "offline.jpg";
@@ -36,7 +38,7 @@ public class EbsService
         string? slatePath = null;
         if (displayMode == EbsDisplayMode.SlateImage)
         {
-            slatePath = ResolveSlatePath();
+            slatePath = ResolveSlatePath(channel.AspectRatio);
             if (string.IsNullOrWhiteSpace(slatePath))
             {
                 _logger.LogWarning(
@@ -67,12 +69,15 @@ public class EbsService
     }
 
     public string? ResolveSlatePath()
-    {
-        var variant = FinTvRuntime.Current?.Configuration.EbsSlateVariant ?? EbsSlateVariant.Usa;
-        return ResolveSlatePath(variant);
-    }
+        => ResolveSlatePath(FinTvRuntime.Current?.Configuration.EbsSlateVariant ?? EbsSlateVariant.Usa, AspectRatioMode.SixteenNine);
+
+    public string? ResolveSlatePath(AspectRatioMode aspect)
+        => ResolveSlatePath(FinTvRuntime.Current?.Configuration.EbsSlateVariant ?? EbsSlateVariant.Usa, aspect);
 
     public string? ResolveSlatePath(EbsSlateVariant variant)
+        => ResolveSlatePath(variant, AspectRatioMode.SixteenNine);
+
+    public string? ResolveSlatePath(EbsSlateVariant variant, AspectRatioMode aspect)
     {
         var customPath = ResolveCustomSlatePath(variant);
         if (!string.IsNullOrWhiteSpace(customPath))
@@ -80,35 +85,37 @@ public class EbsService
             return customPath;
         }
 
-        return ResolveStockSlatePath(variant);
+        return ResolveStockSlatePath(variant, aspect);
     }
 
     public string? ResolveStockSlatePath(EbsSlateVariant variant)
+        => ResolveStockSlatePath(variant, AspectRatioMode.SixteenNine);
+
+    public string? ResolveStockSlatePath(EbsSlateVariant variant, AspectRatioMode aspect)
     {
-        var preferredFile = variant == EbsSlateVariant.Usa ? UsaSlateFile : InternationalSlateFile;
-        foreach (var root in GetStockSlateRoots())
+        foreach (var file in GetPreferredStockFiles(variant, aspect))
         {
-            var path = Path.Combine(root, preferredFile);
-            if (File.Exists(path))
+            var found = FindStockFile(file);
+            if (!string.IsNullOrWhiteSpace(found))
             {
-                return path;
+                return found;
             }
         }
 
-        foreach (var root in GetStockSlateRoots())
+        var tagged = EnumerateStockImages()
+            .Where(path => MatchesVariant(path, variant) && MatchesNamedAspect(path, aspect))
+            .ToList();
+        if (tagged.Count > 0)
         {
-            if (!Directory.Exists(root))
-            {
-                continue;
-            }
+            return tagged[Random.Shared.Next(tagged.Count)];
+        }
 
-            var files = Directory.EnumerateFiles(root, "*.*", SearchOption.TopDirectoryOnly)
-                .Where(path => IsImageFile(path) && MatchesVariant(path, variant))
-                .ToList();
-            if (files.Count > 0)
-            {
-                return files[Random.Shared.Next(files.Count)];
-            }
+        var untagged = EnumerateStockImages()
+            .Where(path => MatchesVariant(path, variant) && !HasNamedAspect(path))
+            .ToList();
+        if (untagged.Count > 0)
+        {
+            return untagged[Random.Shared.Next(untagged.Count)];
         }
 
         return null;
@@ -239,6 +246,53 @@ public class EbsService
     private static string GetCustomSlatePrefix(EbsSlateVariant variant)
         => variant == EbsSlateVariant.Usa ? "usa" : "international";
 
+    private static IEnumerable<string> GetPreferredStockFiles(EbsSlateVariant variant, AspectRatioMode aspect)
+    {
+        var fourThree = aspect == AspectRatioMode.FourThree;
+        if (variant == EbsSlateVariant.Usa)
+        {
+            yield return fourThree ? "offline_usa_4_3.jpg" : "offline_usa_16_9.jpg";
+            yield return UsaSlateFile;
+            yield break;
+        }
+
+        yield return fourThree ? "offline_world_4_3.jpg" : "offline_world_16_9.jpg";
+        yield return InternationalSlateFile;
+    }
+
+    private static string? FindStockFile(string fileName)
+    {
+        foreach (var root in GetStockSlateRoots())
+        {
+            var path = Path.Combine(root, fileName);
+            if (File.Exists(path))
+            {
+                return path;
+            }
+        }
+
+        return null;
+    }
+
+    private static IEnumerable<string> EnumerateStockImages()
+    {
+        foreach (var root in GetStockSlateRoots())
+        {
+            if (!Directory.Exists(root))
+            {
+                continue;
+            }
+
+            foreach (var path in Directory.EnumerateFiles(root, "*.*", SearchOption.TopDirectoryOnly))
+            {
+                if (IsImageFile(path))
+                {
+                    yield return path;
+                }
+            }
+        }
+    }
+
     private static IEnumerable<string> GetStockSlateRoots()
     {
         var plugin = FinTvRuntime.Current;
@@ -248,7 +302,9 @@ public class EbsService
         }
 
         yield return Path.Combine(plugin.LogosFolder, "binarygeek119", EbsFolderName);
+        yield return Path.Combine(plugin.LogosFolder, "binarygeek119", OfflineFolderName);
         yield return Path.Combine(plugin.BundledLogosFolder, EbsFolderName);
+        yield return Path.Combine(plugin.BundledLogosFolder, OfflineFolderName);
     }
 
     private static bool MatchesVariant(string path, EbsSlateVariant variant)
@@ -257,6 +313,31 @@ public class EbsService
         var isUsa = name.Contains("usa", StringComparison.OrdinalIgnoreCase);
         return variant == EbsSlateVariant.Usa ? isUsa : !isUsa;
     }
+
+    private static bool HasNamedAspect(string path)
+    {
+        var name = Path.GetFileNameWithoutExtension(path);
+        return ContainsToken(name, "4_3")
+            || ContainsToken(name, "4-3")
+            || ContainsToken(name, "16_9")
+            || ContainsToken(name, "16-9");
+    }
+
+    private static bool MatchesNamedAspect(string path, AspectRatioMode aspect)
+    {
+        var name = Path.GetFileNameWithoutExtension(path);
+        var isFourThree = ContainsToken(name, "4_3") || ContainsToken(name, "4-3");
+        var isSixteenNine = ContainsToken(name, "16_9") || ContainsToken(name, "16-9");
+        if (aspect == AspectRatioMode.FourThree)
+        {
+            return isFourThree;
+        }
+
+        return isSixteenNine;
+    }
+
+    private static bool ContainsToken(string name, string token)
+        => name.Contains(token, StringComparison.OrdinalIgnoreCase);
 
     private static bool IsImageFile(string path)
         => path.EndsWith(".png", StringComparison.OrdinalIgnoreCase)

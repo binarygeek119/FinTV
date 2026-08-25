@@ -355,6 +355,111 @@ public class CommercialService
         return cursor;
     }
 
+    /// <summary>
+    /// Splits the item now on air so a mid-roll commercial break starts after <paramref name="delay"/>.
+    /// The remainder of the program resumes after the spots.
+    /// </summary>
+    public async Task<ForcedCommercialBreakResult> ForceCommercialBreakAsync(
+        Channel channel,
+        TimeSpan delay,
+        CancellationToken cancellationToken)
+    {
+        if (channel.ContentType is ChannelContentType.Weather or ChannelContentType.News)
+        {
+            return ForcedCommercialBreakResult.Skipped(channel.Name, "Weather and news channels do not play commercial breaks.");
+        }
+
+        var now = DateTime.UtcNow;
+        var current = await _db.PlayoutItems
+            .Where(item => item.ChannelId == channel.Id && item.Start <= now && item.Finish > now)
+            .OrderByDescending(item => item.Start)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (current is null)
+        {
+            return ForcedCommercialBreakResult.Skipped(channel.Name, "Nothing is scheduled on this channel right now.");
+        }
+
+        if (current.CommercialId.HasValue)
+        {
+            return ForcedCommercialBreakResult.Skipped(channel.Name, "Already in a commercial.");
+        }
+
+        var breakAt = now.Add(delay < TimeSpan.FromSeconds(1) ? TimeSpan.FromSeconds(1) : delay);
+        if (breakAt >= current.Finish)
+        {
+            var next = await _db.PlayoutItems
+                .Where(item => item.ChannelId == channel.Id && item.Id != current.Id && item.Start >= current.Finish.AddSeconds(-0.5))
+                .OrderBy(item => item.Start)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (next?.CommercialId is not null)
+            {
+                return ForcedCommercialBreakResult.Skipped(channel.Name, "A commercial break is already next.");
+            }
+
+            breakAt = current.Finish;
+        }
+
+        var preset = await ResolvePresetAsync(channel, cancellationToken);
+        var spotCount = preset is { MidRollCount: > 0 }
+            ? preset.MidRollCount
+            : Math.Max(2, preset?.PostRollCount ?? 2);
+        var pool = await PickCommercialsAsync(channel, spotCount, cancellationToken);
+        if (pool.Count == 0 || pool.All(commercial => commercial.Duration <= TimeSpan.Zero))
+        {
+            return ForcedCommercialBreakResult.Skipped(channel.Name, "No commercials are available for this channel.");
+        }
+
+        var originalFinish = current.Finish;
+        var remaining = originalFinish - breakAt;
+        var mediaInAtBreak = current.InPoint + (breakAt - current.Start);
+        var later = await _db.PlayoutItems
+            .Where(item => item.ChannelId == channel.Id && item.Id != current.Id && item.Start >= originalFinish)
+            .ToListAsync(cancellationToken);
+
+        current.Finish = breakAt;
+        var commercialEnd = await AddCommercialBreakAsync(
+            channel,
+            breakAt,
+            spotCount,
+            FillerKind.MidRoll,
+            cancellationToken);
+        if (commercialEnd <= breakAt)
+        {
+            current.Finish = originalFinish;
+            return ForcedCommercialBreakResult.Skipped(channel.Name, "No commercials are available for this channel.");
+        }
+
+        if (remaining > TimeSpan.FromSeconds(1))
+        {
+            _db.PlayoutItems.Add(new PlayoutItem
+            {
+                ChannelId = channel.Id,
+                JellyfinItemId = current.JellyfinItemId,
+                Start = commercialEnd,
+                Finish = commercialEnd + remaining,
+                InPoint = mediaInAtBreak,
+                OutPoint = current.OutPoint,
+                Title = current.Title,
+                FillerKind = FillerKind.None,
+                GuideGroup = current.GuideGroup,
+                IsVirtual = current.IsVirtual,
+                VirtualSource = current.VirtualSource
+            });
+        }
+
+        var shift = commercialEnd - breakAt;
+        foreach (var item in later)
+        {
+            item.Start += shift;
+            item.Finish += shift;
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+        var delaySeconds = Math.Max(1, (int)Math.Round((breakAt - now).TotalSeconds));
+        return ForcedCommercialBreakResult.Ok(channel.Name, delaySeconds);
+    }
+
     private PlayoutItem AddProgramSegment(
         Channel channel,
         ResolvedCandidate content,
@@ -462,4 +567,32 @@ public sealed class ScheduledProgramResult
     public DateTime TimelineEnd { get; init; }
 
     public List<PlayoutItem> ProgramItems { get; init; } = [];
+}
+
+public sealed class ForcedCommercialBreakResult
+{
+    public bool Forced { get; init; }
+
+    public string ChannelName { get; init; } = string.Empty;
+
+    public string Message { get; init; } = string.Empty;
+
+    public int DelaySeconds { get; init; }
+
+    public static ForcedCommercialBreakResult Ok(string channelName, int delaySeconds)
+        => new()
+        {
+            Forced = true,
+            ChannelName = channelName,
+            DelaySeconds = delaySeconds,
+            Message = $"Goes to commercial in {delaySeconds} seconds."
+        };
+
+    public static ForcedCommercialBreakResult Skipped(string channelName, string message)
+        => new()
+        {
+            Forced = false,
+            ChannelName = channelName,
+            Message = message
+        };
 }

@@ -59,6 +59,8 @@ Jellyfin.Plugin.FinTV/Assets/tools/yt-dlp/
 release-artifact/
 artifacts/
 .env
+config/youtube-cookies.txt
+**/youtube-cookies.txt
 config/logs/
 media/*
 !media/.gitkeep

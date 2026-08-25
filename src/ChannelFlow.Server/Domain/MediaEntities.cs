@@ -70,6 +70,15 @@ public class MediaItem
 
     public string? AlbumArtistsJson { get; set; }
 
+    public int? Width { get; set; }
+
+    public int? Height { get; set; }
+
+    /// <summary>
+    /// Normalized picture format: <c>16:9</c>, <c>4:3</c>, or <c>other</c>.
+    /// </summary>
+    public string? AspectRatio { get; set; }
+
     public DateTime SyncedAt { get; set; } = DateTime.UtcNow;
 
     /// <summary>

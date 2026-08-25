@@ -1146,15 +1146,17 @@
             return 0;
         }
 
-        if (playlist.itemCount != null) {
-            return playlist.itemCount;
+        const count = playlist.itemCount ?? playlist.itemCount;
+        if (count != null) {
+            return count;
         }
 
-        if (playlist.lastMatchedCount != null) {
-            return playlist.lastMatchedCount;
+        const matched = playlist.lastMatchedCount ?? playlist.lastMatchedCount;
+        if (matched != null) {
+            return matched;
         }
 
-        return (playlist.videoSbids || []).length;
+        return (playlist.videoSbids || playlist.videoSbids || []).length;
     }
 
     function setDeepEditorVisible(show) {
@@ -1203,7 +1205,7 @@
         if (!deepChannelPlaylistIds.length) {
             wrap.innerHTML = commercialSearchPlaylists.length
                 ? '<div class="playlist-empty">No playlists assigned. Commercial breaks use the default pool until you add one.</div>'
-                : '<div class="playlist-empty">No search playlists yet. Create them on the Commercials tab, then add them here.</div>';
+                : '<div class="playlist-empty">No saved playlists yet.</div>';
             fillDeepChannelPlaylistPicker();
             return;
         }
@@ -1211,13 +1213,13 @@
         wrap.innerHTML = deepChannelPlaylistIds.map((id) => {
             const playlist = commercialSearchPlaylists.find((p) => String(p.id) === String(id));
             const name = playlist ? playlist.name : 'Missing playlist';
-            const query = playlist ? playlist.query : '';
+            const summary = playlist ? (playlist.filterSummary || playlist.query || '') : '';
             const count = playlistSpotCount(playlist);
             const missing = playlist ? '' : ' is-missing';
             return `<div class="playlist-chip${missing}" data-id="${escapeHtml(id)}">
                 <div class="playlist-chip-main">
                     <strong>${escapeHtml(name)}</strong>
-                    ${query ? `<span>${escapeHtml(query)}</span>` : ''}
+                    ${summary ? `<span>${escapeHtml(summary)}</span>` : ''}
                 </div>
                 <span class="playlist-chip-count">${count} spot${count === 1 ? '' : 's'}</span>
                 <button type="button" class="btn-ghost" data-remove-playlist="${escapeHtml(id)}" title="Remove">&times;</button>
@@ -2126,11 +2128,144 @@
             });
             applyBrainzSettings(saved);
             if (!options.silent) {
-                toast('CommercialBrainz filters saved.', 'success');
+                toast('CommercialBrainz connection saved.', 'success');
             }
         } catch (err) {
             reportApiError(err, 'Could not save CommercialBrainz settings.');
         }
+    }
+
+    function readBrainzPlaylistPayload(name) {
+        const settings = readBrainzSettingsFromForm();
+        return {
+            name,
+            maxResults: Math.min(500, Math.max(1, settings.maxSyncResults || 50)),
+            minYear: settings.minYear,
+            maxYear: settings.maxYear,
+            decades: settings.decades,
+            brands: settings.brands,
+            tags: settings.tags,
+            excludeTags: settings.excludeTags,
+            genres: settings.genres,
+            networks: settings.networks,
+            channelNames: settings.channelNames,
+            minAgeLimit: settings.minAgeLimit,
+            maxAgeLimit: settings.maxAgeLimit,
+            allowSpoof: settings.allowSpoof,
+            allowFake: settings.allowFake,
+            allowReal: settings.allowReal,
+            allowAiEnhanced: settings.allowAiEnhanced,
+            allowLateNight: settings.allowLateNight,
+            allowAdultRated: settings.allowAdultRated,
+            allowBanned: settings.allowBanned
+        };
+    }
+
+    function bindSavePlaylistMode() {
+        const nameInput = $('brainz-new-playlist-name');
+        const existingSelect = $('brainz-existing-playlist');
+        const setMode = (mode) => {
+            const isNew = mode === 'new';
+            if ($('brainz-save-mode-new')) $('brainz-save-mode-new').checked = isNew;
+            if ($('brainz-save-mode-existing')) $('brainz-save-mode-existing').checked = !isNew;
+            if (nameInput) nameInput.disabled = !isNew;
+            if (existingSelect) existingSelect.disabled = isNew || !commercialSearchPlaylists.length;
+        };
+        if ($('brainz-save-mode-new')) {
+            $('brainz-save-mode-new').onchange = () => setMode('new');
+        }
+        if ($('brainz-save-mode-existing')) {
+            $('brainz-save-mode-existing').onchange = () => setMode('existing');
+        }
+        if (nameInput) {
+            nameInput.onfocus = () => setMode('new');
+        }
+        if (existingSelect) {
+            existingSelect.onchange = () => setMode('existing');
+        }
+        setMode(commercialSearchPlaylists.length ? 'existing' : 'new');
+        if (!commercialSearchPlaylists.length) {
+            setMode('new');
+        } else {
+            setMode('new');
+        }
+    }
+
+    async function openSavePlaylistModal() {
+        if (!syncConfigPage()) {
+            toast('ChannelFlow-Server is not ready. Reload the page.', 'error');
+            return;
+        }
+
+        try {
+            commercialSearchPlaylists = await api('/commercials/search-playlists') || commercialSearchPlaylists || [];
+        } catch (err) {
+            commercialSearchPlaylists = commercialSearchPlaylists || [];
+        }
+
+        const options = commercialSearchPlaylists.map((p) =>
+            `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join('');
+        const hasExisting = commercialSearchPlaylists.length > 0;
+        openModal('Save filters to playlist', `
+            <div class="save-playlist-modal">
+                <p class="hint">Anything entered in the filter fields is stored on the playlist and used when that playlist is assigned to a channel and you go to commercial.</p>
+                <label class="field radio-field">
+                    <input type="radio" name="brainz-save-mode" id="brainz-save-mode-new" value="new" checked>
+                    <span>Create a new playlist</span>
+                </label>
+                <label class="field"><span>New playlist name</span>
+                    <input id="brainz-new-playlist-name" class="emby-input" placeholder="80s toys">
+                </label>
+                <label class="field radio-field">
+                    <input type="radio" name="brainz-save-mode" id="brainz-save-mode-existing" value="existing"${hasExisting ? '' : ' disabled'}>
+                    <span>Save to an existing playlist</span>
+                </label>
+                <label class="field"><span>Existing playlist</span>
+                    <select id="brainz-existing-playlist" class="emby-select"${hasExisting ? '' : ' disabled'}>
+                        ${hasExisting ? options : '<option value="">No playlists yet</option>'}
+                    </select>
+                </label>
+            </div>
+        `, `
+            <button type="button" class="emby-button" id="btn-cancel-playlist-save">Cancel</button>
+            <button type="button" class="raised button-submit emby-button" id="btn-confirm-playlist-save">Save playlist</button>
+        `);
+        bindSavePlaylistMode();
+        if ($('btn-cancel-playlist-save')) {
+            $('btn-cancel-playlist-save').onclick = closeModal;
+        }
+        if ($('btn-confirm-playlist-save')) {
+            $('btn-confirm-playlist-save').onclick = () => confirmSavePlaylist().catch((e) => toast(e.message, 'error'));
+        }
+    }
+
+    async function confirmSavePlaylist() {
+        const mode = $('brainz-save-mode-existing')?.checked ? 'existing' : 'new';
+        const existingId = $('brainz-existing-playlist')?.value || '';
+        const name = $('brainz-new-playlist-name')?.value?.trim() || '';
+        if (mode === 'new' && !name) {
+            toast('Enter a name for the new playlist.', 'error');
+            return;
+        }
+        if (mode === 'existing' && !existingId) {
+            toast('Pick an existing playlist.', 'error');
+            return;
+        }
+
+        const existing = commercialSearchPlaylists.find((p) => String(p.id) === String(existingId));
+        const payload = readBrainzPlaylistPayload(mode === 'new' ? name : (existing?.name || name));
+        await saveBrainzSettings({ silent: true });
+
+        const saved = mode === 'existing'
+            ? await api('/commercials/search-playlists/' + existingId, { method: 'PUT', body: JSON.stringify(payload) })
+            : await api('/commercials/search-playlists', { method: 'POST', body: JSON.stringify(payload) });
+
+        selectedSearchPlaylistId = saved.id;
+        closeModal();
+        toast(mode === 'existing'
+            ? `Filters saved to “${saved.name}”.`
+            : `Created playlist “${saved.name}”.`, 'success');
+        await loadSearchPlaylists();
     }
 
     async function previewBrainz(options = {}) {
@@ -2217,7 +2352,7 @@
             commercialSearchPlaylists = await api('/commercials/search-playlists') || [];
             if (!commercialSearchPlaylists.length) {
                 selectedSearchPlaylistId = null;
-                listEl.innerHTML = '<div class="empty-state">No search playlists yet. Add a name and query, then Add &amp; Pull.</div>';
+                listEl.innerHTML = '<div class="empty-state">No saved playlists yet. Save filters from the CommercialBrainz tab.</div>';
                 if ($('cb-playlist-items')) $('cb-playlist-items').innerHTML = '';
                 return;
             }
@@ -2227,16 +2362,16 @@
             }
 
             listEl.innerHTML = `<table class="data-table">
-                <thead><tr><th>Name</th><th>Search</th><th>Spots</th><th>Last pull</th><th></th></tr></thead>
+                <thead><tr><th>Name</th><th>Spots</th><th>Last pull</th><th></th></tr></thead>
                 <tbody>${commercialSearchPlaylists.map((p) => {
                     const selected = p.id === selectedSearchPlaylistId ? ' class="selected"' : '';
-                    const synced = p.lastSyncedAt ? new Date(p.lastSyncedAt).toLocaleString() : 'never';
-                    const err = p.lastError ? ` title="${escapeHtml(p.lastError)}"` : '';
+                    const synced = (p.lastSyncedAt || p.lastSyncedAt) ? new Date(p.lastSyncedAt || p.lastSyncedAt).toLocaleString() : 'never';
+                    const err = (p.lastError || p.lastError) ? ` title="${escapeHtml(p.lastError || p.lastError)}"` : '';
+                    const summary = p.filterSummary || p.query || '';
                     return `<tr data-playlist-id="${escapeHtml(p.id)}"${selected}${err}>
-                        <td>${escapeHtml(p.name)}</td>
-                        <td>${escapeHtml(p.query)}</td>
-                        <td>${p.itemCount ?? p.lastMatchedCount ?? 0}</td>
-                        <td>${escapeHtml(p.lastError ? 'error' : synced)}</td>
+                        <td>${escapeHtml(p.name)}${summary ? `<span class="playlist-filter-sub">${escapeHtml(summary)}</span>` : ''}</td>
+                        <td>${p.itemCount ?? p.itemCount ?? p.lastMatchedCount ?? p.lastMatchedCount ?? 0}</td>
+                        <td>${escapeHtml((p.lastError || p.lastError) ? 'error' : synced)}</td>
                         <td>
                             <button type="button" class="emby-button btn-pull-cb-playlist" data-id="${escapeHtml(p.id)}">Pull</button>
                             <button type="button" class="emby-button btn-delete-cb-playlist" data-id="${escapeHtml(p.id)}">Delete</button>
@@ -2268,7 +2403,7 @@
             });
             renderSearchPlaylistItems();
         } catch (err) {
-            reportApiError(err, 'Could not load search playlists.');
+            reportApiError(err, 'Could not load saved playlists.');
         }
     }
 
@@ -2284,10 +2419,12 @@
         }
         const items = playlist.items || [];
         if (!items.length) {
-            el.innerHTML = `<div class="empty-state">No spots in “${escapeHtml(playlist.name)}” yet. Click Pull.</div>`;
+            el.innerHTML = `<p class="playlist-sample-caption">Sample of spots this playlist will pull into commercial breaks.</p>
+                <div class="empty-state">Click Pull to see a sample of matching spots for “${escapeHtml(playlist.name)}”.</div>`;
             return;
         }
-        el.innerHTML = `<table class="data-table">
+        el.innerHTML = `<p class="playlist-sample-caption">Sample of spots this playlist will pull into commercial breaks${playlist.filterSummary ? ` · ${escapeHtml(playlist.filterSummary)}` : ''}.</p>
+            <table class="data-table">
             <thead><tr><th>${escapeHtml(playlist.name)}</th><th>Brand</th><th>Year</th><th>Duration</th></tr></thead>
             <tbody>${items.map((c) => {
                 const title = c.youtubeUrl
@@ -2302,40 +2439,12 @@
             }).join('')}</tbody></table>`;
     }
 
-    async function addSearchPlaylist() {
-        const name = ($('cb-playlist-name')?.value || '').trim();
-        const query = ($('cb-playlist-query')?.value || '').trim();
-        const maxResults = Number($('cb-playlist-max')?.value || '50');
-        if (!name || !query) {
-            toast('Name and search query are required.', 'error');
-            return;
-        }
-
-        const btn = $('btn-add-cb-playlist');
-        if (btn) btn.disabled = true;
-        try {
-            const playlist = await api('/commercials/search-playlists', {
-                method: 'POST',
-                body: { name, query, maxResults }
-            });
-            if ($('cb-playlist-name')) $('cb-playlist-name').value = '';
-            if ($('cb-playlist-query')) $('cb-playlist-query').value = '';
-            selectedSearchPlaylistId = playlist.id;
-            toast(`Pulled ${playlist.itemCount ?? 0} spots into “${playlist.name}”.`, 'success');
-            await loadCommercials();
-        } catch (err) {
-            toast(err.message, 'error');
-        } finally {
-            if (btn) btn.disabled = false;
-        }
-    }
-
     async function pullSearchPlaylist(id) {
         try {
-            toast('Pulling CommercialBrainz search…');
+            toast('Loading a sample of matching spots…');
             const playlist = await api('/commercials/search-playlists/' + id + '/pull', { method: 'POST' });
             selectedSearchPlaylistId = playlist.id;
-            toast(`Pulled ${playlist.itemCount ?? 0} spots into “${playlist.name}”.`, 'success');
+            toast(`Loaded ${playlist.itemCount ?? playlist.itemCount ?? 0} matching spots for “${playlist.name}”.`, 'success');
             await loadCommercials();
         } catch (err) {
             toast(err.message, 'error');
@@ -2343,7 +2452,7 @@
     }
 
     async function deleteSearchPlaylist(id) {
-        if (!confirm('Delete this search playlist? Synced commercials stay in the library.')) {
+        if (!confirm('Delete this saved playlist? Synced commercials stay in the library.')) {
             return;
         }
         try {
@@ -2351,7 +2460,7 @@
             if (selectedSearchPlaylistId === id) {
                 selectedSearchPlaylistId = null;
             }
-            toast('Search playlist deleted.', 'success');
+            toast('Playlist deleted.', 'success');
             await loadSearchPlaylists();
         } catch (err) {
             toast(err.message, 'error');
@@ -2369,6 +2478,140 @@
                 previewEl.dataset.loaded = '';
                 previewEl.innerHTML = `<div class="empty-state">${escapeHtml(previewErr.message || 'Could not load commercial preview.')}</div>`;
             }
+        }
+    }
+
+    const SPONSORBLOCK_LABELS = {
+        sponsor: 'Sponsor',
+        selfpromo: 'Self-promo',
+        interaction: 'Interaction reminders',
+        intro: 'Intro',
+        outro: 'Outro',
+        preview: 'Preview / recap',
+        hook: 'Hook',
+        filler: 'Filler',
+        music_offtopic: 'Non-music section'
+    };
+
+    function renderYouTubeStatus(settings) {
+        const el = $('youtube-status');
+        if (!el) {
+            return;
+        }
+
+        const ytDlp = settings.ytDlpAvailable ? 'yt-dlp found' : 'yt-dlp missing';
+        const cookies = settings.hasCookies
+            ? (settings.looksSignedIn
+                ? `cookies saved (${settings.cookieCount} rows, looks signed in)`
+                : `cookies saved (${settings.cookieCount} rows)`)
+            : 'no cookies saved';
+        const premium = settings.preferPremium ? 'Premium formats on' : 'Premium formats off';
+        const sb = settings.sponsorBlockEnabled ? 'SponsorBlock on' : 'SponsorBlock off';
+        el.textContent = `${ytDlp} · ${cookies} · ${premium} · ${sb}`;
+    }
+
+    function renderSponsorBlockCategories(known, selected) {
+        const host = $('yt-sb-categories');
+        if (!host) {
+            return;
+        }
+
+        const selectedSet = new Set(selected || []);
+        host.innerHTML = (known || Object.keys(SPONSORBLOCK_LABELS)).map((id) => {
+            const label = SPONSORBLOCK_LABELS[id] || id;
+            const checked = selectedSet.has(id) ? ' checked' : '';
+            return `<label class="field checkbox-field">
+                <input type="checkbox" data-sb-category="${escapeHtml(id)}"${checked}>
+                <span class="channelflow-check-box" aria-hidden="true"></span>
+                <span>${escapeHtml(label)}</span>
+            </label>`;
+        }).join('');
+    }
+
+    function readSponsorBlockCategories() {
+        return Array.from(qa('#yt-sb-categories input[data-sb-category]:checked')).map((el) => el.dataset.sbCategory);
+    }
+
+    function applyYouTubeSettings(settings) {
+        settings = settings || {};
+        if ($('yt-prefer-premium')) {
+            $('yt-prefer-premium').checked = settings.preferPremium !== false;
+        }
+        if ($('yt-sponsorblock')) {
+            $('yt-sponsorblock').checked = settings.sponsorBlockEnabled !== false;
+        }
+        if ($('yt-cookies')) {
+            $('yt-cookies').value = '';
+        }
+        renderSponsorBlockCategories(settings.knownCategories, settings.sponsorBlockCategories);
+        renderYouTubeStatus(settings);
+    }
+
+    async function loadYouTube() {
+        try {
+            const settings = await api('/youtube/settings');
+            applyYouTubeSettings(settings);
+        } catch (err) {
+            reportApiError(err, 'Could not load YouTube settings.');
+        }
+    }
+
+    async function saveYouTubeSettings(options = {}) {
+        if (!syncConfigPage()) {
+            toast('ChannelFlow-Server is not ready. Reload the page.', 'error');
+            return;
+        }
+
+        try {
+            const saved = await api('/youtube/settings', {
+                method: 'PUT',
+                body: JSON.stringify({
+                    cookies: ($('yt-cookies')?.value || '').trim() || null,
+                    preferPremium: !!$('yt-prefer-premium')?.checked,
+                    sponsorBlockEnabled: !!$('yt-sponsorblock')?.checked,
+                    sponsorBlockCategories: readSponsorBlockCategories()
+                })
+            });
+            applyYouTubeSettings(saved);
+            if (!options.silent) {
+                toast('YouTube settings saved.', 'success');
+            }
+        } catch (err) {
+            reportApiError(err, 'Could not save YouTube settings.');
+        }
+    }
+
+    async function clearYouTubeCookies() {
+        if (!confirm('Remove the saved YouTube cookies from this server?')) {
+            return;
+        }
+
+        const saved = await api('/youtube/settings', {
+            method: 'PUT',
+            body: JSON.stringify({ clearCookies: true })
+        });
+        applyYouTubeSettings(saved);
+        toast('YouTube cookies cleared.', 'success');
+    }
+
+    async function testYouTubeAccess() {
+        const resultEl = $('youtube-test-result');
+        if (resultEl) {
+            resultEl.textContent = 'Testing yt-dlp…';
+        }
+        try {
+            await saveYouTubeSettings({ silent: true });
+            const result = await api('/youtube/test', { method: 'POST' });
+            const text = result.message || (result.ok ? 'YouTube access works.' : 'YouTube test failed.');
+            if (resultEl) {
+                resultEl.textContent = text;
+            }
+            toast(text, result.ok ? 'success' : 'error');
+        } catch (err) {
+            if (resultEl) {
+                resultEl.textContent = err.message || 'YouTube test failed.';
+            }
+            reportApiError(err, 'YouTube test failed.');
         }
     }
 
@@ -2514,6 +2757,27 @@
         img.src = url;
     }
 
+    function setEbsLiveSlateImage(img, missing, url) {
+        if (!img) return;
+        img.onload = () => {
+            img.classList.remove('hidden');
+            if (missing) {
+                missing.classList.add('hidden');
+                missing.hidden = true;
+            }
+        };
+        img.onerror = () => {
+            img.classList.add('hidden');
+            img.removeAttribute('src');
+            if (missing) {
+                missing.classList.remove('hidden');
+                missing.hidden = false;
+            }
+        };
+        img.classList.add('hidden');
+        img.src = url;
+    }
+
     function refreshEbsPreviews() {
         const displayMode = Number($('ebs-display-mode')?.value || '0');
         const variant = Number($('ebs-slate-variant')?.value || '0');
@@ -2523,39 +2787,55 @@
         const bars = $('ebs-live-preview-bars');
         const snow = $('ebs-live-preview-static');
         const missing = $('ebs-live-preview-missing');
+        const pair = $('ebs-live-preview-pair');
+        const generatedFrame = $('ebs-live-preview-frame');
 
         bars?.classList.toggle('hidden', displayMode !== 1);
         snow?.classList.toggle('hidden', displayMode !== 2);
         if (bars) bars.hidden = displayMode !== 1;
         if (snow) snow.hidden = displayMode !== 2;
+        pair?.classList.toggle('hidden', displayMode !== 0);
+        generatedFrame?.classList.toggle('hidden', displayMode === 0);
 
         if (displayMode === 0) {
             if (liveCaption) {
-                liveCaption.textContent = 'Shown during dead air and playback errors.';
+                liveCaption.textContent = variant === 1
+                    ? 'World stills during dead air and playback errors. 16:9 channels use the wide still; 4:3 channels use the 4:3 still.'
+                    : 'USA stills during dead air and playback errors. 16:9 channels use the wide still; 4:3 channels use the 4:3 still.';
             }
             if (missing) {
                 missing.classList.add('hidden');
                 missing.hidden = true;
             }
             if (liveImg) {
-                liveImg.onload = () => {
-                    liveImg.classList.remove('hidden');
-                    if (missing) {
-                        missing.classList.add('hidden');
-                        missing.hidden = true;
-                    }
-                };
-                liveImg.onerror = () => {
-                    liveImg.classList.add('hidden');
-                    liveImg.removeAttribute('src');
-                    if (missing) {
-                        missing.classList.remove('hidden');
-                        missing.hidden = false;
-                    }
-                };
-                liveImg.src = withAppBase('/api/ebs/preview?variant=' + variant + '&t=' + bust);
+                liveImg.classList.add('hidden');
+                liveImg.removeAttribute('src');
             }
+            setEbsLiveSlateImage(
+                $('ebs-live-preview-image-169'),
+                $('ebs-live-preview-missing-169'),
+                withAppBase('/api/ebs/preview?variant=' + variant + '&aspect=0&t=' + bust)
+            );
+            setEbsLiveSlateImage(
+                $('ebs-live-preview-image-43'),
+                $('ebs-live-preview-missing-43'),
+                withAppBase('/api/ebs/preview?variant=' + variant + '&aspect=1&t=' + bust)
+            );
         } else {
+            ['ebs-live-preview-image-169', 'ebs-live-preview-image-43'].forEach((id) => {
+                const img = $(id);
+                if (img) {
+                    img.classList.add('hidden');
+                    img.removeAttribute('src');
+                }
+            });
+            ['ebs-live-preview-missing-169', 'ebs-live-preview-missing-43'].forEach((id) => {
+                const el = $(id);
+                if (el) {
+                    el.classList.add('hidden');
+                    el.hidden = true;
+                }
+            });
             if (liveImg) {
                 liveImg.classList.add('hidden');
                 liveImg.removeAttribute('src');
@@ -2571,8 +2851,8 @@
             }
         }
 
-        setEbsPreviewImage($('ebs-usa-preview'), withAppBase('/api/ebs/slates/usa/image?t=' + bust));
-        setEbsPreviewImage($('ebs-international-preview'), withAppBase('/api/ebs/slates/international/image?t=' + bust));
+        setEbsPreviewImage($('ebs-usa-preview'), withAppBase('/api/ebs/slates/usa/image?aspect=0&t=' + bust));
+        setEbsPreviewImage($('ebs-international-preview'), withAppBase('/api/ebs/slates/international/image?aspect=0&t=' + bust));
     }
 
     function populateEbsMusicLibraries(libraries, selectedId, selectedName, selectId) {
@@ -2611,12 +2891,12 @@
         if (usaEl) {
             usaEl.textContent = usa?.fileName
                 ? `Custom upload: ${usa.fileName}`
-                : 'Using bundled stock slate.';
+                : 'Using bundled 16:9 and 4:3 stills.';
         }
         if (intlEl) {
             intlEl.textContent = international?.fileName
                 ? `Custom upload: ${international.fileName}`
-                : 'Using bundled stock slate.';
+                : 'Using bundled 16:9 and 4:3 stills.';
         }
     }
 
@@ -4085,6 +4365,44 @@
         toast('Catalog cleanup grace period saved.', 'success');
     }
 
+    async function forceWatchedChannelsToCommercial() {
+        if (!confirm('Cut every currently watched channel to commercial in 15 seconds?')) {
+            return;
+        }
+
+        const statusEl = $('force-commercial-status');
+        const button = $('btn-force-commercial');
+        if (button) {
+            button.disabled = true;
+        }
+        if (statusEl) {
+            statusEl.textContent = 'Forcing watched channels to commercial…';
+        }
+
+        try {
+            const result = await api('/tasks/force-commercial', { method: 'POST' });
+            const lines = [result.message || 'Done.'];
+            (result.forced || []).forEach((item) => {
+                lines.push(`${item.channelName}: ${item.message}`);
+            });
+            (result.skipped || []).forEach((item) => {
+                lines.push(`${item.channelName}: ${item.message}`);
+            });
+            if (statusEl) {
+                statusEl.textContent = lines.join('\n');
+            }
+            if (result.forcedCount > 0) {
+                toast(result.message, 'success');
+            } else {
+                toast(result.message || 'No channels were cut to commercial.', 'info');
+            }
+        } finally {
+            if (button) {
+                button.disabled = false;
+            }
+        }
+    }
+
     async function runCatalogCleanup() {
         const result = await api('/tasks/catalog-cleanup/run', { method: 'POST' });
         if (result.alreadyRunning) {
@@ -4577,6 +4895,7 @@
                 <tr>
                     <th>Title</th>
                     <th>Runtime</th>
+                    <th>Format</th>
                     <th>Chapters</th>
                     <th>Rating</th>
                     <th>Plot</th>
@@ -4589,6 +4908,7 @@
                 ${items.map((row) => `<tr>
                     <td>${escapeHtml(row.name || '')}</td>
                     <td>${escapeHtml(row.runtime || '')}</td>
+                    <td>${escapeHtml(row.format || '')}</td>
                     <td>${escapeHtml(row.chapters || '')}</td>
                     <td>${escapeHtml(row.rating || '')}</td>
                     <td class="catalog-plot" title="${escapeHtml(row.plot || '')}">${escapeHtml(row.plot || '')}</td>
@@ -5299,6 +5619,7 @@
         special: '/special',
         commercials: '/commercials',
         commercialbrainz: '/commercialbrainz',
+        youtube: '/youtube',
         ebs: '/ebs',
         emergency: '/emergency',
         ai: '/ai',
@@ -5321,6 +5642,7 @@
         special: 'Special Presentation',
         commercials: 'Commercials',
         commercialbrainz: 'CommercialBrainz',
+        youtube: 'YouTube',
         ebs: 'Off Air',
         emergency: 'Emergency Broadcast System',
         ai: 'AI',
@@ -5341,8 +5663,9 @@
         list: 'Register Jellyfin playlists as ChannelFlow lists',
         jellyfin: 'Choose which Jellyfin libraries to sync from',
         special: 'Recurring blocks that override the normal lineup',
-        commercials: 'Jellyfin commercial library and blackframe scan',
+        commercials: 'Jellyfin commercial library and saved playlists',
         commercialbrainz: 'YouTube commercial pool from CommercialBrainz',
+        youtube: 'YouTube cookies, Premium playback, and SponsorBlock',
         ebs: 'Playback when a channel has nothing scheduled',
         emergency: 'NOAA watches and warnings on TV, movies, and music',
         ai: 'AI lineup generation and tagging',
@@ -5490,6 +5813,7 @@
         if (name === 'special') loadSpecialPresentations();
         if (name === 'commercials') loadCommercials();
         if (name === 'commercialbrainz') loadCommercialBrainz();
+        if (name === 'youtube') loadYouTube();
 
         const path = TAB_PATHS[name];
         if (!options.skipHistory && normalizePathname(location.pathname) !== path) {
@@ -5616,16 +5940,19 @@
         click('btn-scan-blackframes', () => api('/commercials/scan-blackframes', { method: 'POST' })
             .then(() => { toast('Blackframe scan started.', 'success'); return loadCommercials(); })
             .catch((e) => toast(e.message, 'error')));
-        click('btn-add-cb-playlist', () => addSearchPlaylist().catch((e) => toast(e.message, 'error')));
-        click('btn-save-brainz', () => saveBrainzSettings().catch((e) => toast(e.message, 'error')));
+        click('btn-save-brainz', () => openSavePlaylistModal().catch((e) => toast(e.message, 'error')));
         click('btn-preview-brainz', () => previewBrainz().catch((e) => toast(e.message, 'error')));
         click('btn-sync-brainz', () => syncBrainz().catch((e) => toast(e.message, 'error')));
+        click('btn-save-youtube', () => saveYouTubeSettings().catch((e) => toast(e.message, 'error')));
+        click('btn-test-youtube', () => testYouTubeAccess().catch((e) => toast(e.message, 'error')));
+        click('btn-clear-youtube-cookies', () => clearYouTubeCookies().catch((e) => toast(e.message, 'error')));
         click('btn-rebuild-all', () => api('/tasks/rebuild-all', { method: 'POST' })
             .then(() => {
                 toast('Rebuild all started in background. This may take several minutes.', 'success');
                 $('task-status').textContent = 'Rebuild all playouts running in background…';
             })
             .catch((e) => toast(e.message, 'error')));
+        click('btn-force-commercial', () => forceWatchedChannelsToCommercial().catch((e) => toast(e.message, 'error')));
         click('btn-save-catalog-cleanup', () => saveCatalogCleanupSettings().catch((e) => toast(e.message, 'error')));
         click('btn-run-catalog-cleanup', () => runCatalogCleanup().catch((e) => toast(e.message, 'error')));
         click('btn-scan-local-catalog', () => runCatalogLocalScan().catch((e) => toast(e.message, 'error')));

@@ -188,86 +188,16 @@ public class CommercialBrainzSyncService
             .FirstOrDefault(p => p.Id == playlistId)
             ?? throw new InvalidOperationException("Search playlist not found.");
 
-        var query = playlist.Query.Trim();
-        if (string.IsNullOrWhiteSpace(query))
-        {
-            throw new InvalidOperationException("Search playlist query is required.");
-        }
-
-        var settings = GetSettings();
-        var pullSettings = ForSearchPull(settings, playlist.MaxResults);
-        var limit = Math.Clamp(playlist.MaxResults, 1, 100);
-        var seen = new HashSet<Guid>();
-        var videos = new List<CommercialBrainzVideoSummary>();
+        var connection = GetSettings();
+        var pullSettings = playlist.ToPullSettings(connection);
+        var matchLimit = Math.Clamp(playlist.MaxResults, 1, 500);
+        pullSettings.MaxSyncResults = Math.Clamp(Math.Max(matchLimit * 4, 200), 1, 2000);
 
         try
         {
-            foreach (var hit in await _client.SearchAsync(settings, query, "video", limit, cancellationToken))
-            {
-                if (hit.Sbid == Guid.Empty || !seen.Add(hit.Sbid))
-                {
-                    continue;
-                }
-
-                var detail = await _client.GetVideoAsync(settings, hit.Sbid, cancellationToken);
-                if (detail is not null)
-                {
-                    videos.Add(detail);
-                }
-            }
-
-            if (videos.Count < limit)
-            {
-                foreach (var hit in await _client.SearchAsync(settings, query, "advertiser", 25, cancellationToken))
-                {
-                    await foreach (var video in BrowseAllAsync(
-                        pullSettings,
-                        limit,
-                        seen,
-                        enrichDetails: true,
-                        advertiserSbid: hit.Sbid.ToString("D"),
-                        cancellationToken: cancellationToken))
-                    {
-                        videos.Add(video);
-                        if (videos.Count >= limit)
-                        {
-                            break;
-                        }
-                    }
-
-                    if (videos.Count >= limit)
-                    {
-                        break;
-                    }
-                }
-            }
-
-            if (videos.Count < limit)
-            {
-                var advertisers = await _client.SearchAdvertisersAsync(settings, query, 0, 25, cancellationToken);
-                foreach (var advertiser in advertisers.Items)
-                {
-                    await foreach (var video in BrowseAllAsync(
-                        pullSettings,
-                        limit,
-                        seen,
-                        enrichDetails: true,
-                        advertiserSbid: advertiser.Sbid.ToString("D"),
-                        cancellationToken: cancellationToken))
-                    {
-                        videos.Add(video);
-                        if (videos.Count >= limit)
-                        {
-                            break;
-                        }
-                    }
-
-                    if (videos.Count >= limit)
-                    {
-                        break;
-                    }
-                }
-            }
+            var videos = !playlist.HasStructuredFilters && !string.IsNullOrWhiteSpace(playlist.Query)
+                ? await SearchVideosByQueryAsync(connection, pullSettings, playlist.Query.Trim(), matchLimit, cancellationToken)
+                : await CollectMatchingVideosAsync(pullSettings, matchLimit, cancellationToken);
 
             using var scope = _scopeFactory.CreateScope();
             var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
@@ -299,7 +229,7 @@ public class CommercialBrainzSyncService
                 }
 
                 matchedSbids.Add(mapped.CommercialBrainzVideoSbid);
-                if (matchedSbids.Count >= limit)
+                if (matchedSbids.Count >= matchLimit)
                 {
                     break;
                 }
@@ -347,6 +277,25 @@ public class CommercialBrainzSyncService
             name = playlist.Name,
             query = playlist.Query,
             maxResults = playlist.MaxResults,
+            minYear = playlist.MinYear,
+            maxYear = playlist.MaxYear,
+            decades = playlist.Decades,
+            brands = playlist.Brands,
+            tags = playlist.Tags,
+            excludeTags = playlist.ExcludeTags,
+            genres = playlist.Genres,
+            networks = playlist.Networks,
+            channelNames = playlist.ChannelNames,
+            minAgeLimit = playlist.MinAgeLimit,
+            maxAgeLimit = playlist.MaxAgeLimit,
+            allowSpoof = playlist.AllowSpoof,
+            allowFake = playlist.AllowFake,
+            allowReal = playlist.AllowReal,
+            allowAiEnhanced = playlist.AllowAiEnhanced,
+            allowLateNight = playlist.AllowLateNight,
+            allowAdultRated = playlist.AllowAdultRated,
+            allowBanned = playlist.AllowBanned,
+            filterSummary = BuildFilterSummary(playlist),
             lastSyncedAt = playlist.LastSyncedAt,
             lastMatchedCount = playlist.LastMatchedCount,
             lastError = playlist.LastError,
@@ -363,22 +312,153 @@ public class CommercialBrainzSyncService
         };
     }
 
-    private static CommercialBrainzSettings ForSearchPull(CommercialBrainzSettings source, int maxResults)
+    private async Task<List<CommercialBrainzVideoSummary>> CollectMatchingVideosAsync(
+        CommercialBrainzSettings settings,
+        int matchLimit,
+        CancellationToken cancellationToken)
     {
-        return new CommercialBrainzSettings
+        var videos = new List<CommercialBrainzVideoSummary>();
+        await foreach (var video in EnumerateCandidatesAsync(settings, enrichDetails: true, cancellationToken))
         {
-            Enabled = true,
-            BaseUrl = source.BaseUrl,
-            ApiToken = source.ApiToken,
-            MaxSyncResults = Math.Clamp(maxResults, 1, 100),
-            AllowSpoof = source.AllowSpoof,
-            AllowFake = source.AllowFake,
-            AllowReal = source.AllowReal,
-            AllowAiEnhanced = source.AllowAiEnhanced,
-            AllowLateNight = source.AllowLateNight,
-            AllowAdultRated = source.AllowAdultRated,
-            AllowBanned = source.AllowBanned
-        };
+            if (!_filter.Matches(settings, video, requireEnabled: false))
+            {
+                continue;
+            }
+
+            videos.Add(video);
+            if (videos.Count >= matchLimit)
+            {
+                break;
+            }
+        }
+
+        return videos;
+    }
+
+    private async Task<List<CommercialBrainzVideoSummary>> SearchVideosByQueryAsync(
+        CommercialBrainzSettings connection,
+        CommercialBrainzSettings pullSettings,
+        string query,
+        int limit,
+        CancellationToken cancellationToken)
+    {
+        var seen = new HashSet<Guid>();
+        var videos = new List<CommercialBrainzVideoSummary>();
+
+        foreach (var hit in await _client.SearchAsync(connection, query, "video", limit, cancellationToken))
+        {
+            if (hit.Sbid == Guid.Empty || !seen.Add(hit.Sbid))
+            {
+                continue;
+            }
+
+            var detail = await _client.GetVideoAsync(connection, hit.Sbid, cancellationToken);
+            if (detail is not null)
+            {
+                videos.Add(detail);
+            }
+        }
+
+        if (videos.Count < limit)
+        {
+            foreach (var hit in await _client.SearchAsync(connection, query, "advertiser", 25, cancellationToken))
+            {
+                await foreach (var video in BrowseAllAsync(
+                    pullSettings,
+                    limit,
+                    seen,
+                    enrichDetails: true,
+                    advertiserSbid: hit.Sbid.ToString("D"),
+                    cancellationToken: cancellationToken))
+                {
+                    videos.Add(video);
+                    if (videos.Count >= limit)
+                    {
+                        break;
+                    }
+                }
+
+                if (videos.Count >= limit)
+                {
+                    break;
+                }
+            }
+        }
+
+        if (videos.Count < limit)
+        {
+            var advertisers = await _client.SearchAdvertisersAsync(connection, query, 0, 25, cancellationToken);
+            foreach (var advertiser in advertisers.Items)
+            {
+                await foreach (var video in BrowseAllAsync(
+                    pullSettings,
+                    limit,
+                    seen,
+                    enrichDetails: true,
+                    advertiserSbid: advertiser.Sbid.ToString("D"),
+                    cancellationToken: cancellationToken))
+                {
+                    videos.Add(video);
+                    if (videos.Count >= limit)
+                    {
+                        break;
+                    }
+                }
+
+                if (videos.Count >= limit)
+                {
+                    break;
+                }
+            }
+        }
+
+        return videos;
+    }
+
+    private static string BuildFilterSummary(CommercialSearchPlaylist playlist)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(playlist.Query))
+        {
+            parts.Add(playlist.Query.Trim());
+        }
+
+        if (playlist.Brands.Count > 0)
+        {
+            parts.Add(string.Join(", ", playlist.Brands));
+        }
+
+        if (playlist.MinYear.HasValue || playlist.MaxYear.HasValue)
+        {
+            parts.Add($"{playlist.MinYear?.ToString() ?? ""}–{playlist.MaxYear?.ToString() ?? ""}".Trim('–'));
+        }
+
+        if (playlist.Decades.Count > 0)
+        {
+            parts.Add(string.Join(", ", playlist.Decades));
+        }
+
+        if (playlist.Tags.Count > 0)
+        {
+            parts.Add(string.Join(", ", playlist.Tags));
+        }
+
+        if (playlist.Genres.Count > 0)
+        {
+            parts.Add(string.Join(", ", playlist.Genres));
+        }
+
+        if (playlist.Networks.Count > 0)
+        {
+            parts.Add(string.Join(", ", playlist.Networks));
+        }
+
+        if (playlist.ChannelNames.Count > 0)
+        {
+            parts.Add(string.Join(", ", playlist.ChannelNames));
+        }
+
+        return string.Join(" · ", parts);
     }
 
     private async IAsyncEnumerable<CommercialBrainzVideoSummary> EnumerateCandidatesAsync(

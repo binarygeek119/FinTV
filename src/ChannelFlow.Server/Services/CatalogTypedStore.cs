@@ -99,6 +99,60 @@ public sealed class CatalogTypedStore
         }
     }
 
+    /// <summary>
+    /// Writes normalized 16:9 / 4:3 / other aspect values onto existing catalog rows.
+    /// </summary>
+    public async Task NormalizeAspectRatiosAsync(CancellationToken cancellationToken)
+    {
+        var typed = new List<CatalogMediaRow>();
+        typed.AddRange(await NormalizeRowsAsync(_db.TvShows, cancellationToken));
+        typed.AddRange(await NormalizeRowsAsync(_db.Episodes, cancellationToken));
+        typed.AddRange(await NormalizeRowsAsync(_db.Movies, cancellationToken));
+        typed.AddRange(await NormalizeRowsAsync(_db.Music, cancellationToken));
+        typed.AddRange(await NormalizeRowsAsync(_db.MusicVideos, cancellationToken));
+        typed.AddRange(await NormalizeRowsAsync(_db.PastTenseNews, cancellationToken));
+
+        var byId = new Dictionary<Guid, (int? Width, int? Height, string? AspectRatio)>();
+        foreach (var row in typed)
+        {
+            byId[row.Id] = (row.Width, row.Height, row.AspectRatio);
+        }
+
+        var mediaItems = await _db.MediaItems.ToListAsync(cancellationToken);
+        foreach (var item in mediaItems)
+        {
+            if (byId.TryGetValue(item.Id, out var typedRow))
+            {
+                item.Width ??= typedRow.Width;
+                item.Height ??= typedRow.Height;
+            }
+
+            var classified = VideoAspectFormat.Classify(item.AspectRatio, item.Width, item.Height);
+            if (!string.Equals(item.AspectRatio, classified, StringComparison.Ordinal))
+            {
+                item.AspectRatio = classified;
+            }
+        }
+
+        await _db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task<List<T>> NormalizeRowsAsync<T>(DbSet<T> set, CancellationToken cancellationToken)
+        where T : CatalogMediaRow
+    {
+        var rows = await set.ToListAsync(cancellationToken);
+        foreach (var row in rows)
+        {
+            var classified = VideoAspectFormat.Classify(row.AspectRatio, row.Width, row.Height);
+            if (!string.Equals(row.AspectRatio, classified, StringComparison.Ordinal))
+            {
+                row.AspectRatio = classified;
+            }
+        }
+
+        return rows;
+    }
+
     private static CatalogTable? Classify(CatalogItemDto item)
     {
         if (IsPastTenseNews(item))
@@ -196,7 +250,7 @@ public sealed class CatalogTypedStore
         row.AudioCodec = item.AudioCodec;
         row.Width = item.Width;
         row.Height = item.Height;
-        row.AspectRatio = item.AspectRatio;
+        row.AspectRatio = VideoAspectFormat.Classify(item.AspectRatio, item.Width, item.Height);
         row.Path = item.Path;
         row.JellyfinItemId = item.Id;
         row.ImdbId = FindProvider(providers, "imdb", "imdbid");
@@ -280,6 +334,9 @@ public sealed class CatalogTypedStore
             LibraryId = item.LibraryId,
             LibraryName = item.LibraryName,
             PrimaryImagePath = item.PrimaryImagePath,
+            Width = item.Width,
+            Height = item.Height,
+            AspectRatio = item.AspectRatio,
             Genres = ReadJsonArray(item.GenresJson),
             Tags = ReadJsonArray(item.TagsJson),
             Studios = ReadJsonArray(item.StudiosJson),

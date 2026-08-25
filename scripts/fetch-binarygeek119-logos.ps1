@@ -10,6 +10,7 @@ $TreeUrl = "https://api.github.com/repos/$Repo/git/trees/$GitRef`?recursive=1"
 $RawBase = "https://raw.githubusercontent.com/$Repo/$GitRef/"
 $LogoPrefixes = @(
     "EBS/",
+    "OFFLINE/",
     "Movies/",
     "News/",
     "Shows/",
@@ -41,7 +42,11 @@ $client = New-Object System.Net.WebClient
 $client.Headers.Add("User-Agent", "ChannelFlow-Server")
 
 foreach ($file in $files) {
-    $relative = $file.path
+    $repoPath = $file.path
+    $relative = $repoPath
+    if ($repoPath.StartsWith("OFFLINE/")) {
+        $relative = "EBS/" + [IO.Path]::GetFileName($repoPath)
+    }
     $destination = Join-Path $OutputDir ($relative -replace '/', [IO.Path]::DirectorySeparatorChar)
     if (Test-Path -LiteralPath $destination) {
         continue
@@ -55,7 +60,7 @@ foreach ($file in $files) {
     }
 
     $client.DownloadFile($url, $destination)
-    Write-Host "  $relative"
+    Write-Host "  $repoPath -> $relative"
 }
 
 $client.Dispose()

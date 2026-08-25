@@ -1,4 +1,5 @@
 using FinTv.Domain;
+using FinTv.Services;
 using System.Globalization;
 namespace FinTv.Streaming;
 
@@ -18,7 +19,13 @@ public class FfmpegCommandBuilder
         double durationSeconds,
         string? bugImagePath,
         string? overlayHeadline = null,
-        string? alertTickerPath = null)
+        string? alertTickerPath = null,
+        string? sourceAspectRatio = null,
+        int? sourceWidth = null,
+        int? sourceHeight = null,
+        bool overlayBug = true,
+        bool fadeBugIn = false,
+        bool fadeBugOut = false)
     {
         var (width, height) = GetResolution(channel);
         var context = CreateEncodingContext(width, height, inputPath);
@@ -36,7 +43,22 @@ public class FfmpegCommandBuilder
             "-t", durationSeconds.ToString("F3", CultureInfo.InvariantCulture),
             "-i", inputPath
         });
-        AppendMediaVideoGraph(args, context, channel, width, height, bugImagePath, overlayHeadline, alertTickerPath);
+        AppendMediaVideoGraph(
+            args,
+            context,
+            channel,
+            width,
+            height,
+            bugImagePath,
+            overlayHeadline,
+            alertTickerPath,
+            durationSeconds: durationSeconds,
+            sourceAspectRatio: sourceAspectRatio,
+            sourceWidth: sourceWidth,
+            sourceHeight: sourceHeight,
+            overlayBug: overlayBug,
+            fadeBugIn: fadeBugIn,
+            fadeBugOut: fadeBugOut);
         AppendVideoEncoderArgs(args, context);
         args.AddRange(new[]
         {
@@ -57,12 +79,18 @@ public class FfmpegCommandBuilder
         string inputPath,
         double startSeconds,
         double durationSeconds,
-        string? bugImagePath)
+        string? bugImagePath,
+        IReadOnlyList<SponsorSkipRange>? skipRanges = null,
+        string? sourceAspectRatio = null,
+        int? sourceWidth = null,
+        int? sourceHeight = null,
+        bool overlayBug = true)
     {
         var (width, height) = GetResolution(channel);
         var context = CreateEncodingContext(width, height, inputPath);
         var isRemoteInput = inputPath.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
             || inputPath.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+        var skipExpr = FfmpegSkipCuts.BuildSelectExpression(skipRanges ?? []);
 
         var args = new List<string>
         {
@@ -92,8 +120,30 @@ public class FfmpegCommandBuilder
             "-t", durationSeconds.ToString("F3", CultureInfo.InvariantCulture),
             "-i", inputPath
         });
-        AppendMediaVideoGraph(args, context, channel, width, height, bugImagePath, overlayHeadline: null, alertTickerPath: null);
+        AppendMediaVideoGraph(
+            args,
+            context,
+            channel,
+            width,
+            height,
+            bugImagePath,
+            overlayHeadline: null,
+            alertTickerPath: null,
+            skipExpr,
+            durationSeconds,
+            sourceAspectRatio,
+            sourceWidth,
+            sourceHeight,
+            overlayBug);
         AppendVideoEncoderArgs(args, context);
+        if (!string.IsNullOrEmpty(skipExpr) && !args.Contains("-filter_complex"))
+        {
+            args.AddRange(new[]
+            {
+                "-af", $"aselect='{skipExpr}',asetpts=N/SR/TB"
+            });
+        }
+
         args.AddRange(new[]
         {
             "-c:a", "aac",
@@ -585,10 +635,23 @@ public class FfmpegCommandBuilder
         int height,
         string? bugImagePath,
         string? overlayHeadline,
-        string? alertTickerPath)
+        string? alertTickerPath,
+        string? skipExpr = null,
+        double durationSeconds = 0,
+        string? sourceAspectRatio = null,
+        int? sourceWidth = null,
+        int? sourceHeight = null,
+        bool overlayBug = true,
+        bool fadeBugIn = false,
+        bool fadeBugOut = false)
     {
         var linear = BuildLinearVideoFilters(channel, width, height, overlayHeadline, alertTickerPath);
-        var bug = ResolveBugFile(channel, bugImagePath);
+        if (!string.IsNullOrEmpty(skipExpr))
+        {
+            linear = $"select='{skipExpr}',setpts=N/FRAME_RATE/TB,{linear}";
+        }
+
+        var bug = overlayBug ? ResolveBugFile(channel, bugImagePath) : null;
         if (string.IsNullOrWhiteSpace(bug))
         {
             args.Add("-vf");
@@ -597,11 +660,16 @@ public class FfmpegCommandBuilder
         }
 
         var bugWidth = Math.Clamp(width / 8, 140, 260);
-        var position = GetBugOverlay(channel, width, height);
+        var position = GetBugOverlay(channel, width, height, sourceAspectRatio, sourceWidth, sourceHeight);
+        var alpha = ChannelBugLayout.AlphaFilters(fadeBugIn, fadeBugOut, durationSeconds);
         var graph =
             $"[0:v]{linear}[base];" +
-            $"[1:v]format=rgba,scale={bugWidth}:-1:force_original_aspect_ratio=decrease[bug];" +
+            $"[1:v]format=rgba,scale={bugWidth}:-1:force_original_aspect_ratio=decrease,{alpha}[bug];" +
             $"[base][bug]overlay={position}:format=auto:eof_action=repeat:repeatlast=1[vout]";
+        if (!string.IsNullOrEmpty(skipExpr))
+        {
+            graph += $";[0:a]aselect='{skipExpr}',asetpts=N/SR/TB[aout]";
+        }
 
         args.AddRange(
         [
@@ -610,7 +678,7 @@ public class FfmpegCommandBuilder
             "-i", bug,
             "-filter_complex", _encoding.AdaptFilterComplexForEncoder(graph, context.Encoder),
             "-map", "[vout]",
-            "-map", "0:a?",
+            "-map", string.IsNullOrEmpty(skipExpr) ? "0:a?" : "[aout]",
             "-shortest"
         ]);
     }
@@ -720,7 +788,7 @@ public class FfmpegCommandBuilder
         if (!string.IsNullOrWhiteSpace(logoPath) && File.Exists(logoPath))
         {
             var logoInput = current == "[tmpv]" ? "2:v" : "1:v";
-            baseFilter += $";{current}[{logoInput}]format=rgba,scale=160:-1[logo];{current}[logo]overlay=W-w-40:40:format=auto[vout]";
+            baseFilter += $";{current}[{logoInput}]format=rgba,scale=160:-1,colorchannelmixer=aa={ChannelBugLayout.Opacity.ToString(CultureInfo.InvariantCulture)}[logo];{current}[logo]overlay=W-w-40:40:format=auto[vout]";
         }
         else
         {
@@ -745,20 +813,21 @@ public class FfmpegCommandBuilder
         return baseFilter;
     }
 
-    private static string GetBugOverlay(Channel channel, int width, int height)
-    {
-        const int margin = 24;
-        return channel.BugPlacement switch
-        {
-            BugPlacementMode.TopLeft => $"{margin}:{margin}",
-            BugPlacementMode.TopRight => $"W-w-{margin}:{margin}",
-            BugPlacementMode.BottomLeft => $"{margin}:H-h-{margin}",
-            BugPlacementMode.BottomRight => $"W-w-{margin}:H-h-{margin}",
-            BugPlacementMode.None => string.Empty,
-            BugPlacementMode.Auto => $"W-w-{margin}:H-h-{margin}",
-            _ => $"W-w-{margin}:H-h-{margin}"
-        };
-    }
+    private static string GetBugOverlay(
+        Channel channel,
+        int width,
+        int height,
+        string? sourceAspectRatio,
+        int? sourceWidth,
+        int? sourceHeight)
+        => ChannelBugLayout.OverlayExpression(
+            channel.BugPlacement,
+            channel.AspectRatio,
+            width,
+            height,
+            sourceAspectRatio,
+            sourceWidth,
+            sourceHeight);
 
     private static (int Width, int Height) GetResolution(Channel channel)
     {

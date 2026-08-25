@@ -41,6 +41,15 @@ public class BaseItem
 
     public string? PrimaryImagePath { get; set; }
 
+    public int? Width { get; set; }
+
+    public int? Height { get; set; }
+
+    /// <summary>
+    /// Normalized picture format: <c>16:9</c>, <c>4:3</c>, or <c>other</c>.
+    /// </summary>
+    public string? AspectRatio { get; set; }
+
     public string[] Tags { get; set; } = [];
 
     public string[] Genres { get; set; } = [];

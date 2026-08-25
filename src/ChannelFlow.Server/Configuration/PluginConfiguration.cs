@@ -37,6 +37,11 @@ public class PluginConfiguration
     /// </summary>
     public string? ApiKey { get; set; }
 
+    /// <summary>
+    /// Jellyfin base URL the ChannelFlow plugin registered for Live TV guide refresh callbacks.
+    /// </summary>
+    public string? JellyfinPluginUrl { get; set; }
+
     public EbsBackgroundMusicSource EbsBackgroundMusicSource { get; set; } = EbsBackgroundMusicSource.NamedLibrary;
 
     public string EbsBackgroundMusicLibraryName { get; set; } = "Background Music";
@@ -94,6 +99,8 @@ public class PluginConfiguration
     public BlackframeTaskState BlackframeTaskState { get; set; } = new();
 
     public CommercialBrainzSettings CommercialBrainz { get; set; } = new();
+
+    public YouTubeSettings YouTube { get; set; } = new();
 
     public List<CommercialSearchPlaylist> CommercialSearchPlaylists { get; set; } = new();
 

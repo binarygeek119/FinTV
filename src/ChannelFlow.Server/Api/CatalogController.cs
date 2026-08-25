@@ -187,6 +187,9 @@ public class CatalogController : ControllerBase
                 item.PeopleJson,
                 item.ProviderIdsJson,
                 item.ArtistsJson,
+                item.Width,
+                item.Height,
+                item.AspectRatio,
                 ChapterCount = item.Chapters.Count
             })
             .ToListAsync(cancellationToken);
@@ -207,7 +210,7 @@ public class CatalogController : ControllerBase
             var mapped = MapMediaRow(row.Id, row.Name, row.Kind, row.Overview, row.OfficialRating, row.CommunityRating,
                 row.Runtime, row.RuntimeTicks, row.Path, row.SeriesName, row.SeasonName, row.IndexNumber,
                 row.ParentIndexNumber, row.LibraryName, row.Album, row.PeopleJson, row.ProviderIdsJson,
-                row.ArtistsJson, row.ChapterCount);
+                row.ArtistsJson, row.AspectRatio, row.ChapterCount);
 
             if (IsNewsItem(row.Kind, row.CollectionType, row.LibraryName))
             {
@@ -585,6 +588,7 @@ public class CatalogController : ControllerBase
         string? peopleJson,
         string? providerIdsJson,
         string? artistsJson,
+        string? aspectRatio,
         int chapterCount)
     {
         var stars = ReadStars(peopleJson, artistsJson);
@@ -617,6 +621,7 @@ public class CatalogController : ControllerBase
             id,
             name = title,
             runtime = string.IsNullOrWhiteSpace(runtime) ? FormatRuntime(runtimeTicks) : runtime,
+            format = aspectRatio ?? string.Empty,
             chapters = chapterCount == 0 ? string.Empty : $"{chapterCount}",
             rating = FormatRating(officialRating, communityRating),
             plot,

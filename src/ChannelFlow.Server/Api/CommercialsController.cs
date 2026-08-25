@@ -218,23 +218,46 @@ public class CommercialsController : ControllerBase
         }
 
         var name = request?.Name?.Trim();
-        var query = request?.Query?.Trim();
-        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(query))
+        if (string.IsNullOrWhiteSpace(name))
         {
-            return BadRequest(new { message = "Name and search query are required." });
+            return BadRequest(new { message = "Playlist name is required." });
         }
 
-        var playlist = new CommercialSearchPlaylist
-        {
-            Name = name,
-            Query = query,
-            MaxResults = Math.Clamp(request?.MaxResults ?? 50, 1, 100)
-        };
+        var playlist = new CommercialSearchPlaylist { Name = name };
+        ApplyPlaylistFilters(playlist, request);
         runtime.Configuration.CommercialSearchPlaylists.Add(playlist);
         runtime.SaveConfiguration();
 
-        var pulled = await _commercialBrainz.PullSearchPlaylistAsync(playlist.Id, cancellationToken);
-        return Ok(await _commercialBrainz.MapSearchPlaylistAsync(pulled, cancellationToken));
+        return Ok(await _commercialBrainz.MapSearchPlaylistAsync(playlist, cancellationToken));
+    }
+
+    [HttpPut("search-playlists/{id:guid}")]
+    public async Task<ActionResult<object>> UpdateSearchPlaylist(
+        Guid id,
+        [FromBody] CommercialSearchPlaylistRequest? request,
+        CancellationToken cancellationToken)
+    {
+        var runtime = FinTvRuntime.Current;
+        if (runtime is null)
+        {
+            return NotFound();
+        }
+
+        var playlist = runtime.Configuration.CommercialSearchPlaylists.FirstOrDefault(p => p.Id == id);
+        if (playlist is null)
+        {
+            return NotFound(new { message = "Search playlist not found." });
+        }
+
+        var name = request?.Name?.Trim();
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            playlist.Name = name;
+        }
+
+        ApplyPlaylistFilters(playlist, request);
+        runtime.SaveConfiguration();
+        return Ok(await _commercialBrainz.MapSearchPlaylistAsync(playlist, cancellationToken));
     }
 
     [HttpPost("search-playlists/{id:guid}/pull")]
@@ -299,6 +322,34 @@ public class CommercialsController : ControllerBase
             allowBanned = settings.AllowBanned,
             syncState = settings.SyncState
         };
+    }
+
+    private static void ApplyPlaylistFilters(CommercialSearchPlaylist playlist, CommercialSearchPlaylistRequest? request)
+    {
+        playlist.Query = request?.Query?.Trim() ?? string.Empty;
+        playlist.MaxResults = Math.Clamp(request?.MaxResults ?? playlist.MaxResults, 1, 500);
+        playlist.MinYear = request?.MinYear;
+        playlist.MaxYear = request?.MaxYear;
+        playlist.Decades = request?.Decades?
+            .Where(decade => decade >= 1900)
+            .Distinct()
+            .ToList()
+            ?? new List<int>();
+        playlist.Brands = NormalizeList(request?.Brands);
+        playlist.Tags = NormalizeList(request?.Tags);
+        playlist.ExcludeTags = NormalizeList(request?.ExcludeTags);
+        playlist.Genres = NormalizeList(request?.Genres);
+        playlist.Networks = NormalizeList(request?.Networks);
+        playlist.ChannelNames = NormalizeList(request?.ChannelNames);
+        playlist.MinAgeLimit = request?.MinAgeLimit;
+        playlist.MaxAgeLimit = request?.MaxAgeLimit;
+        playlist.AllowSpoof = request?.AllowSpoof ?? true;
+        playlist.AllowFake = request?.AllowFake ?? true;
+        playlist.AllowReal = request?.AllowReal ?? true;
+        playlist.AllowAiEnhanced = request?.AllowAiEnhanced ?? true;
+        playlist.AllowLateNight = request?.AllowLateNight ?? true;
+        playlist.AllowAdultRated = request?.AllowAdultRated ?? false;
+        playlist.AllowBanned = request?.AllowBanned ?? false;
     }
 
     private static List<string> NormalizeList(IEnumerable<string>? values)
@@ -368,4 +419,40 @@ public class CommercialSearchPlaylistRequest
     public string? Query { get; set; }
 
     public int? MaxResults { get; set; }
+
+    public int? MinYear { get; set; }
+
+    public int? MaxYear { get; set; }
+
+    public List<int>? Decades { get; set; }
+
+    public List<string>? Brands { get; set; }
+
+    public List<string>? Tags { get; set; }
+
+    public List<string>? ExcludeTags { get; set; }
+
+    public List<string>? Genres { get; set; }
+
+    public List<string>? Networks { get; set; }
+
+    public List<string>? ChannelNames { get; set; }
+
+    public int? MinAgeLimit { get; set; }
+
+    public int? MaxAgeLimit { get; set; }
+
+    public bool? AllowSpoof { get; set; }
+
+    public bool? AllowFake { get; set; }
+
+    public bool? AllowReal { get; set; }
+
+    public bool? AllowAiEnhanced { get; set; }
+
+    public bool? AllowLateNight { get; set; }
+
+    public bool? AllowAdultRated { get; set; }
+
+    public bool? AllowBanned { get; set; }
 }

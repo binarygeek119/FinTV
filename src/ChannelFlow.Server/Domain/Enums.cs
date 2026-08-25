@@ -98,12 +98,13 @@ public enum EbsBackgroundMusicSource
 public enum EbsSlateVariant
 {
     /// <summary>
-    /// USA off-air slate (<c>offlineusa.jpg</c>).
+    /// USA off-air slate (<c>offline_usa_16_9.jpg</c> / <c>offline_usa_4_3.jpg</c>).
     /// </summary>
     Usa = 0,
 
     /// <summary>
-    /// International off-air slate (<c>offline.jpg</c>).
+    /// World off-air slate (<c>offline_world_16_9.jpg</c> / <c>offline_world_4_3.jpg</c>).
+    /// Stored as International for existing configuration compatibility.
     /// </summary>
     International = 1
 }

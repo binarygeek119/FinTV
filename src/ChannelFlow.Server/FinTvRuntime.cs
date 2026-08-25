@@ -69,6 +69,7 @@ public sealed class FinTvRuntime
 
         EnsureApiKey();
         _configuration.Transcode ??= new TranscodeSettings();
+        _configuration.YouTube ??= new YouTubeSettings();
     }
 
     private void EnsureApiKey()

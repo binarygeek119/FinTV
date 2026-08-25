@@ -48,8 +48,13 @@ public class EbsController : ControllerBase
             customSlates = _ebs.GetCustomSlateStatus(),
             stockSlates = new
             {
-                usa = EbsService.EbsFolderName + "/offlineusa.jpg",
-                international = EbsService.EbsFolderName + "/offline.jpg"
+                usa = EbsService.EbsFolderName + "/offline_usa_16_9.jpg",
+                usa16x9 = EbsService.EbsFolderName + "/offline_usa_16_9.jpg",
+                usa4x3 = EbsService.EbsFolderName + "/offline_usa_4_3.jpg",
+                world = EbsService.EbsFolderName + "/offline_world_16_9.jpg",
+                world16x9 = EbsService.EbsFolderName + "/offline_world_16_9.jpg",
+                world4x3 = EbsService.EbsFolderName + "/offline_world_4_3.jpg",
+                international = EbsService.EbsFolderName + "/offline_world_16_9.jpg"
             },
             musicLibraries = _catalog.GetMusicLibraries().Select(l => new { id = l.Id, name = l.Name })
         });
@@ -103,9 +108,9 @@ public class EbsController : ControllerBase
     }
 
     /// <summary>
-    /// Uploads a custom off-air slate image for the USA or International variant.
+    /// Uploads a custom off-air slate image for the USA or World variant.
     /// </summary>
-    /// <param name="variant">Slate variant (<c>usa</c> or <c>international</c>).</param>
+    /// <param name="variant">Slate variant (<c>usa</c>, <c>world</c>, or <c>international</c>).</param>
     /// <param name="file">PNG or JPG image.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Upload result.</returns>
@@ -123,7 +128,7 @@ public class EbsController : ControllerBase
 
         if (!TryParseVariant(variant, out var slateVariant))
         {
-            return BadRequest(new { message = "Variant must be usa or international." });
+            return BadRequest(new { message = "Variant must be usa, world, or international." });
         }
 
         try
@@ -145,14 +150,14 @@ public class EbsController : ControllerBase
     /// <summary>
     /// Deletes a custom off-air slate image.
     /// </summary>
-    /// <param name="variant">Slate variant (<c>usa</c> or <c>international</c>).</param>
+    /// <param name="variant">Slate variant (<c>usa</c>, <c>world</c>, or <c>international</c>).</param>
     /// <returns>No content.</returns>
     [HttpDelete("slates/{variant}")]
     public ActionResult DeleteSlate(string variant)
     {
         if (!TryParseVariant(variant, out var slateVariant))
         {
-            return BadRequest(new { message = "Variant must be usa or international." });
+            return BadRequest(new { message = "Variant must be usa, world, or international." });
         }
 
         _ebs.DeleteCustomSlate(slateVariant);
@@ -162,28 +167,30 @@ public class EbsController : ControllerBase
     /// <summary>
     /// Gets the effective off-air slate (custom upload or bundled stock) for admin preview.
     /// </summary>
-    /// <param name="variant">Slate variant (<c>usa</c> or <c>international</c>).</param>
+    /// <param name="variant">Slate variant (<c>usa</c>, <c>world</c>, or <c>international</c>).</param>
+    /// <param name="aspect">Channel aspect: <c>0</c> 16:9, <c>1</c> 4:3.</param>
     /// <returns>Image file.</returns>
     [HttpGet("slates/{variant}/image")]
     [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
-    public ActionResult GetSlateImage(string variant)
+    public ActionResult GetSlateImage(string variant, [FromQuery] int? aspect)
     {
         if (!TryParseVariant(variant, out var slateVariant))
         {
-            return BadRequest(new { message = "Variant must be usa or international." });
+            return BadRequest(new { message = "Variant must be usa, world, or international." });
         }
 
-        return FileSlate(_ebs.ResolveSlatePath(slateVariant));
+        return FileSlate(_ebs.ResolveSlatePath(slateVariant, ParseAspect(aspect)));
     }
 
     /// <summary>
     /// Gets the off-air image currently used for dead air and playback errors.
     /// </summary>
-    /// <param name="variant">Optional slate variant override (<c>0</c> USA, <c>1</c> International).</param>
+    /// <param name="variant">Optional slate variant override (<c>0</c> USA, <c>1</c> World).</param>
+    /// <param name="aspect">Channel aspect: <c>0</c> 16:9, <c>1</c> 4:3.</param>
     /// <returns>Image file.</returns>
     [HttpGet("preview")]
     [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
-    public ActionResult GetPreview([FromQuery] int? variant)
+    public ActionResult GetPreview([FromQuery] int? variant, [FromQuery] int? aspect)
     {
         var slateVariant = variant switch
         {
@@ -192,7 +199,7 @@ public class EbsController : ControllerBase
             _ => FinTvRuntime.Current?.Configuration.EbsSlateVariant ?? EbsSlateVariant.Usa
         };
 
-        return FileSlate(_ebs.ResolveSlatePath(slateVariant));
+        return FileSlate(_ebs.ResolveSlatePath(slateVariant, ParseAspect(aspect)));
     }
 
     private ActionResult FileSlate(string? path)
@@ -224,7 +231,8 @@ public class EbsController : ControllerBase
             return true;
         }
 
-        if (string.Equals(value, "international", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(value, "international", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "world", StringComparison.OrdinalIgnoreCase))
         {
             variant = EbsSlateVariant.International;
             return true;
@@ -233,6 +241,11 @@ public class EbsController : ControllerBase
         variant = default;
         return false;
     }
+
+    private static AspectRatioMode ParseAspect(int? aspect)
+        => aspect == (int)AspectRatioMode.FourThree
+            ? AspectRatioMode.FourThree
+            : AspectRatioMode.SixteenNine;
 }
 
 /// <summary>

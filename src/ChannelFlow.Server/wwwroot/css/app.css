@@ -361,13 +361,6 @@ input, select, textarea {
 .credits-list li { margin: 0.4rem 0; line-height: 1.45; }
 .credits-list a { color: var(--accent-hover); }
 #general-api-key { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.cb-playlist-add {
-    display: grid;
-    grid-template-columns: minmax(120px, 1fr) minmax(180px, 2fr) 90px auto;
-    gap: 0.65rem;
-    align-items: end;
-    margin: 0.85rem 0 1rem;
-}
 
 body.channel-editor-open .app-drawer { display: none; }
 body.channel-editor-open .app-topbar { padding-bottom: 0; }
@@ -395,6 +388,32 @@ body.channel-editor-open .app-topbar { padding-bottom: 0; }
     padding: 1rem 1.1rem;
     color: var(--muted);
     background: #141414;
+}
+table.data-table tbody tr.selected {
+    background: rgba(225, 29, 72, 0.14);
+}
+.playlist-sample-caption,
+.playlist-sample-caption {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin: 0 0 0.65rem;
+}
+.playlist-filter-sub,
+.playlist-filter-sub {
+    display: block;
+    color: var(--muted);
+    font-size: 0.78rem;
+    margin-top: 0.15rem;
+}
+.save-playlist-modal {
+    display: grid;
+    gap: 0.75rem;
+}
+.radio-field {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    margin: 0;
 }
 .playlist-chip {
     display: grid;
@@ -439,13 +458,27 @@ body.channel-editor-open .app-topbar { padding-bottom: 0; }
 }
 .library-pick-meta { color: var(--muted); font-size: 0.8rem; font-weight: 400; }
 
+.cookie-textarea {
+    width: 100%;
+    min-height: 12rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.8rem;
+    line-height: 1.35;
+    resize: vertical;
+}
+.checkbox-grid {
+    display: grid;
+    gap: 0.45rem 0.85rem;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    margin: 0.85rem 0 1rem;
+}
+
 @media (max-width: 840px) {
     #app-shell { flex-direction: column; }
     .app-drawer { width: 100%; flex-direction: row; flex-wrap: wrap; }
     .drawer-brand { flex-direction: row; align-items: center; text-align: left; padding: 0.35rem 0.75rem; overflow: visible; }
     .drawer-brand img { width: auto; max-width: 180px; }
     .drawer-nav { flex-direction: row; flex-wrap: wrap; }
-    .cb-playlist-add { grid-template-columns: 1fr; }
     .channel-editor-grid { grid-template-columns: 1fr; }
     .playlist-chip { grid-template-columns: 1fr auto; }
     .playlist-chip-count { grid-column: 1; }

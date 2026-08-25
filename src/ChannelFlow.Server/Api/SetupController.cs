@@ -1,11 +1,13 @@
 using FinTv;
 using FinTv.Auth;
 using FinTv.Configuration;
+using FinTv.Data;
 using FinTv.Domain;
 using FinTv.News;
 using FinTv.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace FinTv.Api;
 
@@ -242,6 +244,9 @@ public class TasksController : ControllerBase
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly CatalogCleanupService _catalogCleanup;
     private readonly NewsBulletinService _newsBulletins;
+    private readonly StreamService _streams;
+    private readonly CommercialService _commercials;
+    private readonly FinTvDbContext _db;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TasksController"/> class.
@@ -250,12 +255,18 @@ public class TasksController : ControllerBase
         PlayoutBuilderService playoutBuilder,
         IServiceScopeFactory scopeFactory,
         CatalogCleanupService catalogCleanup,
-        NewsBulletinService newsBulletins)
+        NewsBulletinService newsBulletins,
+        StreamService streams,
+        CommercialService commercials,
+        FinTvDbContext db)
     {
         _playoutBuilder = playoutBuilder;
         _scopeFactory = scopeFactory;
         _catalogCleanup = catalogCleanup;
         _newsBulletins = newsBulletins;
+        _streams = streams;
+        _commercials = commercials;
+        _db = db;
     }
 
     /// <summary>
@@ -267,6 +278,77 @@ public class TasksController : ControllerBase
     {
         _playoutBuilder.QueueForceRebuildAllChannels();
         return Accepted(new { queued = true });
+    }
+
+    /// <summary>
+    /// Cuts every currently watched channel to a commercial break in 15 seconds.
+    /// </summary>
+    [HttpPost("force-commercial")]
+    public async Task<ActionResult> ForceCommercial(CancellationToken cancellationToken)
+    {
+        const int delaySeconds = 15;
+        var watched = _streams.GetActiveStreams();
+        if (watched.Count == 0)
+        {
+            return Ok(new
+            {
+                delaySeconds,
+                forcedCount = 0,
+                skippedCount = 0,
+                forced = Array.Empty<object>(),
+                skipped = Array.Empty<object>(),
+                message = "No channels are currently being watched."
+            });
+        }
+
+        var ids = watched.Select(stream => stream.ChannelId).ToList();
+        var channels = await _db.Channels
+            .Where(channel => ids.Contains(channel.Id))
+            .OrderBy(channel => channel.Number)
+            .ToListAsync(cancellationToken);
+
+        var forced = new List<object>();
+        var skipped = new List<object>();
+        foreach (var channel in channels)
+        {
+            var result = await _commercials.ForceCommercialBreakAsync(
+                channel,
+                TimeSpan.FromSeconds(delaySeconds),
+                cancellationToken);
+            if (result.Forced)
+            {
+                _streams.InterruptCurrentItem(channel.Id);
+                forced.Add(new
+                {
+                    channelId = channel.Id,
+                    channelName = result.ChannelName,
+                    delaySeconds = result.DelaySeconds,
+                    message = result.Message
+                });
+            }
+            else
+            {
+                skipped.Add(new
+                {
+                    channelId = channel.Id,
+                    channelName = result.ChannelName,
+                    message = result.Message
+                });
+            }
+        }
+
+        var message = forced.Count == 0
+            ? "Could not force a commercial on any watched channel."
+            : $"Forced {forced.Count} channel{(forced.Count == 1 ? "" : "s")} to commercial in {delaySeconds} seconds.";
+        return Ok(new
+        {
+            delaySeconds,
+            forcedCount = forced.Count,
+            skippedCount = skipped.Count,
+            forced,
+            skipped,
+            message
+        });
     }
 
     [HttpPost("news-bulletin")]

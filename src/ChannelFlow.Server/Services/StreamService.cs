@@ -16,6 +16,7 @@ public class StreamService : IDisposable
 {
     private readonly ConcurrentDictionary<Guid, int> _activeStreams = new();
     private readonly ConcurrentDictionary<Guid, ChannelLiveSession> _liveSessions = new();
+    private readonly ConcurrentDictionary<Guid, CancellationTokenSource> _itemCuts = new();
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly FfmpegCommandBuilder _ffmpeg;
     private readonly WeatherAlertOverlayService _weatherAlerts;
@@ -162,28 +163,35 @@ public class StreamService : IDisposable
             }
 
             var current = await GetCurrentItemAsync(channelId, cancellationToken);
+            var skipDelay = false;
             if (current is not null)
             {
+                using var itemCts = CreateItemCutCts(channelId);
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, itemCts.Token);
                 try
                 {
                     if (current.IsVirtual && current.VirtualSource == VirtualContentSource.MusicArtSlide)
                     {
-                        await StreamMusicItemAsync(channel, current, catalog, ffmpegPath, output, cancellationToken);
+                        await StreamMusicItemAsync(channel, current, catalog, ffmpegPath, output, linked.Token);
                     }
                     else if (current.CommercialId.HasValue)
                     {
-                        await StreamCommercialItemAsync(channel, current, catalog, holidays, youtubeCommercials, ffmpegPath, output, cancellationToken);
+                        await StreamCommercialItemAsync(channel, current, catalog, youtubeCommercials, ffmpegPath, output, linked.Token);
                     }
                     else if (current.JellyfinItemId.HasValue)
                     {
-                        await StreamMediaItemAsync(channel, current, catalog, holidays, ffmpegPath, output, alertSession, cancellationToken);
+                        await StreamMediaItemAsync(channel, current, catalog, holidays, ffmpegPath, output, alertSession, linked.Token);
                     }
                     else
                     {
-                        await WriteEbsAsync(channel, ebs, ffmpegPath, output, 180, cancellationToken);
+                        await WriteEbsAsync(channel, ebs, ffmpegPath, output, 180, linked.Token);
                     }
                 }
-                catch (Exception ex)
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    skipDelay = true;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
                     _logger.LogError(ex, "Failed streaming item {Title}", current.Title);
                     await WriteEbsAsync(channel, ebs, ffmpegPath, output, 120, cancellationToken);
@@ -195,7 +203,10 @@ public class StreamService : IDisposable
                 await WriteEbsAsync(channel, ebs, ffmpegPath, output, ebsDuration, cancellationToken);
             }
 
-            await DelayIfStreamEndedImmediatelyAsync(channel.Name, started, cancellationToken);
+            if (!skipDelay)
+            {
+                await DelayIfStreamEndedImmediatelyAsync(channel.Name, started, cancellationToken);
+            }
         }
     }
 
@@ -274,6 +285,35 @@ public class StreamService : IDisposable
     public int GetActiveStreamCount(Guid channelId)
     {
         return _activeStreams.TryGetValue(channelId, out var count) ? count : 0;
+    }
+
+    /// <summary>
+    /// Stops the current ffmpeg item so playout is re-read. Viewers stay on the shared session.
+    /// </summary>
+    public void InterruptCurrentItem(Guid channelId)
+    {
+        if (_itemCuts.TryGetValue(channelId, out var cts))
+        {
+            try
+            {
+                cts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
+
+        if (_liveSessions.TryGetValue(channelId, out var session))
+        {
+            session.DropReplayAndResetPace();
+        }
+    }
+
+    private CancellationTokenSource CreateItemCutCts(Guid channelId)
+    {
+        var cts = new CancellationTokenSource();
+        _itemCuts[channelId] = cts;
+        return cts;
     }
 
     private StreamLease TrackStream(Guid channelId)
@@ -364,7 +404,21 @@ public class StreamService : IDisposable
         var bugPath = ResolveBugPath(channel, item.Start, holidays);
         var headline = PastTenseNewsCatalog.IsPastTenseNewsChannel(channel) ? item.Title : null;
         var tickerPath = await _weatherAlerts.PrepareTickerFileAsync(channel, cancellationToken);
-        var args = _ffmpeg.BuildMediaCommand(channel, inputPath, offset, duration, bugPath, headline, tickerPath);
+        var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
+        var (fadeBugIn, fadeBugOut) = await GetChannelBugCommercialFadesAsync(db, item, duration, cancellationToken);
+        var args = _ffmpeg.BuildMediaCommand(
+            channel,
+            inputPath,
+            offset,
+            duration,
+            bugPath,
+            headline,
+            tickerPath,
+            mediaItem.AspectRatio,
+            mediaItem.Width,
+            mediaItem.Height,
+            fadeBugIn: fadeBugIn,
+            fadeBugOut: fadeBugOut);
 
         await RunFfmpegToStreamAsync(ffmpegPath, args, output, cancellationToken);
     }
@@ -373,7 +427,6 @@ public class StreamService : IDisposable
         Channel channel,
         PlayoutItem item,
         JellyfinCatalogService catalog,
-        HolidayChannelService holidays,
         YouTubeCommercialStreamService youtubeCommercials,
         string ffmpegPath,
         Stream output,
@@ -406,8 +459,16 @@ public class StreamService : IDisposable
 
             var offset = Math.Max(0, (DateTime.UtcNow - item.Start).TotalSeconds + item.InPoint.TotalSeconds);
             var duration = Math.Max(1, (item.Finish - DateTime.UtcNow).TotalSeconds);
-            var bugPath = ResolveBugPath(channel, item.Start, holidays);
-            var args = _ffmpeg.BuildMediaCommand(channel, inputPath, offset, duration, bugPath);
+            var args = _ffmpeg.BuildMediaCommand(
+                channel,
+                inputPath,
+                offset,
+                duration,
+                bugImagePath: null,
+                sourceAspectRatio: mediaItem.AspectRatio,
+                sourceWidth: mediaItem.Width,
+                sourceHeight: mediaItem.Height,
+                overlayBug: false);
             await RunFfmpegToStreamAsync(ffmpegPath, args, output, cancellationToken);
             return;
         }
@@ -461,6 +522,37 @@ public class StreamService : IDisposable
         var plan = ebs.CreatePlaybackPlan(channel, durationSeconds);
         var args = _ffmpeg.BuildEbsCommand(channel, plan);
         await RunFfmpegToStreamAsync(ffmpegPath, args, output, cancellationToken);
+    }
+
+    private static async Task<(bool FadeIn, bool FadeOut)> GetChannelBugCommercialFadesAsync(
+        FinTvDbContext db,
+        PlayoutItem item,
+        double encodeDurationSeconds,
+        CancellationToken cancellationToken)
+    {
+        const double adjacentSeconds = 2.5;
+        var previous = await db.PlayoutItems.AsNoTracking()
+            .Where(p => p.ChannelId == item.ChannelId && p.Id != item.Id && p.Finish <= item.Start.AddSeconds(adjacentSeconds))
+            .OrderByDescending(p => p.Finish)
+            .Select(p => new { p.CommercialId, p.Finish })
+            .FirstOrDefaultAsync(cancellationToken);
+        var next = await db.PlayoutItems.AsNoTracking()
+            .Where(p => p.ChannelId == item.ChannelId && p.Id != item.Id && p.Start >= item.Finish.AddSeconds(-adjacentSeconds))
+            .OrderBy(p => p.Start)
+            .Select(p => new { p.CommercialId, p.Start })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var fadeIn = previous?.CommercialId is not null
+            && Math.Abs((item.Start - previous.Finish).TotalSeconds) <= adjacentSeconds
+            && (DateTime.UtcNow - item.Start).TotalSeconds < 5;
+
+        var remainingToItemEnd = (item.Finish - DateTime.UtcNow).TotalSeconds;
+        var encodeReachesEnd = encodeDurationSeconds >= remainingToItemEnd - 0.75;
+        var fadeOut = encodeReachesEnd
+            && next?.CommercialId is not null
+            && Math.Abs((next.Start - item.Finish).TotalSeconds) <= adjacentSeconds;
+
+        return (fadeIn, fadeOut);
     }
 
     private static string? ResolveBugPath(Channel channel, DateTime scheduleUtc, HolidayChannelService holidays)

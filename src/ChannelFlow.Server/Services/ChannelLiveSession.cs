@@ -86,6 +86,20 @@ internal sealed class ChannelLiveSession
         }
     }
 
+    /// <summary>
+    /// Drops already-encoded video so a newly spliced commercial is not stuck behind the run-ahead buffer.
+    /// </summary>
+    public void DropReplayAndResetPace()
+    {
+        lock (_gate)
+        {
+            _replay.Clear();
+            _replayBytes = 0;
+            _pacedBytes = 0;
+            _paceClock = null;
+        }
+    }
+
     private bool TryBeginAttach(Viewer viewer, out byte[][] primed)
     {
         lock (_gate)

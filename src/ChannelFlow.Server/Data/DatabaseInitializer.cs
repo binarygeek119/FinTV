@@ -32,8 +32,9 @@ public class DatabaseInitializer : IHostedService
         await EnsureCatalogTablesAsync(db, cancellationToken);
         await UpgradeTvShowsToEpisodesAsync(db, cancellationToken);
         await EnsureCatalogMissingColumnsAsync(db, cancellationToken);
-        await scope.ServiceProvider.GetRequiredService<CatalogTypedStore>()
-            .BackfillFromMediaItemsAsync(cancellationToken);
+        var typedCatalog = scope.ServiceProvider.GetRequiredService<CatalogTypedStore>();
+        await typedCatalog.BackfillFromMediaItemsAsync(cancellationToken);
+        await typedCatalog.NormalizeAspectRatiosAsync(cancellationToken);
 
         if (!await db.AppSettings.AnyAsync(cancellationToken))
         {
@@ -206,7 +207,11 @@ public class DatabaseInitializer : IHostedService
             """ALTER TABLE "MediaItems" ADD COLUMN IF NOT EXISTS "PeopleJson" text NULL""",
             """ALTER TABLE "MediaItems" ADD COLUMN IF NOT EXISTS "ProviderIdsJson" text NULL""",
             """ALTER TABLE "MediaItems" ADD COLUMN IF NOT EXISTS "ArtistsJson" text NULL""",
-            """ALTER TABLE "MediaItems" ADD COLUMN IF NOT EXISTS "AlbumArtistsJson" text NULL"""
+            """ALTER TABLE "MediaItems" ADD COLUMN IF NOT EXISTS "AlbumArtistsJson" text NULL""",
+            """ALTER TABLE "MediaItems" ADD COLUMN IF NOT EXISTS "Width" integer NULL""",
+            """ALTER TABLE "MediaItems" ADD COLUMN IF NOT EXISTS "Height" integer NULL""",
+            """ALTER TABLE "MediaItems" ADD COLUMN IF NOT EXISTS "AspectRatio" text NULL""",
+            """CREATE INDEX IF NOT EXISTS "IX_MediaItems_AspectRatio" ON "MediaItems" ("AspectRatio")"""
         };
 
         foreach (var sql in statements)
@@ -307,8 +312,11 @@ public class DatabaseInitializer : IHostedService
             {
                 $"""ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS "IsMissing" boolean NOT NULL DEFAULT FALSE""",
                 $"""ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS "MissingSince" timestamp with time zone NULL""",
+                $"""ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS "Width" integer NULL""",
+                $"""ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS "Height" integer NULL""",
                 $"""ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS "AspectRatio" text NULL""",
-                $"""CREATE INDEX IF NOT EXISTS "IX_{table}_IsMissing" ON "{table}" ("IsMissing")"""
+                $"""CREATE INDEX IF NOT EXISTS "IX_{table}_IsMissing" ON "{table}" ("IsMissing")""",
+                $"""CREATE INDEX IF NOT EXISTS "IX_{table}_AspectRatio" ON "{table}" ("AspectRatio")"""
             };
 
             foreach (var sql in statements)

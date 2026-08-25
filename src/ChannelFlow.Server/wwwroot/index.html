@@ -101,6 +101,7 @@
                                 <option value="4" selected>Bottom Right</option>
                                 <option value="5">No Bug</option>
                             </select>
+                            <p class="hint">On 16:9 channels, 4:3 shows keep the bug on the picture. Widescreen shows put it in the side area outside 4:3.</p>
                         </label>
                         <label class="field"><span>Audio language</span><input id="deep-ch-audio" value="eng" class="emby-input"></label>
                         <label class="field"><span>Logo set</span><select id="deep-ch-logo-set" class="emby-select"><option value="">None</option></select></label>
@@ -156,6 +157,7 @@
                 <a href="special" class="tab" data-tab="special" role="tab">Special Presentation</a>
                 <a href="commercials" class="tab" data-tab="commercials" role="tab">Commercials</a>
                 <a href="commercialbrainz" class="tab" data-tab="commercialbrainz" role="tab">CommercialBrainz</a>
+                <a href="youtube" class="tab" data-tab="youtube" role="tab">YouTube</a>
                 <a href="ebs" class="tab" data-tab="ebs" role="tab">Off Air</a>
                 <a href="emergency" class="tab" data-tab="emergency" role="tab">Emergency Broadcast System</a>
                 <a href="ai" class="tab" data-tab="ai" role="tab">AI</a>
@@ -226,6 +228,7 @@
                                     <option value="4" selected>Bottom Right</option>
                                     <option value="5">No Bug</option>
                                 </select>
+                                <p class="hint">On 16:9 channels, 4:3 shows keep the bug on the picture. Widescreen shows put it in the side area outside 4:3.</p>
                             </label>
                             <label class="field">
                                 <span>Audio Language</span>
@@ -381,7 +384,7 @@
                 </div>
                 <div class="card section-card">
                     <h3>TV shows</h3>
-                    <p class="hint">Synced series and episodes with runtime, chapters, rating, plot, stars, Jellyfin path, and IDs.</p>
+                    <p class="hint">Synced series and episodes with runtime, picture format (16:9, 4:3, or other), chapters, rating, plot, stars, Jellyfin path, and IDs.</p>
                     <div id="jf-media-tv" class="data-table-wrap catalog-media-table"></div>
                 </div>
                 <div class="card section-card">
@@ -426,14 +429,8 @@
                     <div id="commercial-list" class="data-table-wrap"></div>
                 </div>
                 <div class="card section-card">
-                    <h3>CommercialBrainz search playlists</h3>
-                    <p class="hint">Save a search (brand, title, or keyword) and pull matching YouTube spots from CommercialBrainz into this library. Configure API token and allow-flags on the <strong>CommercialBrainz</strong> tab.</p>
-                    <div class="cb-playlist-add">
-                        <label class="field"><span>Name</span><input id="cb-playlist-name" type="text" class="emby-input" placeholder="80s toys"></label>
-                        <label class="field"><span>Search</span><input id="cb-playlist-query" type="text" class="emby-input" placeholder="McDonald's, Commodore, 1985"></label>
-                        <label class="field"><span>Max</span><input id="cb-playlist-max" type="number" min="1" max="100" value="50" class="emby-input"></label>
-                        <button type="button" id="btn-add-cb-playlist" class="raised button-submit emby-button">Add &amp; Pull</button>
-                    </div>
+                    <h3>Saved playlists</h3>
+                    <p class="hint">Playlists saved from the CommercialBrainz tab. Assign them to a channel for commercial breaks. Click <strong>Pull</strong> to load a sample of spots this playlist will use.</p>
                     <div id="cb-playlist-list" class="data-table-wrap"></div>
                     <div id="cb-playlist-items" class="data-table-wrap"></div>
                 </div>
@@ -443,7 +440,7 @@
                 <p>Sync YouTube commercials from <a href="https://commercialbrainz.org/" target="_blank" rel="noopener">CommercialBrainz</a>.</p>
                 <div class="card section-card">
                     <h3>CommercialBrainz YouTube Pool</h3>
-                    <p class="hint">CommercialBrainz sync stores YouTube metadata only. At break time ChannelFlow-Server streams each spot directly into the channel (no local download). Click <strong>Preview Matches</strong> to see the commercials that the current filters will pull.</p>
+                    <p class="hint">Fill in the filters, then Save to playlist. Those playlists appear on the Commercials tab and can be assigned to channels. Channel commercial breaks pull from that playlist’s filters. CommercialBrainz stores YouTube metadata only and streams each spot at break time (no local download). Paste a YouTube cookies.txt on the <strong>YouTube</strong> tab to use your account (including Premium when the cookie is from a Premium login). SponsorBlock skips in-video sponsors during playback.</p>
                     <div class="form-grid">
                         <label class="field checkbox-field">
                             <input id="cb-enabled" type="checkbox" checked>
@@ -510,12 +507,44 @@
                         </label>
                     </div>
                     <div class="actions">
-                        <button type="button" id="btn-save-brainz" class="raised button-submit emby-button">Save CommercialBrainz Filters</button>
+                        <button type="button" id="btn-save-brainz" class="raised button-submit emby-button">Save to playlist</button>
                         <button type="button" id="btn-preview-brainz" class="emby-button">Preview Matches</button>
                         <button type="button" id="btn-sync-brainz" class="emby-button">Sync CommercialBrainz</button>
                     </div>
                     <div id="brainz-status" class="status-card"></div>
                     <div id="brainz-preview" class="brainz-preview-wrap"></div>
+                </div>
+            </section>
+
+            <section id="tab-youtube" class="tab-panel hidden" hidden>
+                <div class="card section-card">
+                    <h2>YouTube</h2>
+                    <p class="hint">ChannelFlow streams CommercialBrainz spots from YouTube at break time (no local download). yt-dlp already omits YouTube pre-roll ads. Paste a Netscape <code>cookies.txt</code> from a signed-in browser to use your YouTube account. If that account has YouTube Premium, yt-dlp can request Premium formats. ChannelFlow cannot turn Premium on by itself.</p>
+                    <div id="youtube-status" class="status-card">Loading YouTube settings…</div>
+                    <label class="field">
+                        <span>YouTube cookies.txt</span>
+                        <textarea id="yt-cookies" class="emby-input cookie-textarea" rows="10" spellcheck="false" autocomplete="off" placeholder="# Netscape HTTP Cookie File&#10;.youtube.com	TRUE	/	TRUE	0	SID	…"></textarea>
+                    </label>
+                    <p class="hint">Export with a cookies.txt browser extension while signed into YouTube, or <code>yt-dlp --cookies-from-browser chrome --cookies cookies.txt</code>. ChannelFlow never shows the saved cookie values again. Leave the box empty to keep the current file.</p>
+                    <label class="field checkbox-field">
+                        <input id="yt-prefer-premium" type="checkbox" checked>
+                        <span class="channelflow-check-box" aria-hidden="true"></span>
+                        <span>Prefer Premium / signed-in formats</span>
+                    </label>
+                    <p class="hint">Uses TV and Android player clients with your cookies so a Premium login can unlock higher-quality streams.</p>
+                    <label class="field checkbox-field">
+                        <input id="yt-sponsorblock" type="checkbox" checked>
+                        <span class="channelflow-check-box" aria-hidden="true"></span>
+                        <span>Skip SponsorBlock segments</span>
+                    </label>
+                    <p class="hint">Cuts in-video sponsors, intros, outros, and similar chapters from <a href="https://sponsor.ajay.app/" target="_blank" rel="noopener">SponsorBlock</a>. Segments that would remove almost the entire spot are ignored so the commercial still plays.</p>
+                    <div id="yt-sb-categories" class="checkbox-grid"></div>
+                    <div class="actions">
+                        <button type="button" id="btn-save-youtube" class="raised button-submit emby-button">Save YouTube settings</button>
+                        <button type="button" id="btn-test-youtube" class="emby-button">Test YouTube access</button>
+                        <button type="button" id="btn-clear-youtube-cookies" class="emby-button">Clear cookies</button>
+                    </div>
+                    <p id="youtube-test-result" class="hint"></p>
                 </div>
             </section>
 
@@ -525,7 +554,23 @@
                     <p class="hint">Off Air plays when a channel has no scheduled media, when playback fails, or when a weather capture error occurs. Pick off-air video and audio independently — for example, color bars with a beep tone, or TV static with white noise.</p>
                     <div class="ebs-live-preview" id="ebs-live-preview">
                         <span class="ebs-live-preview-label">What viewers see</span>
-                        <div class="ebs-live-preview-frame" id="ebs-live-preview-frame">
+                        <div class="ebs-live-preview-pair" id="ebs-live-preview-pair">
+                            <div class="ebs-live-preview-slot">
+                                <span class="ebs-live-preview-aspect">16:9 channels</span>
+                                <div class="ebs-live-preview-frame ebs-live-preview-frame-169">
+                                    <img id="ebs-live-preview-image-169" class="ebs-live-preview-image hidden" alt="Off-air image for 16:9 channels">
+                                    <p id="ebs-live-preview-missing-169" class="ebs-preview-missing hidden" hidden>No 16:9 off-air slate was found.</p>
+                                </div>
+                            </div>
+                            <div class="ebs-live-preview-slot">
+                                <span class="ebs-live-preview-aspect">4:3 channels</span>
+                                <div class="ebs-live-preview-frame ebs-live-preview-frame-43">
+                                    <img id="ebs-live-preview-image-43" class="ebs-live-preview-image hidden" alt="Off-air image for 4:3 channels">
+                                    <p id="ebs-live-preview-missing-43" class="ebs-preview-missing hidden" hidden>No 4:3 off-air slate was found.</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="ebs-live-preview-frame hidden" id="ebs-live-preview-frame">
                             <img id="ebs-live-preview-image" class="ebs-live-preview-image hidden" alt="Off-air image shown during dead air and errors">
                             <div id="ebs-live-preview-bars" class="ebs-preview-bars hidden" hidden></div>
                             <div id="ebs-live-preview-static" class="ebs-preview-static hidden" hidden></div>
@@ -542,13 +587,13 @@
                         </select>
                     </label>
                     <label class="field" id="ebs-slate-variant-field">
-                        <span>Stock slate variant</span>
+                        <span>Stock slate</span>
                         <select id="ebs-slate-variant" class="emby-input">
-                            <option value="0">USA (offlineusa.jpg)</option>
-                            <option value="1">International (offline.jpg)</option>
+                            <option value="0">USA</option>
+                            <option value="1">World</option>
                         </select>
                     </label>
-                    <p class="hint" id="ebs-slate-variant-hint">Used when off-air video is set to slate image. Custom uploads below override the bundled stock image for each variant.</p>
+                    <p class="hint" id="ebs-slate-variant-hint">Used when off-air video is set to slate image. 16:9 channels get the 16:9 still; 4:3 channels get the 4:3 still. Custom uploads below override both sizes for that variant.</p>
                     <label class="field" id="ebs-audio-mode-field">
                         <span>Off-air audio</span>
                         <select id="ebs-audio-mode" class="emby-input">
@@ -575,11 +620,11 @@
                 </div>
                 <div class="card section-card">
                     <h3>Custom slate images</h3>
-                    <p class="hint">Upload PNG or JPG images to replace the bundled stock slates. Each variant can have one custom image.</p>
+                    <p class="hint">Upload PNG or JPG images to replace the bundled stock slates. Each variant can have one custom image used for both 16:9 and 4:3 channels.</p>
                     <div class="ebs-upload-grid">
                         <div class="ebs-upload-card">
                             <h4>USA slate</h4>
-                            <p class="hint">Stock fallback: <code>offlineusa.jpg</code></p>
+                            <p class="hint">Stock: <code>offline_usa_16_9.jpg</code> and <code>offline_usa_4_3.jpg</code></p>
                             <div class="ebs-upload-preview-wrap hidden">
                                 <img id="ebs-usa-preview" class="ebs-upload-preview hidden" alt="USA off-air slate">
                             </div>
@@ -594,10 +639,10 @@
                             </div>
                         </div>
                         <div class="ebs-upload-card">
-                            <h4>International slate</h4>
-                            <p class="hint">Stock fallback: <code>offline.jpg</code></p>
+                            <h4>World slate</h4>
+                            <p class="hint">Stock: <code>offline_world_16_9.jpg</code> and <code>offline_world_4_3.jpg</code></p>
                             <div class="ebs-upload-preview-wrap hidden">
-                                <img id="ebs-international-preview" class="ebs-upload-preview hidden" alt="International off-air slate">
+                                <img id="ebs-international-preview" class="ebs-upload-preview hidden" alt="World off-air slate">
                             </div>
                             <div id="ebs-international-status" class="status-card"></div>
                             <label class="field">
@@ -605,8 +650,8 @@
                                 <input id="ebs-international-file" type="file" class="emby-input" accept=".png,.jpg,.jpeg,image/png,image/jpeg">
                             </label>
                             <div class="actions">
-                                <button type="button" id="btn-upload-ebs-international" class="emby-button">Upload International Slate</button>
-                                <button type="button" id="btn-remove-ebs-international" class="emby-button">Remove Custom International Slate</button>
+                                <button type="button" id="btn-upload-ebs-international" class="emby-button">Upload World Slate</button>
+                                <button type="button" id="btn-remove-ebs-international" class="emby-button">Remove Custom World Slate</button>
                             </div>
                         </div>
                     </div>
@@ -947,6 +992,12 @@
 
             <section id="tab-tasks" class="tab-panel hidden" hidden>
                 <div class="card">
+                    <h2>Force commercial</h2>
+                    <p class="hint">Cuts every channel that is currently being watched to a commercial break in <strong>15 seconds</strong>. The rest of the show resumes after the spots. Weather and news channels are skipped.</p>
+                    <button type="button" id="btn-force-commercial" class="raised button-submit emby-button">Force to Commercial</button>
+                    <div id="force-commercial-status" class="status-card"></div>
+                </div>
+                <div class="card">
                     <h2>Maintenance</h2>
                     <p class="hint">Rebuild playout timelines for all enabled channels after bulk lineup changes.</p>
                     <button id="btn-rebuild-all" class="raised button-submit emby-button">Rebuild All Playouts</button>
@@ -1059,6 +1110,8 @@
                         <li>FlowWire news TTS may use Google Translate speech or the configured AI provider</li>
                         <li><a href="https://platform.openai.com/docs/guides/text-to-speech#voice-options" target="_blank" rel="noopener">OpenAI</a> and <a href="https://docs.venice.ai/models/text-to-speech" target="_blank" rel="noopener">Venice</a> — optional lineup generation and speech</li>
                         <li>CommercialBrainz — optional YouTube commercial pool</li>
+                        <li><a href="https://github.com/yt-dlp/yt-dlp" target="_blank" rel="noopener">yt-dlp</a> — YouTube commercial playback</li>
+                        <li><a href="https://sponsor.ajay.app/" target="_blank" rel="noopener">SponsorBlock</a> — skip in-video sponsors during YouTube commercials</li>
                     </ul>
                 </div>
             </section>

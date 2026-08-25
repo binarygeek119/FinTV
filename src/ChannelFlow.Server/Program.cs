@@ -90,6 +90,16 @@ builder.Services.AddHttpClient("News", client =>
     client.Timeout = TimeSpan.FromSeconds(45);
     client.DefaultRequestHeaders.UserAgent.ParseAdd("ChannelFlow-Server/0.0.3 (news)");
 });
+builder.Services.AddHttpClient("JellyfinPlugin", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(15);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("ChannelFlow-Server/1.0 (guide-refresh)");
+});
+builder.Services.AddHttpClient(nameof(SponsorBlockClient), client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(8);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("ChannelFlow-Server/1.0 (SponsorBlock)");
+});
 builder.Services.AddHttpClient();
 
 builder.Services.AddSingleton<FinTvRuntime>();
@@ -100,6 +110,7 @@ builder.Services.AddSingleton<IPublicBaseUrl>(sp => sp.GetRequiredService<Public
 builder.Services.AddSingleton<FfmpegEncodingService>();
 builder.Services.AddSingleton<FfmpegCommandBuilder>();
 builder.Services.AddSingleton<YtDlpLocator>();
+builder.Services.AddSingleton<YouTubeCookieStore>();
 builder.Services.AddSingleton<StreamService>();
 builder.Services.AddSingleton<WeatherGeocoder>();
 builder.Services.AddSingleton<WeatherDataClient>();
@@ -130,6 +141,7 @@ builder.Services.AddScoped<CommercialService>();
 builder.Services.AddScoped<CommercialBrainzClient>();
 builder.Services.AddScoped<CommercialBrainzFilterService>();
 builder.Services.AddScoped<CommercialBrainzSyncService>();
+builder.Services.AddScoped<SponsorBlockClient>();
 builder.Services.AddScoped<YouTubeCommercialStreamService>();
 builder.Services.AddScoped<EpgService>();
 builder.Services.AddScoped<GuideMetadataService>();

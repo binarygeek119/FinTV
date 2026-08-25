@@ -41,7 +41,10 @@ public class PluginBridgeController : ControllerBase
     }
 
     [HttpPost("catalog")]
-    public async Task<IActionResult> SyncCatalog([FromBody] CatalogSyncRequest request, CancellationToken cancellationToken)
+    public async Task<IActionResult> SyncCatalog(
+        [FromBody] CatalogSyncRequest request,
+        [FromServices] GuideUpdateTracker guideUpdates,
+        CancellationToken cancellationToken)
     {
         if (request.Items is null)
         {
@@ -95,6 +98,9 @@ public class PluginBridgeController : ControllerBase
             row.ProviderIdsJson = JsonSerializer.Serialize(item.ProviderIds ?? new Dictionary<string, string>());
             row.ArtistsJson = JsonSerializer.Serialize(item.Artists ?? []);
             row.AlbumArtistsJson = JsonSerializer.Serialize(item.AlbumArtists ?? []);
+            row.Width = item.Width;
+            row.Height = item.Height;
+            row.AspectRatio = VideoAspectFormat.Classify(item.AspectRatio, item.Width, item.Height);
             row.SyncedAt = DateTime.UtcNow;
             row.IsMissing = false;
             row.MissingSince = null;
@@ -127,6 +133,7 @@ public class PluginBridgeController : ControllerBase
             SaveReportedLibraries(request.Libraries);
         }
 
+        guideUpdates.RegisterPlugin(Request, null);
         return Ok(new { count = request.Items.Count });
     }
 
@@ -134,9 +141,12 @@ public class PluginBridgeController : ControllerBase
     /// Replaces the Jellyfin library list used by the ChannelFlow Library tab and catalog sync filters.
     /// </summary>
     [HttpPost("libraries")]
-    public IActionResult SyncLibraries([FromBody] JellyfinLibraryListRequest? request)
+    public IActionResult SyncLibraries(
+        [FromBody] JellyfinLibraryListRequest? request,
+        [FromServices] GuideUpdateTracker guideUpdates)
     {
         var libraries = SaveReportedLibraries(request?.Libraries);
+        guideUpdates.RegisterPlugin(Request, null);
         return Ok(new { count = libraries.Count });
     }
 
@@ -207,6 +217,18 @@ public class PluginBridgeController : ControllerBase
             revision = status.Revision,
             updatedAt = status.UpdatedAt
         });
+    }
+
+    /// <summary>
+    /// Plugin handshake so ChannelFlow-Server can push a Live TV guide refresh after playout changes.
+    /// </summary>
+    [HttpPost("register")]
+    public ActionResult<object> Register(
+        [FromBody] PluginRegisterRequest? request,
+        [FromServices] GuideUpdateTracker guideUpdates)
+    {
+        var jellyfinUrl = guideUpdates.RegisterPlugin(Request, request?.JellyfinUrl);
+        return Ok(new { jellyfinUrl });
     }
 
     internal static List<Configuration.JellyfinLibraryInfo> SaveReportedLibraries(
@@ -441,6 +463,11 @@ public class CatalogSyncRequest
     public List<CatalogItemDto> Items { get; set; } = [];
 
     public List<JellyfinLibraryDto>? Libraries { get; set; }
+}
+
+public class PluginRegisterRequest
+{
+    public string? JellyfinUrl { get; set; }
 }
 
 public class JellyfinLibraryListRequest
