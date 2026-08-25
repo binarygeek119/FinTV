@@ -596,9 +596,9 @@ public sealed class NewsChannelService
         var storyEnable = StoryEnable(presentation);
         var headline = EscapeDraw(FirstHeadline(presentation) ?? presentation.Header);
         var vf =
-            $"drawbox=x=0:y=h-176:w=iw:h=80:color=0xe11d48@0.92:t=fill:enable='{storyEnable}'," +
+            $"drawbox=x=0:y=ih-176:w=iw:h=80:color=0xe11d48@0.92:t=fill:enable='{storyEnable}'," +
             $"drawtext=text='{headline}':fontcolor=white:fontsize=32:x=(w-text_w)/2:y=h-160:enable='{storyEnable}'," +
-            $"drawbox=x=0:y=h-88:w=iw:h=88:color=0x111827@0.94:t=fill:enable='{storyEnable}'," +
+            $"drawbox=x=0:y=ih-88:w=iw:h=88:color=0x111827@0.94:t=fill:enable='{storyEnable}'," +
             $"drawtext=textfile='{tickerFilter}':fontcolor=white:fontsize=40:x=w-mod(t*110\\,w+text_w):y=h-64:enable='{storyEnable}'";
 
         return BuildEncodeArgs(width, height, presentation, vf);

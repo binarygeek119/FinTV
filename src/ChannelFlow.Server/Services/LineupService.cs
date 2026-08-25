@@ -344,6 +344,7 @@ public class LineupService
         {
             SlotIndex = dto.SlotIndex,
             SpanSlots = Math.Clamp(dto.SpanSlots, 1, 8),
+            IsRerunSlot = dto.IsRerunSlot,
             LineupId = lineupId,
             LineupOverrideId = overrideId,
             Candidates = (dto.Candidates ?? new List<SlotCandidateDto>()).Select(c => new SlotCandidate
@@ -392,6 +393,8 @@ public class LineupSlotDto
     public int SlotIndex { get; set; }
 
     public int SpanSlots { get; set; } = 1;
+
+    public bool IsRerunSlot { get; set; }
 
     public List<SlotCandidateDto> Candidates { get; set; } = new();
 }

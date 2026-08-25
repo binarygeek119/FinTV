@@ -1,6 +1,7 @@
 using FinTv.Configuration;
 using FinTv.Data;
 using FinTv.Domain;
+using FinTv.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace FinTv;
@@ -74,6 +75,7 @@ public sealed class FinTvRuntime
         EnsureApiKey();
         _configuration.Transcode ??= new TranscodeSettings();
         _configuration.YouTube ??= new YouTubeSettings();
+        ScheduleTimeZoneHelper.ApplyAsProcessTimeZone();
     }
 
     private void EnsureApiKey()

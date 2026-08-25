@@ -189,6 +189,16 @@ table.data-table td.catalog-path, table.data-table td.catalog-ids { max-width: 1
 .slot-card { background: var(--channelflow-surface); border: 1px solid var(--channelflow-border); border-radius: 8px; padding: .55rem .65rem; min-height: 96px; cursor: pointer; transition: border-color .12s, transform .12s; }
 .slot-card:hover { border-color: var(--channelflow-accent); transform: translateY(-1px); }
 .slot-card.has-items { border-color: rgba(34, 197, 94, .45); }
+.slot-card.rerun-slot {
+    background: #facc15;
+    border-color: #ca8a04;
+    opacity: 1;
+}
+.slot-card.rerun-slot .time,
+.slot-card.rerun-slot .summary,
+.slot-card.rerun-slot .count {
+    color: #422006;
+}
 .slot-card.weather-slot { cursor: default; }
 .slot-card.weather-slot:hover { transform: none; }
 .slot-card.weather-slot .summary { color: #d1fae5; }

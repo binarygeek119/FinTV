@@ -45,7 +45,10 @@
           <h1 id="page-title">Channels</h1>
           <p class="muted" id="page-subtitle">Manage Live TV channels</p>
         </div>
-        <div id="topbar-user" class="topbar-user"></div>
+        <div class="topbar-meta">
+          <div id="app-clock" class="app-clock" aria-live="polite"></div>
+          <div id="topbar-user" class="topbar-user"></div>
+        </div>
       </header>
       <div id="ChannelFlowConfigPage">
         <div id="channel-deep-editor" class="channel-editor hidden" hidden>
@@ -668,7 +671,7 @@
             <section id="tab-emergency" class="tab-panel hidden" hidden>
                 <div class="card section-card">
                     <h3>Emergency Broadcast System</h3>
-                    <p class="hint">When NOAA has watches or warnings for the default Weather tab location, show them on TV, movies, and music. The attention tone from <code>Weather/weather_alert.ogg</code> plays first, then the alerts screen. WeatherStar and FlowWire keep their own displays.</p>
+                    <p class="hint">When NOAA has watches or warnings for the default Weather tab location, TV, movies, and music play <code>Weather/weather_alert.ogg</code> over the current picture (or the alerts screen), then the full-screen alerts or the bottom bar, then <code>Weather/weather_alert_single.mp3</code> at the end. The picture stays up — there is no black screen. Each alert dumps the run-ahead buffer down to 60 seconds so it reaches the tuner faster, then the buffer fills back to the Transcode setting. Another alert dumps it again. WeatherStar and FlowWire keep their own displays.</p>
                     <label class="field">
                         <span>Alert display</span>
                         <select id="weather-alert-overlay-mode" class="emby-select">
@@ -689,6 +692,7 @@
                     </div>
                     <div class="actions">
                         <button type="button" id="btn-test-weather-alerts" class="emby-button">Test alerts</button>
+                        <button type="button" id="btn-stop-weather-alert-test" class="emby-button" disabled>Stop test</button>
                         <button type="button" id="btn-save-weather-alerts" class="raised button-submit emby-button">Save Alert Settings</button>
                     </div>
                     <div id="weather-alert-test-preview" class="weather-alert-test-preview hidden" hidden></div>
@@ -715,6 +719,12 @@
                         <span class="channelflow-check-box" aria-hidden="true"></span>
                         <span>Apply AI lineups to all eligible channels when saving settings (14-day playout rebuild)</span>
                     </label>
+                    <label class="field checkbox-field">
+                        <input type="checkbox" id="ai-simulate-original-broadcasting">
+                        <span class="channelflow-check-box" aria-hidden="true"></span>
+                        <span>Simulate original broadcasting</span>
+                    </label>
+                    <p class="hint">Saved for a later update. Does not change playout yet.</p>
                     <div class="actions" style="margin-bottom:1rem">
                         <button type="button" id="btn-save-ai-settings" class="raised button-submit emby-button">Save AI Settings</button>
                         <button type="button" id="btn-test-ai" class="emby-button">Test Connection</button>

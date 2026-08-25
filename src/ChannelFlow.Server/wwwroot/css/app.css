@@ -100,8 +100,11 @@ body.guide-tab-open .tv-guide {
     border-bottom: 0;
     border-radius: var(--radius) 0 0 0;
 }
-.app-topbar { display: flex; justify-content: space-between; align-items: flex-start; padding: 1.25rem 1.5rem 0.5rem; }
+.app-topbar { display: flex; justify-content: space-between; align-items: center; padding: 1.25rem 1.5rem 0.5rem; }
 .app-topbar h1 { margin: 0; font-size: 1.6rem; }
+.topbar-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 0.15rem; text-align: right; }
+.app-clock { color: var(--muted); font-size: 0.9rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.topbar-user { color: var(--muted); font-size: 0.85rem; }
 .muted { color: var(--muted); margin: 0.2rem 0 0; }
 
 #ChannelFlowConfigPage { padding: 0 1.5rem 2rem; }
@@ -312,6 +315,15 @@ input, select, textarea {
 .tv-guide-block.type-weather { border-left-color: #22d3ee; }
 .tv-guide-block.type-news { border-left-color: #fbbf24; }
 .tv-guide-block.is-virtual { border-style: dashed; }
+.tv-guide-poster {
+    width: 120px;
+    max-height: 180px;
+    object-fit: cover;
+    float: right;
+    margin: 0 0 0.75rem 0.75rem;
+    border-radius: 6px;
+    background: #111;
+}
 .weather-zip-list { display: grid; gap: 0.65rem; margin-top: 0.85rem; }
 .weather-zip-row { display: grid; grid-template-columns: minmax(140px, 1fr) 140px; gap: 0.65rem; align-items: end; }
 .weather-zip-row .wx-channel-label { color: var(--muted); font-size: 0.85rem; padding-bottom: 0.45rem; }

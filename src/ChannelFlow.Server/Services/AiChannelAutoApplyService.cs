@@ -447,7 +447,7 @@ public class AiChannelAutoApplyService
         Guid channelId,
         CancellationToken cancellationToken = default)
     {
-        var start = DateTime.UtcNow.Date;
+        var start = PlayoutScheduleHelper.GetScheduleDayStartUtc(DateTime.UtcNow);
         var existing = await _db.PlayoutItems
             .Where(p => p.ChannelId == channelId && p.Finish > start)
             .ToListAsync(cancellationToken);
@@ -471,8 +471,8 @@ public class AiChannelAutoApplyService
         var channel = await _db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken)
             ?? throw new InvalidOperationException("Channel not found.");
 
-        var dayStart = DateTime.UtcNow.Date.AddDays(dayOffset);
-        var dayEnd = dayStart.AddDays(1);
+        var dayStart = PlayoutScheduleHelper.GetScheduleDayStartUtc(DateTime.UtcNow, dayOffset);
+        var dayEnd = PlayoutScheduleHelper.GetScheduleDayStartUtc(DateTime.UtcNow, dayOffset + 1);
         FinTvDebugLog.Ai(
             _logger,
             "Building playout day {DayOffset} for {ChannelName}: {Start:u} to {End:u}",

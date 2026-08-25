@@ -15,15 +15,18 @@ public class WeatherController : ControllerBase
     private readonly JellyfinCatalogService _catalog;
     private readonly ChannelService _channels;
     private readonly WeatherAlertOverlayService _alerts;
+    private readonly StreamService _streams;
 
     public WeatherController(
         JellyfinCatalogService catalog,
         ChannelService channels,
-        WeatherAlertOverlayService alerts)
+        WeatherAlertOverlayService alerts,
+        StreamService streams)
     {
         _catalog = catalog;
         _channels = channels;
         _alerts = alerts;
+        _streams = streams;
     }
 
     [HttpGet("status")]
@@ -71,6 +74,7 @@ public class WeatherController : ControllerBase
                 WeatherAlertOverlayService.ParseMode(config?.WeatherAlertOverlayMode)),
             weatherAlertCutInIntervalMinutes = Math.Clamp(config?.WeatherAlertCutInIntervalMinutes ?? 15, 1, 180),
             weatherAlertCutInDurationSeconds = Math.Clamp(config?.WeatherAlertCutInDurationSeconds ?? 20, 5, 120),
+            weatherAlertTestActive = _alerts.HasActiveTest,
             weatherChannels,
             musicLibraries,
             publicSite = false,
@@ -209,8 +213,8 @@ public class WeatherController : ControllerBase
             var preview = await _alerts.StartTestAsync(mode, TimeSpan.FromSeconds(seconds), cancellationToken);
             var first = preview.Alerts.FirstOrDefault();
             var liveHint = mode == WeatherAlertOverlayMode.CutIn
-                ? "Live TV, movies, and music play the attention tone, then switch to this screen at the next program break for the next couple of minutes."
-                : "Live TV, movies, and music show the scrolling bar on the next program for the next couple of minutes.";
+                ? "Live TV, movies, and music play the attention tone, then switch to this screen. Use Stop test to end it early."
+                : "Live TV, movies, and music show the scrolling bar. Use Stop test to end it early.";
             return Ok(new
             {
                 mode = WeatherAlertOverlayService.FormatMode(preview.Mode),
@@ -226,6 +230,20 @@ public class WeatherController : ControllerBase
         {
             return BadRequest(new { message = ex.Message });
         }
+    }
+
+    [HttpPost("alerts/test/stop")]
+    public ActionResult<object> StopAlertTest()
+    {
+        var stopped = _alerts.StopTest();
+        _streams.InterruptAllCurrentItems();
+        return Ok(new
+        {
+            stopped,
+            message = stopped
+                ? "Weather alert test stopped. Live TV is back on the regular lineup."
+                : "No weather alert test was running."
+        });
     }
 
     private static string NormalizeWeatherStarId(string? value)

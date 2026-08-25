@@ -158,7 +158,7 @@ public class ChannelsController : ControllerBase
             return;
         }
 
-        var start = DateTime.UtcNow.Date;
+        var start = PlayoutScheduleHelper.GetScheduleDayStartUtc(DateTime.UtcNow);
         var end = PlayoutScheduleHelper.GetHorizonEndUtc(start);
         await _lineupGenerator.BuildPlayoutAsync(channel, start, end, PlayoutBuildMode.ReplaceWindow, cancellationToken);
     }

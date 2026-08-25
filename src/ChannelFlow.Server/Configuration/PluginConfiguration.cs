@@ -205,6 +205,12 @@ public class AiSettings
     public bool AutoApplyOnChannelAdd { get; set; }
 
     public bool AutoApplyToAllChannelsOnSave { get; set; }
+
+    /// <summary>
+    /// When true, lineups and playout should mimic original broadcast patterns.
+    /// Stored now; behavior will be wired later.
+    /// </summary>
+    public bool SimulateOriginalBroadcasting { get; set; }
 }
 
 public class CatalogCleanupSettings

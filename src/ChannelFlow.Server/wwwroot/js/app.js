@@ -73,6 +73,8 @@
     let guideFromIso = null;
     let guideDateFilter = null;
     let guideTimer = null;
+    let scheduleTimeZone = null;
+    let appClockTimer = null;
     const GUIDE_PX_PER_MIN = 4;
     const GUIDE_CHANNEL_COL = 168;
 
@@ -640,8 +642,59 @@
             .replace(/"/g, '&quot;');
     }
 
+    function appTimeZone() {
+        return scheduleTimeZone || (guideData && guideData.timeZone) || undefined;
+    }
+
+    function setScheduleTimeZone(id) {
+        if (id) {
+            scheduleTimeZone = id;
+        }
+        startAppClock();
+    }
+
+    function startAppClock() {
+        const el = document.getElementById('app-clock');
+        if (!el) {
+            return;
+        }
+
+        const tick = () => {
+            try {
+                const tz = appTimeZone();
+                el.textContent = new Date().toLocaleString([], {
+                    weekday: 'short',
+                    month: 'short',
+                    day: 'numeric',
+                    hour: 'numeric',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    timeZone: tz,
+                    timeZoneName: tz ? 'short' : undefined
+                });
+            } catch (ignore) {
+                el.textContent = new Date().toLocaleString();
+            }
+        };
+
+        tick();
+        if (appClockTimer) {
+            clearInterval(appClockTimer);
+        }
+        appClockTimer = setInterval(tick, 1000);
+    }
+
     function todayIsoDate() {
-        return new Date().toISOString().slice(0, 10);
+        try {
+            return new Intl.DateTimeFormat('en-CA', {
+                timeZone: appTimeZone(),
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit'
+            }).format(new Date());
+        } catch (ignore) {
+            return new Date().toISOString().slice(0, 10);
+        }
     }
 
     function openModal(title, bodyHtml, footerHtml) {
@@ -668,6 +721,10 @@
     function itemLabel(id) {
         if (!id) return 'Unknown item';
         return itemTitleCache[id] || id;
+    }
+
+    function isRerunSlot(slot) {
+        return !!(slot && (slot.isRerunSlot || slot.IsRerunSlot));
     }
 
     function candidateKind(candidate) {
@@ -1567,7 +1624,7 @@
         }
 
         if (hint) {
-            hint.textContent = 'Click a 30-minute slot to edit candidates. Slots with overrides show a badge on preview.';
+            hint.textContent = 'Click a 30-minute slot to edit candidates. Check Rerun slot to fill it from yesterday’s primetime (yellow).';
         }
 
         weatherBanner?.classList.add('hidden');
@@ -1597,14 +1654,18 @@
     function renderLineupGrid() {
         const grid = $('lineup-grid');
         grid.innerHTML = lineupSlots.sort((a, b) => a.slotIndex - b.slotIndex).map((s) => {
+            const rerun = isRerunSlot(s);
             const count = (s.candidates || []).length;
-            const first = count ? candidateSummary(s.candidates[0]) : 'Empty slot';
+            const first = rerun
+                ? 'Rerun · yesterday primetime'
+                : (count ? candidateSummary(s.candidates[0]) : 'Empty slot');
             const span = Math.max(1, s.spanSlots || 1);
             const spanLabel = span > 1 ? ` · ${span * 30}m` : '';
-            return `<div class="slot-card ${count ? 'has-items' : 'empty'}" data-slot="${s.slotIndex}" style="${span > 1 ? '--slot-span:' + span + ';grid-column:span ' + span : ''}">
+            const classes = ['slot-card', rerun ? 'rerun-slot' : (count ? 'has-items' : 'empty')].join(' ');
+            return `<div class="${classes}" data-slot="${s.slotIndex}" style="${span > 1 ? '--slot-span:' + span + ';grid-column:span ' + span : ''}">
                 <div class="time">${slotTime(s.slotIndex)}${spanLabel}</div>
                 <div class="summary">${escapeHtml(first)}</div>
-                <div class="count">${count} candidate${count === 1 ? '' : 's'}</div>
+                <div class="count">${rerun ? 'Rerun slot' : `${count} candidate${count === 1 ? '' : 's'}`}</div>
             </div>`;
         }).join('');
 
@@ -1652,6 +1713,12 @@
 
         const body = `
             <p class="hint">Editing ${slotTime(index)} · add multiple weighted candidates for smart rotation.</p>
+            <label class="field checkbox-field">
+                <input id="slot-rerun" type="checkbox" ${isRerunSlot(slot) ? 'checked' : ''}>
+                <span class="channelflow-check-box" aria-hidden="true"></span>
+                <span>Rerun slot</span>
+            </label>
+            <p class="hint">Yellow on the grid. Playout copies a primetime show from the previous day into this time. Candidates below are used only if no rerun is available.</p>
             <label class="field"><span>Block length (30-min slots)</span>
                 <input id="slot-span-slots" type="number" min="1" max="8" class="emby-input" value="${Math.max(1, slot.spanSlots || 1)}"></label>
             <div id="slot-candidates" class="candidate-list">${renderCandidateRows(slot.candidates)}</div>
@@ -1756,6 +1823,7 @@
         document.getElementById('slot-cancel').onclick = closeModal;
         document.getElementById('slot-save').onclick = () => {
             slot.spanSlots = Math.max(1, Math.min(8, parseInt(document.getElementById('slot-span-slots').value, 10) || 1));
+            slot.isRerunSlot = !!document.getElementById('slot-rerun')?.checked;
             const idx = lineupSlots.findIndex((s) => s.slotIndex === index);
             if (idx >= 0) lineupSlots[idx] = slot;
             else lineupSlots.push(slot);
@@ -3008,6 +3076,7 @@
         const slots = source.map((slot) => ({
             SlotIndex: slot.slotIndex ?? slot.SlotIndex,
             SpanSlots: Math.max(1, Math.min(8, Number(slot.spanSlots ?? slot.SpanSlots ?? 1))),
+            IsRerunSlot: !!(slot.isRerunSlot ?? slot.IsRerunSlot),
             Candidates: (slot.candidates || slot.Candidates || []).map((c, index) => ({
                 Kind: resolveEnumValue(SLOT_CANDIDATE_KIND_VALUES, c.kind ?? c.Kind, 0),
                 JellyfinItemId: c.jellyfinItemId ?? c.JellyfinItemId ?? null,
@@ -3037,6 +3106,7 @@
             enabled: !!$('ai-enabled')?.checked,
             autoApplyOnChannelAdd: !!$('ai-auto-apply-channel-add')?.checked,
             autoApplyToAllChannelsOnSave: !!$('ai-auto-apply-all-on-save')?.checked,
+            simulateOriginalBroadcasting: !!$('ai-simulate-original-broadcasting')?.checked,
             defaultProvider: Number($('ai-default-provider')?.value || '0'),
             openAiModel: $('ai-openai-model')?.value?.trim() || 'gpt-4o-mini',
             veniceModel: $('ai-venice-model')?.value?.trim() || 'gpt-4o-mini',
@@ -3056,6 +3126,7 @@
             if ($('ai-enabled')) $('ai-enabled').checked = !!aiSettings.enabled;
             if ($('ai-auto-apply-channel-add')) $('ai-auto-apply-channel-add').checked = !!aiSettings.autoApplyOnChannelAdd;
             if ($('ai-auto-apply-all-on-save')) $('ai-auto-apply-all-on-save').checked = !!aiSettings.autoApplyToAllChannelsOnSave;
+            if ($('ai-simulate-original-broadcasting')) $('ai-simulate-original-broadcasting').checked = !!aiSettings.simulateOriginalBroadcasting;
             if ($('ai-default-provider')) $('ai-default-provider').value = String(aiSettings.defaultProvider ?? 0);
             if ($('ai-openai-model')) $('ai-openai-model').value = aiSettings.openAiModel || 'gpt-4o-mini';
             if ($('ai-venice-model')) $('ai-venice-model').value = aiSettings.veniceModel || 'gpt-4o-mini';
@@ -3613,7 +3684,8 @@
         $('ai-preview-summary').textContent = `AI chose from ${aiPreview.catalogSummary.includedInPrompt} of ${aiPreview.catalogSummary.totalAvailable} tagged items · ${AI_CATALOG_MODES[aiPreview.catalogMode] || 'Mixed'} mode${templateLabel} · lineup is applied and the Live TV guide is rebuilt (up to 14 days)`;
         const grid = $('ai-preview-grid');
         const occupied = new Array(48).fill(false);
-        const blocks = (aiPreview.slots || []).filter((s) => (s.title && s.title !== 'Filter fallback') || s.jellyfinItemId);
+        const blocks = (aiPreview.slots || []).filter((s) =>
+            isRerunSlot(s) || (s.title && s.title !== 'Filter fallback') || s.jellyfinItemId);
         let html = '';
         for (let i = 0; i < 48; i++) {
             if (occupied[i]) continue;
@@ -3626,7 +3698,8 @@
             const span = Math.max(1, block.spanSlots || 1);
             for (let j = i; j < i + span && j < 48; j++) occupied[j] = true;
             const duration = span * 30;
-            html += `<div class="slot-card has-items span-block" style="--slot-span:${span};grid-column:span ${span}">
+            const rerun = isRerunSlot(block);
+            html += `<div class="slot-card ${rerun ? 'rerun-slot' : 'has-items'} span-block" style="--slot-span:${span};grid-column:span ${span}">
                 <div class="time">${slotTime(i)} · ${duration}m</div>
                 <div class="summary">${escapeHtml(block.title)}</div>
                 <div class="count">${escapeHtml(block.type || '')}${block.runtimeMinutes ? ' · ' + block.runtimeMinutes + 'm' : ''}${block.daypartName ? `<span class="ai-daypart-badge">${escapeHtml(block.daypartName)}</span>` : ''}</div>
@@ -3819,6 +3892,7 @@
             $('weather-alert-cutin-duration').value = String(status?.weatherAlertCutInDurationSeconds || 20);
         }
         toggleWeatherAlertCutInFields();
+        setWeatherAlertTestRunning(!!status?.weatherAlertTestActive);
     }
 
     const WEATHER_SCREEN_KEYS = [
@@ -3914,9 +3988,12 @@
         if (fields) {
             fields.classList.toggle('hidden', mode === 'off');
         }
-        const interval = $('weather-alert-interval-wrap');
-        if (interval) {
-            interval.classList.toggle('hidden', mode !== 'cutin');
+    }
+
+    function setWeatherAlertTestRunning(running) {
+        const stop = $('btn-stop-weather-alert-test');
+        if (stop) {
+            stop.disabled = !running;
         }
     }
 
@@ -3979,15 +4056,33 @@
                 })
             });
             showWeatherAlertTestPreview(data);
+            setWeatherAlertTestRunning(true);
             toast(data.eventName ? `Sample ${data.eventName} is ready.` : 'Sample weather alert is ready.', 'success');
         } catch (err) {
             hideWeatherAlertTestPreview();
+            setWeatherAlertTestRunning(false);
             toast(err.message || 'Could not test weather alerts.', 'error');
         } finally {
             if (btn) {
                 btn.disabled = false;
                 btn.textContent = originalLabel || 'Test alerts';
             }
+        }
+    }
+
+    async function stopWeatherAlertTest() {
+        const btn = $('btn-stop-weather-alert-test');
+        try {
+            if (btn) {
+                btn.disabled = true;
+            }
+            const data = await api('/weather/alerts/test/stop', { method: 'POST', body: '{}' });
+            hideWeatherAlertTestPreview();
+            setWeatherAlertTestRunning(false);
+            toast(data.message || 'Weather alert test stopped.', 'success');
+        } catch (err) {
+            setWeatherAlertTestRunning(true);
+            toast(err.message || 'Could not stop the weather alert test.', 'error');
         }
     }
 
@@ -4572,7 +4667,7 @@
                 ['GC heap', system.gcHeap],
                 ['Uptime', system.uptime],
                 ['Time zone', system.timeZone],
-                ['Server time', system.serverTime],
+                ['App time', system.appTime],
                 ['UTC', system.utcTime],
                 ['Listen port', system.listenPort],
                 ['Config folder', system.configFolder],
@@ -4736,6 +4831,7 @@
             const tzSelect = $('general-schedule-tz');
             if (tzSelect) {
                 const selected = settings.scheduleTimeZone || 'America/New_York';
+                setScheduleTimeZone(selected);
                 const options = Array.isArray(timeZones) ? timeZones : [];
                 const hasSelected = options.some((tz) => tz.id === selected);
 
@@ -5406,7 +5502,7 @@
     }
 
     function guideTimeZone() {
-        return (guideData && guideData.timeZone) || undefined;
+        return (guideData && guideData.timeZone) || scheduleTimeZone || undefined;
     }
 
     function formatGuideClock(iso) {
@@ -6104,6 +6200,7 @@
         click('btn-save-weather-source', () => saveWeatherSettings());
         click('btn-save-weather-alerts', () => saveWeatherSettings('Emergency Broadcast System settings saved.'));
         click('btn-test-weather-alerts', () => { void testWeatherAlerts(); });
+        click('btn-stop-weather-alert-test', () => { void stopWeatherAlertTest(); });
         change('weather-alert-overlay-mode', toggleWeatherAlertCutInFields);
         click('btn-save-news', () => saveNewsSettings().catch((e) => toast(e.message, 'error')));
         change('news-no-music', syncNewsMusicUi);
@@ -6138,7 +6235,19 @@
     }
 
     async function refresh() {
-        await loadChannels();
+        await Promise.all([
+            loadScheduleTimeZone(),
+            loadChannels()
+        ]);
+    }
+
+    async function loadScheduleTimeZone() {
+        try {
+            const settings = await api('/general/settings');
+            setScheduleTimeZone(settings.scheduleTimeZone || settings.ScheduleTimeZone);
+        } catch (ignore) {
+            startAppClock();
+        }
     }
 
     function init(page) {
@@ -6153,6 +6262,7 @@
 
         bindEvents();
         applyTabFromLocation();
+        startAppClock();
         return refresh().then(() => {
             const editorId = channelEditorIdFromPath(location.pathname);
             if (editorId) {

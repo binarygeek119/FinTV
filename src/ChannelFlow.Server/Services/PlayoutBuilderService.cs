@@ -130,28 +130,43 @@ public class PlayoutBuilderService : BackgroundService
             var hasCoverageNow = await db.PlayoutItems
                 .AnyAsync(p => p.ChannelId == channel.Id && p.Start <= now && p.Finish > now, cancellationToken);
 
-            if (latestFinish.HasValue && latestFinish.Value >= horizonEnd && hasCoverageNow)
-            {
-                await db.SaveChangesAsync(cancellationToken);
-                continue;
-            }
-
             if (!hasCoverageNow)
             {
-                var rebuildStart = now.Date;
-                await generator.BuildPlayoutAsync(
-                    channel,
-                    rebuildStart,
-                    horizonEnd,
-                    PlayoutBuildMode.ReplaceWindow,
-                    cancellationToken);
-                await db.SaveChangesAsync(cancellationToken);
+                var nextStart = await db.PlayoutItems
+                    .Where(p => p.ChannelId == channel.Id && p.Start > now)
+                    .Select(p => (DateTime?)p.Start)
+                    .MinAsync(cancellationToken);
 
-                _logger.LogInformation(
-                    "Rebuilt playout for channel {Channel} from {Start} to {End} (no current coverage)",
-                    channel.Name,
-                    rebuildStart,
-                    horizonEnd);
+                if (nextStart is DateTime upcoming && upcoming < horizonEnd)
+                {
+                    _logger.LogInformation(
+                        "Channel {Channel} has a gap until {NextStart:u}; leaving existing playout in place so the guide stays aligned",
+                        channel.Name,
+                        upcoming);
+                }
+                else
+                {
+                    var rebuildStart = PlayoutScheduleHelper.GetScheduleDayStartUtc(now);
+                    await generator.BuildPlayoutAsync(
+                        channel,
+                        rebuildStart,
+                        horizonEnd,
+                        PlayoutBuildMode.ReplaceWindow,
+                        cancellationToken);
+                    await db.SaveChangesAsync(cancellationToken);
+
+                    _logger.LogInformation(
+                        "Rebuilt playout for channel {Channel} from {Start} to {End} (no current coverage)",
+                        channel.Name,
+                        rebuildStart,
+                        horizonEnd);
+                    continue;
+                }
+            }
+
+            if (latestFinish.HasValue && latestFinish.Value >= horizonEnd)
+            {
+                await db.SaveChangesAsync(cancellationToken);
                 continue;
             }
 
@@ -194,7 +209,7 @@ public class PlayoutBuilderService : BackgroundService
         await commercialService.SyncCommercialLibraryAsync(cancellationToken);
 
         var now = DateTime.UtcNow;
-        var rebuildStart = now.Date;
+        var rebuildStart = PlayoutScheduleHelper.GetScheduleDayStartUtc(now);
         var horizonEnd = PlayoutScheduleHelper.GetHorizonEndUtc(now);
 
         var channels = await db.Channels.Where(c => c.Enabled).ToListAsync(cancellationToken);
@@ -230,7 +245,7 @@ public class PlayoutBuilderService : BackgroundService
         var channel = await db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken)
             ?? throw new InvalidOperationException("Channel not found.");
 
-        var start = DateTime.UtcNow.Date;
+        var start = PlayoutScheduleHelper.GetScheduleDayStartUtc(DateTime.UtcNow);
         var end = PlayoutScheduleHelper.GetHorizonEndUtc(start);
         await generator.BuildPlayoutAsync(channel, start, end, PlayoutBuildMode.ReplaceWindow, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);

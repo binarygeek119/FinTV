@@ -56,6 +56,8 @@ public class StreamService : IDisposable
         return TranscodeSettings.ClampRunAheadSeconds(configured);
     }
 
+    internal const int WeatherAlertRunAheadSeconds = 60;
+
     /// <summary>
     /// MPEG-TS bytes per second used to size the run-ahead ring and pace ffmpeg.
     /// Sized above the 5 Mbps video maxrate plus audio and TS overhead so CRF spikes still buffer.
@@ -158,15 +160,54 @@ public class StreamService : IDisposable
             var started = DateTime.UtcNow;
             if (await _weatherAlerts.ShouldCutInNowAsync(channel, alertSession, cancellationToken))
             {
+                FlushBufferForWeatherAlert(channelId);
+                using var itemCts = CreateItemCutCts(channelId);
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, itemCts.Token);
                 try
                 {
-                    await weather.StreamHazardsCutInAsync(channel, output, _weatherAlerts.CutInDurationForStream, cancellationToken);
-                    _weatherAlerts.MarkCutInComplete(alertSession);
+                    if (_weatherAlerts.EffectiveMode == WeatherAlertOverlayMode.Ticker)
+                    {
+                        var tickerItem = await GetCurrentItemAsync(channelId, cancellationToken);
+                        if (tickerItem is not null)
+                        {
+                            var tones = await weather.CreateToneSandwichAsync(
+                                _weatherAlerts.CutInDurationForStream.TotalSeconds,
+                                linked.Token);
+                            await StreamTickerAlertWindowAsync(
+                                channel,
+                                tickerItem,
+                                catalog,
+                                youtubeCommercials,
+                                holidays,
+                                ebs,
+                                ffmpegPath,
+                                output,
+                                tones,
+                                linked.Token);
+                        }
+                    }
+                    else
+                    {
+                        await weather.StreamHazardsCutInAsync(channel, output, _weatherAlerts.CutInDurationForStream, linked.Token);
+                    }
+
+                    if (!linked.IsCancellationRequested)
+                    {
+                        _weatherAlerts.MarkCutInComplete(alertSession);
+                    }
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    // Test stop or item cut — keep the shared encoder running.
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    _logger.LogWarning(ex, "Weather alert cut-in failed for {Channel}", channel.Name);
+                    _logger.LogWarning(ex, "Weather alert overlay failed for {Channel}", channel.Name);
                     _weatherAlerts.MarkCutInComplete(alertSession);
+                }
+                finally
+                {
+                    RestoreRunAheadBuffer(channelId);
                 }
 
                 continue;
@@ -182,12 +223,24 @@ public class StreamService : IDisposable
                     youtubeCommercials,
                     cancellationToken);
                 using var itemCts = CreateItemCutCts(channelId);
+                var remaining = current.Finish.Kind == DateTimeKind.Utc
+                    ? current.Finish - DateTime.UtcNow
+                    : DateTime.SpecifyKind(current.Finish, DateTimeKind.Utc) - DateTime.UtcNow;
+                if (remaining > TimeSpan.Zero && remaining < TimeSpan.FromDays(2))
+                {
+                    itemCts.CancelAfter(remaining);
+                }
+
                 using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, itemCts.Token);
                 try
                 {
                     if (current.IsVirtual && current.VirtualSource == VirtualContentSource.MusicArtSlide)
                     {
                         await StreamMusicItemAsync(channel, current, catalog, ffmpegPath, output, linked.Token);
+                    }
+                    else if (current.IsVirtual && current.VirtualSource == VirtualContentSource.LogoBumper)
+                    {
+                        await StreamLogoBumperAsync(channel, current, ffmpegPath, output, linked.Token);
                     }
                     else if (current.CommercialId.HasValue)
                     {
@@ -266,7 +319,8 @@ public class StreamService : IDisposable
             return;
         }
 
-        if (item?.CommercialId is not null)
+        if (item?.CommercialId is not null
+            || (item?.IsVirtual == true && item.VirtualSource == VirtualContentSource.LogoBumper))
         {
             await Task.Delay(TimeSpan.FromMilliseconds(200), cancellationToken);
             return;
@@ -375,6 +429,28 @@ public class StreamService : IDisposable
     }
 
     /// <summary>
+    /// Drops the run-ahead ring to 60 seconds so an EBS alert is not stuck behind the full tuner buffer.
+    /// Another alert while the buffer is refilling drops it again.
+    /// </summary>
+    private void FlushBufferForWeatherAlert(Guid channelId)
+    {
+        if (!_liveSessions.TryGetValue(channelId, out var session))
+        {
+            return;
+        }
+
+        session.FlushForWeatherAlert(WeatherAlertRunAheadSeconds);
+    }
+
+    private void RestoreRunAheadBuffer(Guid channelId)
+    {
+        if (_liveSessions.TryGetValue(channelId, out var session))
+        {
+            session.RestoreRunAhead();
+        }
+    }
+
+    /// <summary>
     /// Cuts every live encode so each channel re-reads playout (or goes Off Air if none remains).
     /// </summary>
     public void InterruptAllCurrentItems()
@@ -451,6 +527,96 @@ public class StreamService : IDisposable
         return Math.Clamp((nextStart - now).TotalSeconds, 30, 600);
     }
 
+    private async Task StreamTickerAlertWindowAsync(
+        Channel channel,
+        PlayoutItem item,
+        JellyfinCatalogService catalog,
+        YouTubeCommercialStreamService youtubeCommercials,
+        HolidayChannelService holidays,
+        EbsService ebs,
+        string ffmpegPath,
+        Stream output,
+        WeatherAlertToneSandwich? alertTones,
+        CancellationToken cancellationToken)
+    {
+        var tickerPath = await _weatherAlerts.PrepareTickerFileAsync(channel, cancellationToken);
+        var duration = _weatherAlerts.CutInDurationForStream;
+        if (item.IsVirtual && item.VirtualSource == VirtualContentSource.MusicArtSlide)
+        {
+            await StreamMusicItemAsync(
+                channel,
+                item,
+                catalog,
+                ffmpegPath,
+                output,
+                cancellationToken,
+                tickerPath,
+                overlayChannelLogo: false,
+                durationOverride: duration,
+                alertTones: alertTones);
+            return;
+        }
+
+        if (item.IsVirtual && item.VirtualSource == VirtualContentSource.LogoBumper)
+        {
+            await StreamLogoBumperAsync(channel, item, ffmpegPath, output, cancellationToken, duration);
+            return;
+        }
+
+        if (item.CommercialId.HasValue)
+        {
+            await StreamCommercialItemAsync(channel, item, catalog, youtubeCommercials, ffmpegPath, output, cancellationToken);
+            return;
+        }
+
+        if (item.JellyfinItemId.HasValue)
+        {
+            await StreamMediaItemAsync(
+                channel,
+                item,
+                catalog,
+                holidays,
+                ffmpegPath,
+                output,
+                alertSession: null,
+                cancellationToken,
+                durationOverride: duration,
+                alertTickerPath: tickerPath,
+                overlayBug: false,
+                alertTones: alertTones);
+            return;
+        }
+
+        await WriteEbsAsync(channel, ebs, ffmpegPath, output, duration.TotalSeconds, cancellationToken);
+    }
+
+    private async Task StreamLogoBumperAsync(
+        Channel channel,
+        PlayoutItem item,
+        string ffmpegPath,
+        Stream output,
+        CancellationToken cancellationToken,
+        TimeSpan? durationOverride = null)
+    {
+        var inputPath = LogoBumperService.ResolveToonTakeoverPath();
+        if (string.IsNullOrWhiteSpace(inputPath) || !File.Exists(inputPath))
+        {
+            throw new FileNotFoundException("Slappy's Toon Takeover bumper was not found in the logo set.");
+        }
+
+        var offset = Math.Max(0, (DateTime.UtcNow - item.Start).TotalSeconds + item.InPoint.TotalSeconds);
+        var duration = durationOverride?.TotalSeconds
+            ?? Math.Max(1, (item.Finish - DateTime.UtcNow).TotalSeconds);
+        var args = _ffmpeg.BuildMediaCommand(
+            channel,
+            inputPath,
+            offset,
+            Math.Max(1, duration),
+            bugImagePath: null,
+            overlayBug: false);
+        await RunFfmpegToStreamAsync(ffmpegPath, args, output, cancellationToken);
+    }
+
     private async Task StreamMediaItemAsync(
         Channel channel,
         PlayoutItem item,
@@ -458,8 +624,12 @@ public class StreamService : IDisposable
         HolidayChannelService holidays,
         string ffmpegPath,
         Stream output,
-        WeatherAlertCutInSession alertSession,
-        CancellationToken cancellationToken)
+        WeatherAlertCutInSession? alertSession,
+        CancellationToken cancellationToken,
+        TimeSpan? durationOverride = null,
+        string? alertTickerPath = null,
+        bool overlayBug = true,
+        WeatherAlertToneSandwich? alertTones = null)
     {
         using var scope = _scopeFactory.CreateScope();
         var libraryManager = scope.ServiceProvider.GetRequiredService<ILibraryManager>();
@@ -476,13 +646,20 @@ public class StreamService : IDisposable
         }
 
         var offset = Math.Max(0, (DateTime.UtcNow - item.Start).TotalSeconds + item.InPoint.TotalSeconds);
-        var duration = Math.Max(1, (item.Finish - DateTime.UtcNow).TotalSeconds);
-        duration = await _weatherAlerts.CapMediaDurationAsync(channel, alertSession, duration, cancellationToken);
-        var bugPath = ResolveBugPath(channel, item.Start, holidays);
+        var duration = durationOverride?.TotalSeconds
+            ?? Math.Max(1, (item.Finish - DateTime.UtcNow).TotalSeconds);
+        if (durationOverride is null && alertSession is not null)
+        {
+            duration = await _weatherAlerts.CapMediaDurationAsync(channel, alertSession, duration, cancellationToken);
+        }
+
+        duration = Math.Max(1, duration);
+        var bugPath = overlayBug ? ResolveBugPath(channel, item.Start, holidays) : null;
         var headline = PastTenseNewsCatalog.IsPastTenseNewsChannel(channel) ? item.Title : null;
-        var tickerPath = await _weatherAlerts.PrepareTickerFileAsync(channel, cancellationToken);
         var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
-        var (fadeBugIn, fadeBugOut) = await GetChannelBugCommercialFadesAsync(db, item, duration, cancellationToken);
+        var (fadeBugIn, fadeBugOut) = overlayBug
+            ? await GetChannelBugCommercialFadesAsync(db, item, duration, cancellationToken)
+            : (false, false);
         var args = _ffmpeg.BuildMediaCommand(
             channel,
             inputPath,
@@ -490,12 +667,14 @@ public class StreamService : IDisposable
             duration,
             bugPath,
             headline,
-            tickerPath,
+            alertTickerPath,
             mediaItem.AspectRatio,
             mediaItem.Width,
             mediaItem.Height,
+            overlayBug: overlayBug,
             fadeBugIn: fadeBugIn,
-            fadeBugOut: fadeBugOut);
+            fadeBugOut: fadeBugOut,
+            alertTones: alertTones);
 
         await RunFfmpegToStreamAsync(ffmpegPath, args, output, cancellationToken);
     }
@@ -566,7 +745,11 @@ public class StreamService : IDisposable
         JellyfinCatalogService catalog,
         string ffmpegPath,
         Stream output,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? alertTickerPath = null,
+        bool overlayChannelLogo = true,
+        TimeSpan? durationOverride = null,
+        WeatherAlertToneSandwich? alertTones = null)
     {
         using var scope = _scopeFactory.CreateScope();
         var libraryManager = scope.ServiceProvider.GetRequiredService<ILibraryManager>();
@@ -583,8 +766,14 @@ public class StreamService : IDisposable
         }
 
         var albumArt = catalog.GetPrimaryImagePath(mediaItem);
-        var tickerPath = await _weatherAlerts.PrepareTickerFileAsync(channel, cancellationToken);
-        var args = _ffmpeg.BuildMusicCommand(channel, inputPath, albumArt, tickerPath);
+        var args = _ffmpeg.BuildMusicCommand(
+            channel,
+            inputPath,
+            albumArt,
+            alertTickerPath,
+            overlayChannelLogo,
+            durationOverride?.TotalSeconds,
+            alertTones);
         await RunFfmpegToStreamAsync(ffmpegPath, args, output, cancellationToken);
     }
 

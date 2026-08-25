@@ -11,7 +11,15 @@ public class GuideMetadataService
 {
     private const int MaxOverviewLength = 500;
 
+    private static readonly string[] PosterFileNames =
+    [
+        "poster.jpg", "poster.jpeg", "poster.png", "poster.webp",
+        "folder.jpg", "folder.jpeg", "folder.png",
+        "cover.jpg", "cover.jpeg", "cover.png"
+    ];
+
     private readonly ILibraryManager _libraryManager;
+    private readonly Dictionary<Guid, string?> _posterPathCache = [];
 
     public GuideMetadataService(ILibraryManager libraryManager)
     {
@@ -52,7 +60,7 @@ public class GuideMetadataService
             _ => new GuideProgramMetadata
             {
                 Title = item.Name,
-                PosterItemId = item.HasImage(ImageType.Primary) ? item.Id : null
+                PosterItemId = PosterItemId(item)
             }
         };
     }
@@ -78,16 +86,36 @@ public class GuideMetadataService
 
     /// <summary>
     /// Gets the filesystem path for a programme poster, if available.
+    /// Prefers the series poster for episodes, then the movie/episode image, then folder art next to the media.
     /// </summary>
     public string? GetPosterImagePath(Guid itemId)
     {
-        var source = GetPosterSourceItem(itemId);
-        if (source is null || !source.HasImage(ImageType.Primary))
+        if (_posterPathCache.TryGetValue(itemId, out var cached))
+        {
+            return cached;
+        }
+
+        var path = ResolvePosterImagePath(itemId);
+        _posterPathCache[itemId] = path;
+        return path;
+    }
+
+    /// <summary>
+    /// Builds an absolute poster URL for XMLTV programme icons when a local poster file exists.
+    /// </summary>
+    public string? GetPosterUrlIfAvailable(string baseUrl, Guid? posterItemId)
+    {
+        if (!posterItemId.HasValue || posterItemId.Value == Guid.Empty)
         {
             return null;
         }
 
-        return source.GetImagePath(ImageType.Primary);
+        if (string.IsNullOrWhiteSpace(GetPosterImagePath(posterItemId.Value)))
+        {
+            return null;
+        }
+
+        return GetPosterUrl(baseUrl, posterItemId);
     }
 
     /// <summary>
@@ -181,15 +209,7 @@ public class GuideMetadataService
         }
 
         var genres = CollectGenres(episode, series);
-        Guid? posterItemId = null;
-        if (series?.HasImage(ImageType.Primary) == true)
-        {
-            posterItemId = series.Id;
-        }
-        else if (episode.HasImage(ImageType.Primary))
-        {
-            posterItemId = episode.Id;
-        }
+        var posterItemId = PosterItemId(series) ?? PosterItemId(episode);
 
         return new GuideProgramMetadata
         {
@@ -225,7 +245,7 @@ public class GuideMetadataService
             IsSeries = false,
             ProductionYear = movie.ProductionYear,
             OfficialRating = movie.OfficialRating,
-            PosterItemId = movie.HasImage(ImageType.Primary) ? movie.Id : null
+            PosterItemId = PosterItemId(movie)
         };
     }
 
@@ -238,7 +258,7 @@ public class GuideMetadataService
             Description = TruncateOverview(musicVideo.Overview),
             Categories = categories,
             ProductionYear = musicVideo.ProductionYear,
-            PosterItemId = musicVideo.HasImage(ImageType.Primary) ? musicVideo.Id : null
+            PosterItemId = PosterItemId(musicVideo)
         };
     }
 
@@ -250,7 +270,7 @@ public class GuideMetadataService
             Description = TruncateOverview(audio.Overview),
             Categories = audio.Genres.Where(g => !string.IsNullOrWhiteSpace(g)).ToList(),
             ProductionYear = audio.ProductionYear,
-            PosterItemId = audio.HasImage(ImageType.Primary) ? audio.Id : null
+            PosterItemId = PosterItemId(audio)
         };
     }
 
@@ -263,6 +283,139 @@ public class GuideMetadataService
 
         return _libraryManager.GetItemById(episode.SeriesId) as Series ?? episode.Series;
     }
+
+    private string? ResolvePosterImagePath(Guid itemId)
+    {
+        var item = _libraryManager.GetItemById(itemId);
+        if (item is null)
+        {
+            return null;
+        }
+
+        if (item is Episode episode)
+        {
+            return FindPosterFile(ResolveSeries(episode), episode);
+        }
+
+        var found = FindPosterFile(item);
+        if (!string.IsNullOrWhiteSpace(found))
+        {
+            return found;
+        }
+
+        return item is Series series ? FindPosterFromSeriesEpisode(series.Id) : null;
+    }
+
+    private string? FindPosterFromSeriesEpisode(Guid seriesId)
+    {
+        var episode = _libraryManager.GetItemsResult(new InternalItemsQuery
+        {
+            ParentId = seriesId,
+            IncludeItemTypes = [BaseItemKind.Episode],
+            Recursive = true,
+            Limit = 1
+        }).Items.OfType<Episode>().FirstOrDefault();
+
+        return episode is null ? null : FindPosterFile(episode);
+    }
+
+    private static Guid? PosterItemId(BaseItem? item)
+    {
+        if (item is null)
+        {
+            return null;
+        }
+
+        return item.Id == Guid.Empty ? null : item.Id;
+    }
+
+    private static string? FindPosterFile(params BaseItem?[] items)
+    {
+        foreach (var item in items)
+        {
+            if (item is null)
+            {
+                continue;
+            }
+
+            if (IsExistingFile(item.PrimaryImagePath))
+            {
+                return item.PrimaryImagePath;
+            }
+
+            var sidecar = FindSidecarPoster(item.Path, walkParents: item is Episode);
+            if (!string.IsNullOrWhiteSpace(sidecar))
+            {
+                return sidecar;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? FindSidecarPoster(string? mediaPath, bool walkParents)
+    {
+        if (string.IsNullOrWhiteSpace(mediaPath))
+        {
+            return null;
+        }
+
+        var start = File.Exists(mediaPath) ? Path.GetDirectoryName(mediaPath) : mediaPath;
+        if (string.IsNullOrWhiteSpace(start) || !Directory.Exists(start))
+        {
+            return null;
+        }
+
+        var current = start;
+        var levels = walkParents ? 3 : 1;
+        for (var i = 0; i < levels; i++)
+        {
+            var named = FindNamedPoster(current, File.Exists(mediaPath) ? Path.GetFileNameWithoutExtension(mediaPath) : null);
+            if (!string.IsNullOrWhiteSpace(named))
+            {
+                return named;
+            }
+
+            var parent = Directory.GetParent(current);
+            if (parent is null)
+            {
+                break;
+            }
+
+            current = parent.FullName;
+        }
+
+        return null;
+    }
+
+    private static string? FindNamedPoster(string folder, string? mediaStem)
+    {
+        if (!string.IsNullOrWhiteSpace(mediaStem))
+        {
+            foreach (var name in new[] { mediaStem + "-poster.jpg", mediaStem + "-poster.png", mediaStem + ".jpg", mediaStem + ".png" })
+            {
+                var candidate = Path.Combine(folder, name);
+                if (IsExistingFile(candidate))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        foreach (var name in PosterFileNames)
+        {
+            var candidate = Path.Combine(folder, name);
+            if (IsExistingFile(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsExistingFile(string? path)
+        => !string.IsNullOrWhiteSpace(path) && File.Exists(path);
 
     private static List<string> CollectGenres(Episode episode, Series? series)
     {

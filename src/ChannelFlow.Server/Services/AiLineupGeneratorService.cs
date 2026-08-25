@@ -140,16 +140,18 @@ public class AiLineupGeneratorService
                 : NetworkSchedulePlanner.CloneDailyToWeek(slots);
 
             NetworkSchedulePlanner.SprinkleMovies(weekly, manifest.Catalog, catalogMode);
-            if (channel.ContentType == ChannelContentType.TvShow)
+            NetworkSchedulePlanner.ApplyTemplateRerunDayparts(weekly, playoutTemplate);
+            foreach (var daySlots in weekly.Values)
             {
-                NetworkSchedulePlanner.ClearOvernightSlots(weekly);
+                NetworkSchedulePlanner.FillRemainingGaps(daySlots, manifest.Catalog, catalogMode, channel.ContentType);
+                NetworkSchedulePlanner.FillEmptySlotsWithChannelFilter(daySlots, channel.FilterJson);
             }
 
             slots = weekly.GetValueOrDefault(DayOfWeek.Monday) ?? slots;
         }
 
-        var filledBlocks = slots.Count(s => s.Candidates.Count > 0);
-        var coveredHalfHours = slots.Where(s => s.Candidates.Count > 0).Sum(s => Math.Clamp(s.SpanSlots, 1, 48));
+        var filledBlocks = slots.Count(s => s.IsRerunSlot || s.Candidates.Count > 0);
+        var coveredHalfHours = slots.Where(s => s.IsRerunSlot || s.Candidates.Count > 0).Sum(s => Math.Clamp(s.SpanSlots, 1, 48));
         FinTvDebugLog.Ai(
             _logger,
             "Validated lineup for {Channel}: {FilledBlocks} blocks covering {Covered}/48 half-hours, weeklyDays={Days}",
@@ -197,7 +199,7 @@ public class AiLineupGeneratorService
 
         try
         {
-            var start = DateTime.UtcNow.Date;
+            var start = PlayoutScheduleHelper.GetScheduleDayStartUtc(DateTime.UtcNow);
             var end = PlayoutScheduleHelper.GetHorizonEndUtc(start);
             FinTvDebugLog.Ai(
                 _logger,
@@ -255,10 +257,13 @@ public class AiLineupGeneratorService
                     SlotIndex = slot.SlotIndex,
                     SpanSlots = slot.SpanSlots,
                     DaypartName = AiPlayoutTemplates.GetDaypartNameForSlot(playoutTemplate, slot.SlotIndex),
-                    Title = entry?.Title ?? candidate?.CollectionName ?? "Filter fallback",
-                    Type = entry?.Type ?? candidate?.Kind.ToString() ?? string.Empty,
-                    RuntimeMinutes = entry?.RuntimeMinutes,
-                    JellyfinItemId = candidate?.JellyfinItemId
+                    Title = slot.IsRerunSlot
+                        ? "Rerun · yesterday primetime"
+                        : entry?.Title ?? candidate?.CollectionName ?? "Filter fallback",
+                    Type = slot.IsRerunSlot ? "Rerun" : entry?.Type ?? candidate?.Kind.ToString() ?? string.Empty,
+                    RuntimeMinutes = slot.IsRerunSlot ? 30 : entry?.RuntimeMinutes,
+                    JellyfinItemId = slot.IsRerunSlot ? null : candidate?.JellyfinItemId,
+                    IsRerunSlot = slot.IsRerunSlot
                 };
             })
             .ToList();
@@ -376,6 +381,23 @@ public class AiLineupGeneratorService
 
             if (IsRangeOccupied(occupied, aiSlot.SlotIndex, span))
             {
+                continue;
+            }
+
+            if (IsGeneratedRerunSlot(aiSlot))
+            {
+                for (var i = 0; i < span; i++)
+                {
+                    var index = aiSlot.SlotIndex + i;
+                    occupied[index] = true;
+                    result[index] = new LineupSlotDto
+                    {
+                        SlotIndex = index,
+                        SpanSlots = 1,
+                        IsRerunSlot = true
+                    };
+                }
+
                 continue;
             }
 
@@ -766,6 +788,12 @@ public class AiLineupGeneratorService
         }
     }
 
+    private static bool IsGeneratedRerunSlot(AiGeneratedSlot slot)
+        => slot.Rerun
+            || slot.IsRerunSlot
+            || string.Equals(slot.Type, "rerun", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(slot.Title, "rerun", StringComparison.OrdinalIgnoreCase);
+
     private static List<LineupSlotDto> NormalizeSlots(IReadOnlyList<LineupSlotDto> slots)
     {
         var normalized = ChannelService.CreateEmptySlots()
@@ -783,6 +811,7 @@ public class AiLineupGeneratorService
             {
                 SlotIndex = slot.SlotIndex,
                 SpanSlots = Math.Clamp(slot.SpanSlots, 1, 8),
+                IsRerunSlot = slot.IsRerunSlot,
                 Candidates = slot.Candidates ?? new List<SlotCandidateDto>()
             };
         }
@@ -823,13 +852,14 @@ public class AiLineupGeneratorService
             ? """
             Prefer `blocks` for a weekly movie grid (double features, Friday/Saturday nights sticky).
             Movies use spanSlots from runtime. Keep the same titles in the same clock times each week.
+            Fill all 48 half-hour slots; overnight features are required.
             """
             : """
             Prefer `blocks` for a weekly TV grid. ChannelFlow expands this to 14 days and plays episodes in order (S01E01 onward, continuing from the last generated episode).
             - episodeBlock: consecutive 30-minute episodes of the same series (usually 2-4; a theme day may use 2-6).
             - days: weekdays, daily, weekends, or a list such as ["mon","tue","wed","thu","fri"] or ["fri"].
             - If Show X is on at 11:00 every Monday, list only Monday for that block. If Show Y is on at noon every day, use daily.
-            - Leave overnight rerun slots 4-11 (2:00-6:00am) empty; ChannelFlow fills those with the previous day's primetime reruns.
+            - Overnight (slots 4-11, 2:00-6:00am) should usually be rerun slots (kind rerun) so yesterday's primetime plays back. You may also mark other encore half-hours as rerun.
             """ + (playoutTemplate.Id is "classic-cable" or "kids-all-day" or "slappy-comedy"
                 ? """
 
@@ -853,6 +883,8 @@ public class AiLineupGeneratorService
             - Identify catalog rows with n (preferred), jellyfinItemId, or exact title. Do not invent GUIDs.
             - Keep shows in the same time slot across days/weeks unless it is a weekly special (Monday-only, Friday movie, theme day).
             - Typical series blocks are 2-4 episodes. Include at most one theme-day mini-marathon of 2-6 episodes per week.
+            - Fill all 48 half-hour slots (0-47). Overnight may reuse daytime or primetime series, or use rerun slots.
+            - Rerun slots: {"kind":"rerun","startSlot":4,"spanSlots":8,"days":["daily"]}. ChannelFlow fills those with yesterday's primetime. Do not assign catalog titles to rerun slots. You may also set "rerun":true on a daily slot.
             - Schedule like a real TV network using the playout template dayparts.
             """ + mixedRule + "\n" + formatHint + $"\nCatalog mode: {catalogMode}." + templateBlock;
     }
@@ -999,6 +1031,8 @@ public class AiLineupPreviewSlot
     public int? RuntimeMinutes { get; set; }
 
     public Guid? JellyfinItemId { get; set; }
+
+    public bool IsRerunSlot { get; set; }
 }
 
 public class AiCatalogSummary
@@ -1063,6 +1097,10 @@ internal class AiGeneratedSlot
     public string? Type { get; set; }
 
     public int? Year { get; set; }
+
+    public bool Rerun { get; set; }
+
+    public bool IsRerunSlot { get; set; }
 
     public List<AiGeneratedCandidate>? Candidates { get; set; }
 }

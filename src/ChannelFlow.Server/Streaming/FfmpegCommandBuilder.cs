@@ -25,10 +25,14 @@ public class FfmpegCommandBuilder
         int? sourceHeight = null,
         bool overlayBug = true,
         bool fadeBugIn = false,
-        bool fadeBugOut = false)
+        bool fadeBugOut = false,
+        WeatherAlertToneSandwich? alertTones = null)
     {
         var (width, height) = GetResolution(channel);
         var context = CreateEncodingContext(width, height, inputPath);
+        var encodeSeconds = alertTones is { HasTones: true }
+            ? alertTones.TotalSeconds
+            : durationSeconds;
 
         var args = new List<string>
         {
@@ -40,7 +44,7 @@ public class FfmpegCommandBuilder
         args.AddRange(new[]
         {
             "-ss", startSeconds.ToString("F3", CultureInfo.InvariantCulture),
-            "-t", durationSeconds.ToString("F3", CultureInfo.InvariantCulture),
+            "-t", encodeSeconds.ToString("F3", CultureInfo.InvariantCulture),
             "-i", inputPath
         });
         AppendMediaVideoGraph(
@@ -52,13 +56,14 @@ public class FfmpegCommandBuilder
             bugImagePath,
             overlayHeadline,
             alertTickerPath,
-            durationSeconds: durationSeconds,
+            durationSeconds: encodeSeconds,
             sourceAspectRatio: sourceAspectRatio,
             sourceWidth: sourceWidth,
             sourceHeight: sourceHeight,
             overlayBug: overlayBug,
             fadeBugIn: fadeBugIn,
-            fadeBugOut: fadeBugOut);
+            fadeBugOut: fadeBugOut,
+            alertTones: alertTones);
         AppendVideoEncoderArgs(args, context);
         args.AddRange(new[]
         {
@@ -193,14 +198,22 @@ public class FfmpegCommandBuilder
         Channel channel,
         string audioPath,
         string? albumArtPath,
-        string? alertTickerPath = null)
+        string? alertTickerPath = null,
+        bool overlayChannelLogo = true,
+        double? durationSeconds = null,
+        WeatherAlertToneSandwich? alertTones = null)
     {
         var (width, height) = GetResolution(channel);
         var context = CreateEncodingContext(width, height, audioPath);
-        var logo = channel.BugPlacement == BugPlacementMode.None ? null : ResolveBugPath(channel);
+        var logo = overlayChannelLogo && channel.BugPlacement != BugPlacementMode.None
+            ? ResolveBugPath(channel)
+            : null;
         var filter = _encoding.AdaptFilterComplexForEncoder(
             BuildMusicFilter(width, height, logo, albumArtPath, channel.ScanlinesEnabled && channel.AspectRatio == AspectRatioMode.FourThree, alertTickerPath),
             context.Encoder);
+        var encodeSeconds = alertTones is { HasTones: true }
+            ? alertTones.TotalSeconds
+            : durationSeconds;
 
         var args = new List<string>
         {
@@ -220,13 +233,30 @@ public class FfmpegCommandBuilder
             args.AddRange(new[] { "-loop", "1", "-i", logo });
         }
 
+        var audioMap = "0:a";
+        if (alertTones is { HasTones: true })
+        {
+            AppendAlertToneInputs(args, alertTones);
+            var firstTone = 1
+                + (!string.IsNullOrWhiteSpace(albumArtPath) && File.Exists(albumArtPath) ? 1 : 0)
+                + (!string.IsNullOrWhiteSpace(logo) && File.Exists(logo) ? 1 : 0);
+            filter += ";" + BuildAlertToneAudioGraph(0, firstTone, alertTones);
+            audioMap = "[aout]";
+        }
+
         args.AddRange(new[]
         {
             "-filter_complex", filter,
             "-map", "[vout]",
-            "-map", "0:a"
+            "-map", audioMap
         });
         AppendVideoEncoderArgs(args, context, stillImage: true);
+        if (encodeSeconds is > 0)
+        {
+            args.Add("-t");
+            args.Add(encodeSeconds.Value.ToString("F3", CultureInfo.InvariantCulture));
+        }
+
         args.AddRange(new[]
         {
             "-c:a", "aac",
@@ -520,14 +550,18 @@ public class FfmpegCommandBuilder
         int height,
         double captureFps,
         string? audioPath,
-        double? durationSeconds = null)
+        double? durationSeconds = null,
+        WeatherAlertToneSandwich? alertTones = null)
     {
         var fps = captureFps.ToString(CultureInfo.InvariantCulture);
         var hasAudio = !string.IsNullOrWhiteSpace(audioPath) && File.Exists(audioPath);
         var context = CreateEncodingContext(width, height);
-        var vf = _encoding.AdaptVideoFilterForEncoder(
-            $"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p",
-            context.Encoder);
+        var videoChain =
+            $"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p";
+        var vf = _encoding.AdaptVideoFilterForEncoder(videoChain, context.Encoder);
+        var encodeSeconds = alertTones is { HasTones: true }
+            ? alertTones.TotalSeconds
+            : durationSeconds;
 
         var args = new List<string>
         {
@@ -563,13 +597,30 @@ public class FfmpegCommandBuilder
             });
         }
 
-        args.AddRange(new[]
+        if (alertTones is { HasTones: true })
         {
-            "-vf", vf,
-            "-map", "0:v:0",
-            "-map", "1:a:0?",
-            "-af", "aresample=async=1:first_pts=0,aformat=sample_rates=48000:channel_layouts=stereo"
-        });
+            AppendAlertToneInputs(args, alertTones);
+            var graph = _encoding.AdaptFilterComplexForEncoder(
+                $"[0:v]{videoChain}[vout];{BuildAlertToneAudioGraph(1, 2, alertTones)}",
+                context.Encoder);
+            args.AddRange(new[]
+            {
+                "-filter_complex", graph,
+                "-map", "[vout]",
+                "-map", "[aout]"
+            });
+        }
+        else
+        {
+            args.AddRange(new[]
+            {
+                "-vf", vf,
+                "-map", "0:v:0",
+                "-map", "1:a:0?",
+                "-af", "aresample=async=1:first_pts=0,aformat=sample_rates=48000:channel_layouts=stereo"
+            });
+        }
+
         AppendVideoEncoderArgs(args, context, stillImage: true);
         args.AddRange(new[]
         {
@@ -578,10 +629,10 @@ public class FfmpegCommandBuilder
             "-ac", "2",
             "-ar", "48000"
         });
-        if (durationSeconds is > 0)
+        if (encodeSeconds is > 0)
         {
             args.Add("-t");
-            args.Add(durationSeconds.Value.ToString("F3", CultureInfo.InvariantCulture));
+            args.Add(encodeSeconds.Value.ToString("F3", CultureInfo.InvariantCulture));
         }
 
         args.AddRange(new[]
@@ -592,45 +643,6 @@ public class FfmpegCommandBuilder
             "pipe:1"
         });
 
-        return args;
-    }
-
-    public IReadOnlyList<string> BuildWeatherAlertToneCommand(Channel channel, string audioPath)
-    {
-        var (width, height) = GetResolution(channel);
-        var context = CreateEncodingContext(width, height, audioPath);
-        var args = new List<string>
-        {
-            "-hide_banner",
-            "-loglevel", "warning",
-            "-fflags", "+genpts"
-        };
-        args.AddRange(context.HardwareDeviceArgs);
-        args.AddRange(new[]
-        {
-            "-f", "lavfi",
-            "-i", $"color=c=black:s={width}x{height}:r=30",
-            "-i", audioPath,
-            "-map", "0:v:0",
-            "-map", "1:a:0",
-            "-af", "aresample=async=1:first_pts=0,aformat=sample_rates=48000:channel_layouts=stereo"
-        });
-        AppendVideoEncoderArgs(args, context, stillImage: true);
-        args.AddRange(new[]
-        {
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-ac", "2",
-            "-ar", "48000",
-            "-t", "30",
-            "-shortest",
-            "-f", "mpegts",
-            "-mpegts_flags", "+resend_headers+initial_discontinuity",
-            "-muxdelay", "0",
-            "-muxpreload", "0",
-            "-flush_packets", "1",
-            "pipe:1"
-        });
         return args;
     }
 
@@ -713,7 +725,8 @@ public class FfmpegCommandBuilder
         int? sourceHeight = null,
         bool overlayBug = true,
         bool fadeBugIn = false,
-        bool fadeBugOut = false)
+        bool fadeBugOut = false,
+        WeatherAlertToneSandwich? alertTones = null)
     {
         var linear = BuildLinearVideoFilters(channel, width, height, overlayHeadline, alertTickerPath);
         if (!string.IsNullOrEmpty(skipExpr))
@@ -722,33 +735,63 @@ public class FfmpegCommandBuilder
         }
 
         var bug = overlayBug ? ResolveBugFile(channel, bugImagePath) : null;
-        if (string.IsNullOrWhiteSpace(bug))
+        var sandwich = alertTones is { HasTones: true } ? alertTones : null;
+        if (string.IsNullOrWhiteSpace(bug) && sandwich is null)
         {
             args.Add("-vf");
             args.Add(_encoding.AdaptVideoFilterForEncoder(linear, context.Encoder));
             return;
         }
 
-        var bugWidth = Math.Clamp(width / 8, 140, 260);
-        var position = GetBugOverlay(channel, width, height, sourceAspectRatio, sourceWidth, sourceHeight);
-        var alpha = ChannelBugLayout.AlphaFilters(fadeBugIn, fadeBugOut, durationSeconds);
-        var graph =
-            $"[0:v]{linear}[base];" +
-            $"[1:v]format=rgba,scale={bugWidth}:-1:force_original_aspect_ratio=decrease,{alpha}[bug];" +
-            $"[base][bug]overlay={position}:format=auto:eof_action=repeat:repeatlast=1[vout]";
-        if (!string.IsNullOrEmpty(skipExpr))
+        if (!string.IsNullOrWhiteSpace(bug))
+        {
+            args.AddRange(
+            [
+                "-loop", "1",
+                "-framerate", "30",
+                "-i", bug
+            ]);
+        }
+
+        if (sandwich is not null)
+        {
+            AppendAlertToneInputs(args, sandwich);
+        }
+
+        var firstToneIndex = string.IsNullOrWhiteSpace(bug) ? 1 : 2;
+        string graph;
+        if (string.IsNullOrWhiteSpace(bug))
+        {
+            graph = $"[0:v]{linear}[vout]";
+        }
+        else
+        {
+            var bugWidth = Math.Clamp(width / 8, 140, 260);
+            var position = GetBugOverlay(channel, width, height, sourceAspectRatio, sourceWidth, sourceHeight);
+            var alpha = ChannelBugLayout.AlphaFilters(fadeBugIn, fadeBugOut, durationSeconds);
+            graph =
+                $"[0:v]{linear}[base];" +
+                $"[1:v]format=rgba,scale={bugWidth}:-1:force_original_aspect_ratio=decrease,{alpha}[bug];" +
+                $"[base][bug]overlay={position}:format=auto:eof_action=repeat:repeatlast=1[vout]";
+        }
+
+        if (!string.IsNullOrEmpty(skipExpr) && sandwich is null)
         {
             graph += $";[0:a]aselect='{skipExpr}',asetpts=N/SR/TB[aout]";
         }
+        else if (sandwich is not null)
+        {
+            graph += ";" + BuildAlertToneAudioGraph(0, firstToneIndex, sandwich);
+        }
 
+        var audioMap = sandwich is not null || !string.IsNullOrEmpty(skipExpr)
+            ? "[aout]"
+            : "0:a?";
         args.AddRange(
         [
-            "-loop", "1",
-            "-framerate", "30",
-            "-i", bug,
             "-filter_complex", _encoding.AdaptFilterComplexForEncoder(graph, context.Encoder),
             "-map", "[vout]",
-            "-map", string.IsNullOrEmpty(skipExpr) ? "0:a?" : "[aout]",
+            "-map", audioMap,
             "-shortest"
         ]);
     }
@@ -805,7 +848,7 @@ public class FfmpegCommandBuilder
         var small = Math.Max(16, height / 50);
         filters.Add($"drawbox=x=0:y=0:w=iw:h={barH}:color=0xe11d48@0.92:t=fill");
         filters.Add($"drawtext=text='BREAKING NEWS':expansion=none:fontcolor=white:fontsize={font}:x=28:y=({barH}-th)/2");
-        filters.Add($"drawbox=x=0:y=h-{lowerH}:w=iw:h={lowerH}:color=0x101010@0.90:t=fill");
+        filters.Add($"drawbox=x=0:y=ih-{lowerH}:w=iw:h={lowerH}:color=0x101010@0.90:t=fill");
         filters.Add($"drawtext=text='PAST TENSE NEWS':expansion=none:fontcolor=0xe11d48:fontsize={small}:x=28:y=h-{lowerH}+10");
         if (string.IsNullOrWhiteSpace(headline))
         {
@@ -829,7 +872,7 @@ public class FfmpegCommandBuilder
         var barH = Math.Max(52, height / 18);
         var font = Math.Max(22, height / 42);
         var escaped = EscapeFilterPath(alertTickerPath!);
-        filters.Add($"drawbox=x=0:y=h-{barH}:w=iw:h={barH}:color=0xc41e3a@0.90:t=fill");
+        filters.Add($"drawbox=x=0:y=ih-{barH}:w=iw:h={barH}:color=0xc41e3a@0.90:t=fill");
         filters.Add($"drawtext=textfile='{escaped}':expansion=none:fontcolor=white:fontsize={font}:x=w-mod(t*90\\,w+text_w):y=h-{barH}+{(barH - font) / 2}");
     }
 
@@ -876,7 +919,7 @@ public class FfmpegCommandBuilder
             var font = Math.Max(22, height / 42);
             var escaped = EscapeFilterPath(alertTickerPath!);
             baseFilter = baseFilter.Replace("[vout]", "[vpre]")
-                + $";[vpre]drawbox=x=0:y=h-{barH}:w=iw:h={barH}:color=0xc41e3a@0.90:t=fill[vbar]"
+                + $";[vpre]drawbox=x=0:y=ih-{barH}:w=iw:h={barH}:color=0xc41e3a@0.90:t=fill[vbar]"
                 + $";[vbar]drawtext=textfile='{escaped}':expansion=none:fontcolor=white:fontsize={font}:x=w-mod(t*90\\,w+text_w):y=h-{barH}+{(barH - font) / 2}[vout]";
         }
 
@@ -941,4 +984,71 @@ public class FfmpegCommandBuilder
             .Replace("'", "\u2019")
             .Replace(":", "\\:")
             .Replace("%", "\\%");
+
+    private static void AppendAlertToneInputs(List<string> args, WeatherAlertToneSandwich sandwich)
+    {
+        if (sandwich.HasAttention)
+        {
+            args.AddRange(["-i", sandwich.AttentionPath!]);
+        }
+
+        if (sandwich.HasEnd)
+        {
+            args.AddRange(["-i", sandwich.EndPath!]);
+        }
+    }
+
+    private static string BuildAlertToneAudioGraph(
+        int programAudioInputIndex,
+        int firstExtraInputIndex,
+        WeatherAlertToneSandwich sandwich)
+    {
+        var mid = sandwich.MiddleSeconds.ToString("F3", CultureInfo.InvariantCulture);
+        var parts = new List<string>();
+        var labels = new List<string>();
+        var extra = firstExtraInputIndex;
+        if (sandwich.HasAttention)
+        {
+            var att = sandwich.AttentionSeconds.ToString("F3", CultureInfo.InvariantCulture);
+            parts.Add($"[{extra}:a]atrim=0:{att},asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo[att]");
+            labels.Add("[att]");
+            extra++;
+        }
+
+        parts.Add($"[{programAudioInputIndex}:a]atrim=0:{mid},asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo[prog]");
+        labels.Add("[prog]");
+        if (sandwich.HasEnd)
+        {
+            var end = sandwich.EndSeconds.ToString("F3", CultureInfo.InvariantCulture);
+            parts.Add($"[{extra}:a]atrim=0:{end},asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo[end]");
+            labels.Add("[end]");
+        }
+
+        parts.Add($"{string.Concat(labels)}concat=n={labels.Count}:v=0:a=1,aresample=async=1:first_pts=0[aout]");
+        return string.Join(';', parts);
+    }
+}
+
+public sealed class WeatherAlertToneSandwich
+{
+    public string? AttentionPath { get; init; }
+
+    public double AttentionSeconds { get; init; }
+
+    public string? EndPath { get; init; }
+
+    public double EndSeconds { get; init; }
+
+    public double MiddleSeconds { get; init; }
+
+    public bool HasAttention
+        => !string.IsNullOrWhiteSpace(AttentionPath) && AttentionSeconds > 0.2;
+
+    public bool HasEnd
+        => !string.IsNullOrWhiteSpace(EndPath) && EndSeconds > 0.2;
+
+    public bool HasTones => HasAttention || HasEnd;
+
+    public double TotalSeconds
+        => (HasAttention ? AttentionSeconds : 0) + MiddleSeconds + (HasEnd ? EndSeconds : 0);
 }

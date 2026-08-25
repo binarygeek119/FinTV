@@ -66,7 +66,8 @@ public enum VirtualContentSource
     None = 0,
     WeatherStar = 1,
     MusicArtSlide = 2,
-    News = 3
+    News = 3,
+    LogoBumper = 4
 }
 
 public enum CommercialSource

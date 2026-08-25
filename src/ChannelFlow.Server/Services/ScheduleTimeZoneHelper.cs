@@ -25,6 +25,26 @@ public static class ScheduleTimeZoneHelper
     public static string GetConfiguredTimeZoneId()
         => NormalizeTimeZoneId(FinTvRuntime.Current?.Configuration.ScheduleTimeZone);
 
+    /// <summary>
+    /// Current instant in the schedule time zone (not container UTC).
+    /// </summary>
+    public static DateTimeOffset Now()
+    {
+        var tz = ResolveScheduleTimeZone();
+        return TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, tz);
+    }
+
+    /// <summary>
+    /// Points the process local clock at the schedule time zone so logs and DateTime.Now
+    /// follow ChannelFlow's setting instead of container UTC.
+    /// </summary>
+    public static void ApplyAsProcessTimeZone()
+    {
+        var tz = ResolveScheduleTimeZone();
+        Environment.SetEnvironmentVariable("TZ", tz.Id);
+        TimeZoneInfo.ClearCachedData();
+    }
+
     public static string NormalizeTimeZoneId(string? timeZoneId)
     {
         if (string.IsNullOrWhiteSpace(timeZoneId))
@@ -39,6 +59,40 @@ public static class ScheduleTimeZoneHelper
         }
 
         return Aliases.TryGetValue(trimmed, out var alias) ? alias : trimmed;
+    }
+
+    /// <summary>
+    /// Floors a UTC instant to the top of the local hour in the schedule time zone.
+    /// </summary>
+    public static DateTime FloorToHourUtc(DateTime utc, TimeZoneInfo? timeZone = null)
+    {
+        timeZone ??= ResolveScheduleTimeZone();
+        if (utc.Kind != DateTimeKind.Utc)
+        {
+            utc = DateTime.SpecifyKind(utc, DateTimeKind.Utc);
+        }
+
+        var local = TimeZoneInfo.ConvertTimeFromUtc(utc, timeZone);
+        var hourLocal = DateTime.SpecifyKind(
+            new DateTime(local.Year, local.Month, local.Day, local.Hour, 0, 0),
+            DateTimeKind.Unspecified);
+        return ConvertLocalToUtc(hourLocal, timeZone);
+    }
+
+    /// <summary>
+    /// Adds local wall-clock hours (DST-safe) to a UTC instant.
+    /// </summary>
+    public static DateTime AddLocalHoursUtc(DateTime utc, int hours, TimeZoneInfo? timeZone = null)
+    {
+        timeZone ??= ResolveScheduleTimeZone();
+        if (utc.Kind != DateTimeKind.Utc)
+        {
+            utc = DateTime.SpecifyKind(utc, DateTimeKind.Utc);
+        }
+
+        var local = TimeZoneInfo.ConvertTimeFromUtc(utc, timeZone);
+        var next = DateTime.SpecifyKind(local.AddHours(hours), DateTimeKind.Unspecified);
+        return ConvertLocalToUtc(next, timeZone);
     }
 
     /// <summary>
@@ -135,6 +189,18 @@ public static class ScheduleTimeZoneHelper
         return string.Create(
             CultureInfo.InvariantCulture,
             $"UTC{sign}{total.Hours:00}:{total.Minutes:00}");
+    }
+
+    private static DateTime ConvertLocalToUtc(DateTime localUnspecified, TimeZoneInfo timeZone)
+    {
+        try
+        {
+            return TimeZoneInfo.ConvertTimeToUtc(localUnspecified, timeZone);
+        }
+        catch (ArgumentException)
+        {
+            return TimeZoneInfo.ConvertTimeToUtc(localUnspecified.AddHours(1), timeZone);
+        }
     }
 
     private static IEnumerable<string> BuildCandidates(string? timeZoneId)

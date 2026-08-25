@@ -188,6 +188,8 @@ public class LineupSlot
 
     public int SpanSlots { get; set; } = 1;
 
+    public bool IsRerunSlot { get; set; }
+
     [JsonIgnore]
     public Lineup? Lineup { get; set; }
 

@@ -19,13 +19,13 @@ public static class AiPlayoutTemplates
         {
             Id = "classic-cable",
             Name = "Classic Cable Dayparts",
-            Description = "Morning cartoons, after-school block, teen hour, primetime, 9pm late night, midnight adult cartoons, and 2am reruns.",
+            Description = "Morning cartoons, after-school block, teen hour, primetime, 9pm late night, midnight adult cartoons, and overnight encore.",
             Dayparts =
             [
                 new AiPlayoutDaypart(0, 3, "Adult Cartoons",
                     "Midnight-2:00am adult animation. No kids content."),
                 new AiPlayoutDaypart(4, 11, "Overnight Reruns",
-                    "2:00-6:00am. Leave empty in the grid; ChannelFlow repeats high-performing shows from the previous afternoon/evening."),
+                    "2:00-6:00am encore. Mark as rerun slots (kind rerun). ChannelFlow repeats yesterday's primetime here. Do not assign catalog titles."),
                 new AiPlayoutDaypart(12, 15, "Morning Cartoons",
                     "Small morning cartoon block that matches the channel (6:00-8:00am)."),
                 new AiPlayoutDaypart(16, 28, "Daytime TV",
@@ -48,7 +48,7 @@ public static class AiPlayoutTemplates
             Dayparts =
             [
                 new AiPlayoutDaypart(0, 11, "Overnight Reruns",
-                    "2:00-6:00am. Leave empty in the grid; ChannelFlow repeats kids shows from the previous afternoon/evening."),
+                    "Midnight-6:00am. Mark as rerun slots (kind rerun). ChannelFlow repeats yesterday's kids primetime. Do not assign catalog titles."),
                 new AiPlayoutDaypart(12, 33, "Kids Block",
                     "Nickelodeon, Disney Channel, Fox Kids, and Cartoon Network style cartoons and live-action kids shows."),
                 new AiPlayoutDaypart(34, 37, "Tween Hour",
@@ -124,7 +124,7 @@ public static class AiPlayoutTemplates
             Dayparts =
             [
                 new AiPlayoutDaypart(0, 11, "Overnight Reruns",
-                    "2:00-6:00am. Leave empty in the grid; ChannelFlow repeats high-performing game shows from the previous day."),
+                    "Midnight-6:00am encore. Mark as rerun slots (kind rerun). ChannelFlow repeats yesterday's primetime game shows. Do not assign catalog titles."),
                 new AiPlayoutDaypart(12, 17, "Morning Quick Games",
                     "Fast-paced 22-30 minute game shows; one show per slot."),
                 new AiPlayoutDaypart(18, 29, "Daytime Blocks",
@@ -145,7 +145,7 @@ public static class AiPlayoutTemplates
             Dayparts =
             [
                 new AiPlayoutDaypart(0, 11, "Overnight Reruns",
-                    "2:00-6:00am. Leave empty in the grid; ChannelFlow repeats high-performing educational shows from the previous day."),
+                    "Midnight-6:00am encore. Mark as rerun slots (kind rerun). ChannelFlow repeats yesterday's primetime educational shows. Do not assign catalog titles."),
                 new AiPlayoutDaypart(12, 17, "Morning Discovery",
                     "Science and nature for a general audience; keep the same subject across 2-4 consecutive slots."),
                 new AiPlayoutDaypart(18, 23, "History Block",
@@ -226,6 +226,16 @@ public static class AiPlayoutTemplates
     public static AiPlayoutTemplate Resolve(Channel channel)
         => Get(channel.AiPlayoutTemplateId) ?? All[0];
 
+    public static AiPlayoutDaypart? GetToonTakeoverDaypart(Channel channel)
+    {
+        var template = Resolve(channel);
+        return template.Dayparts.FirstOrDefault(d =>
+            d.Name.Contains("toon takeover", StringComparison.OrdinalIgnoreCase));
+    }
+
+    public static bool IsToonTakeoverSlot(Channel channel, int slotIndex)
+        => GetToonTakeoverDaypart(channel)?.ContainsSlot(slotIndex) == true;
+
     public static string? GetDaypartNameForSlot(AiPlayoutTemplate? template, int slotIndex)
     {
         if (template is null || template.Dayparts.Count == 0)
@@ -265,6 +275,11 @@ public static class AiPlayoutTemplates
                 ? $"; max spanSlots {daypart.MaxSpanSlots.Value}"
                 : string.Empty;
             lines.Add($"- {daypart.Name} slots {daypart.FormatSlotRange()}: {daypart.Brief}{spanHint}");
+        }
+
+        if (template.Dayparts.Any(d => d.Name.Contains("rerun", StringComparison.OrdinalIgnoreCase)))
+        {
+            lines.Add("- Overnight Reruns dayparts must use kind \"rerun\" (no catalog titles). ChannelFlow fills them with yesterday's primetime.");
         }
 
         if (template.Id is "classic-cable" or "kids-all-day")

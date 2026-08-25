@@ -131,6 +131,7 @@ public class SpecialPresentationService
             Id = slot.Id,
             SlotIndex = slot.SlotIndex,
             SpanSlots = slot.SpanSlots,
+            IsRerunSlot = slot.IsRerunSlot,
             Candidates = slot.Candidates.Select(c => new SlotCandidate
             {
                 Kind = c.Kind,

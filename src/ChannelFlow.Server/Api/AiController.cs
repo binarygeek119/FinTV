@@ -97,6 +97,11 @@ public class AiController : ControllerBase
             ai.AutoApplyToAllChannelsOnSave = request.AutoApplyToAllChannelsOnSave.Value;
         }
 
+        if (request.SimulateOriginalBroadcasting.HasValue)
+        {
+            ai.SimulateOriginalBroadcasting = request.SimulateOriginalBroadcasting.Value;
+        }
+
         if (!string.IsNullOrWhiteSpace(request.OpenAiApiKey))
         {
             ai.OpenAiApiKey = request.OpenAiApiKey.Trim();
@@ -139,7 +144,8 @@ public class AiController : ControllerBase
             openAiApiKeyMasked = MaskKey(ai.OpenAiApiKey),
             veniceApiKeyMasked = MaskKey(ai.VeniceApiKey),
             autoApplyOnChannelAdd = ai.AutoApplyOnChannelAdd,
-            autoApplyToAllChannelsOnSave = ai.AutoApplyToAllChannelsOnSave
+            autoApplyToAllChannelsOnSave = ai.AutoApplyToAllChannelsOnSave,
+            simulateOriginalBroadcasting = ai.SimulateOriginalBroadcasting
         };
     }
 
@@ -449,6 +455,8 @@ public class AiSettingsRequest
     public bool? AutoApplyOnChannelAdd { get; set; }
 
     public bool? AutoApplyToAllChannelsOnSave { get; set; }
+
+    public bool? SimulateOriginalBroadcasting { get; set; }
 }
 
 public class AiTestSettingsRequest

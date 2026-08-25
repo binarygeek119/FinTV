@@ -92,13 +92,15 @@ public class LogoSetService
         var flowWireOutro = Path.Combine(storagePath, "News", "FlowWire-outro.mp3");
         var catherinePortrait = Path.Combine(storagePath, "News", "Catherine_Wolfe.jpg");
         var weatherAlertTone = Path.Combine(storagePath, "Weather", "weather_alert.ogg");
+        var weatherAlertEnd = Path.Combine(storagePath, "Weather", "weather_alert_single.mp3");
 
         if (localCount == 0
             || !File.Exists(flowWireLogo)
             || !File.Exists(flowWireIntro)
             || !File.Exists(flowWireOutro)
             || !File.Exists(catherinePortrait)
-            || !File.Exists(weatherAlertTone))
+            || !File.Exists(weatherAlertTone)
+            || !File.Exists(weatherAlertEnd))
         {
             await DownloadBinarygeek119SetFromGitHubAsync(storagePath, cancellationToken);
         }
@@ -716,6 +718,83 @@ public class LogoSetService
         return File.Exists(path) ? path : null;
     }
 
+    /// <summary>
+    /// Finds a Binarygeek119 logo-repo file on disk, downloading it from GitHub when missing.
+    /// </summary>
+    public async Task<string?> EnsureBinarygeek119FileAsync(string relativePath, CancellationToken cancellationToken = default)
+    {
+        var existing = ResolveBinarygeek119File(relativePath);
+        if (!string.IsNullOrWhiteSpace(existing))
+        {
+            return existing;
+        }
+
+        var plugin = FinTvRuntime.Current;
+        if (plugin is null || string.IsNullOrWhiteSpace(relativePath))
+        {
+            return null;
+        }
+
+        var destination = Path.Combine(
+            plugin.LogosFolder,
+            "binarygeek119",
+            relativePath.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+
+        try
+        {
+            var client = CreateGitHubClient();
+            var url = ToRawGitHubUrl(relativePath.Replace('\\', '/'));
+            using var response = await client.GetAsync(url, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("Failed to download logo asset {Path}: {Status}", relativePath, response.StatusCode);
+                return ResolveBinarygeek119File(relativePath);
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            await using var output = File.Create(destination);
+            await stream.CopyToAsync(output, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to download logo asset {Path}", relativePath);
+        }
+
+        return File.Exists(destination) ? destination : ResolveBinarygeek119File(relativePath);
+    }
+
+    public static string? ResolveBinarygeek119File(string relativePath)
+    {
+        var plugin = FinTvRuntime.Current;
+        var fileName = Path.GetFileName(relativePath.Replace('\\', '/'));
+        foreach (var root in new[]
+                 {
+                     Path.Combine(plugin?.LogosFolder ?? string.Empty, "binarygeek119"),
+                     plugin?.BundledLogosFolder ?? string.Empty
+                 }.Where(path => !string.IsNullOrWhiteSpace(path) && Directory.Exists(path)))
+        {
+            var direct = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+            if (File.Exists(direct))
+            {
+                return direct;
+            }
+
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                continue;
+            }
+
+            var found = Directory.EnumerateFiles(root, fileName, SearchOption.AllDirectories).FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(found))
+            {
+                return found;
+            }
+        }
+
+        return null;
+    }
+
     private static string BuildUniqueFileName(LogoSet set, string displayName, string extension)
     {
         var baseName = SanitizeFileName(displayName);
@@ -827,7 +906,22 @@ public class LogoSetService
             path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsBundledAssetFile(string path)
-        => IsImageFile(path) || IsNewsAudioFile(path) || IsWeatherAudioFile(path);
+        => IsImageFile(path) || IsNewsAudioFile(path) || IsWeatherAudioFile(path) || IsShowsVideoFile(path);
+
+    private static bool IsShowsVideoFile(string path)
+    {
+        if (!path.EndsWith(".mp4", StringComparison.OrdinalIgnoreCase)
+            && !path.EndsWith(".mkv", StringComparison.OrdinalIgnoreCase)
+            && !path.EndsWith(".webm", StringComparison.OrdinalIgnoreCase)
+            && !path.EndsWith(".mov", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var normalized = path.Replace('\\', '/');
+        return normalized.StartsWith("Shows/", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("/Shows/", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static bool IsNewsAudioFile(string path)
         => IsAudioUnderFolder(path, "News");

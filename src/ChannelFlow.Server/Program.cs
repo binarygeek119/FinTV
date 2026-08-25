@@ -161,6 +161,7 @@ builder.Services.AddScoped<EpgService>();
 builder.Services.AddScoped<GuideMetadataService>();
 builder.Services.AddScoped<WeatherGuideMetadataService>();
 builder.Services.AddScoped<LogoSetService>();
+builder.Services.AddScoped<LogoBumperService>();
 builder.Services.AddScoped<HolidayChannelService>();
 builder.Services.AddScoped<JellyfinCatalogService>();
 builder.Services.AddScoped<AiCatalogManifestBuilder>();

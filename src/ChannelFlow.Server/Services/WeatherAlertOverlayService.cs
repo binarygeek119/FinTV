@@ -146,6 +146,22 @@ public sealed class WeatherAlertOverlayService
         return new WeatherAlertTestPreview(mode, duration, alerts, ticker, jpeg);
     }
 
+    public bool HasActiveTest => GetActiveSimulation() is not null;
+
+    public bool StopTest()
+    {
+        lock (_gate)
+        {
+            if (_simulation is null)
+            {
+                return false;
+            }
+
+            _simulation = null;
+            return true;
+        }
+    }
+
     public WeatherSnapshot? TrySimulationSnapshot()
     {
         var simulation = GetActiveSimulation();
@@ -157,7 +173,7 @@ public sealed class WeatherAlertOverlayService
         get
         {
             var simulation = GetActiveSimulation();
-            if (simulation is not null && simulation.Mode == WeatherAlertOverlayMode.CutIn)
+            if (simulation is not null && simulation.Mode is WeatherAlertOverlayMode.CutIn or WeatherAlertOverlayMode.Ticker)
             {
                 return TimeSpan.FromSeconds(Math.Clamp(simulation.CutInDuration.TotalSeconds, 5, 120));
             }
@@ -171,13 +187,25 @@ public sealed class WeatherAlertOverlayService
         WeatherAlertCutInSession session,
         CancellationToken cancellationToken)
     {
-        if (EffectiveMode != WeatherAlertOverlayMode.CutIn || !AppliesTo(channel))
+        if (!AppliesTo(channel))
+        {
+            return false;
+        }
+
+        if (EffectiveMode == WeatherAlertOverlayMode.Ticker && !AllowsTicker(channel))
+        {
+            return false;
+        }
+
+        if (EffectiveMode is not WeatherAlertOverlayMode.CutIn and not WeatherAlertOverlayMode.Ticker)
         {
             return false;
         }
 
         var simulation = GetActiveSimulation();
-        if (simulation is not null && simulation.Mode == WeatherAlertOverlayMode.CutIn && session.PlayedTestId != simulation.Id)
+        if (simulation is not null
+            && simulation.Mode == EffectiveMode
+            && session.PlayedTestId != simulation.Id)
         {
             return true;
         }
@@ -197,7 +225,14 @@ public sealed class WeatherAlertOverlayService
         double durationSeconds,
         CancellationToken cancellationToken)
     {
-        if (EffectiveMode != WeatherAlertOverlayMode.CutIn || !AppliesTo(channel) || durationSeconds <= 2)
+        if (EffectiveMode is not WeatherAlertOverlayMode.CutIn and not WeatherAlertOverlayMode.Ticker
+            || !AppliesTo(channel)
+            || durationSeconds <= 2)
+        {
+            return durationSeconds;
+        }
+
+        if (EffectiveMode == WeatherAlertOverlayMode.Ticker && !AllowsTicker(channel))
         {
             return durationSeconds;
         }

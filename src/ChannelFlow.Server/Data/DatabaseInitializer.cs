@@ -28,6 +28,7 @@ public class DatabaseInitializer : IHostedService
         await RenameFlowWireChannelAsync(db, cancellationToken);
         await MigrateRetiredNewsChannelAsync(db, cancellationToken);
         await EnsureChannelColumnsAsync(db, cancellationToken);
+        await EnsureLineupSlotColumnsAsync(db, cancellationToken);
         await EnsureMediaItemColumnsAsync(db, cancellationToken);
         await EnsureCatalogTablesAsync(db, cancellationToken);
         await UpgradeTvShowsToEpisodesAsync(db, cancellationToken);
@@ -190,6 +191,20 @@ public class DatabaseInitializer : IHostedService
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "Channel schema ensure skipped");
+        }
+    }
+
+    private async Task EnsureLineupSlotColumnsAsync(FinTvDbContext db, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "LineupSlots" ADD COLUMN IF NOT EXISTS "IsRerunSlot" boolean NOT NULL DEFAULT FALSE""",
+                cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "LineupSlot schema ensure skipped");
         }
     }
 

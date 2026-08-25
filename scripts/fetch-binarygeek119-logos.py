@@ -29,6 +29,7 @@ LOGO_PREFIXES = (
 )
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
 AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".opus"}
+VIDEO_SUFFIXES = {".mp4", ".mkv", ".webm", ".mov"}
 
 
 def is_image(path: str) -> bool:
@@ -41,6 +42,10 @@ def is_news_audio(path: str) -> bool:
 
 def is_weather_audio(path: str) -> bool:
     return path.startswith("Weather/") and Path(path).suffix.lower() in AUDIO_SUFFIXES
+
+
+def is_shows_video(path: str) -> bool:
+    return path.startswith("Shows/") and Path(path).suffix.lower() in VIDEO_SUFFIXES
 
 
 def is_logo_path(path: str) -> bool:
@@ -102,7 +107,7 @@ def main() -> int:
         for item in fetch_tree()
         if item.get("type") == "blob"
         and is_logo_path(item.get("path", ""))
-        and (is_image(item["path"]) or is_news_audio(item["path"]) or is_weather_audio(item["path"]))
+        and (is_image(item["path"]) or is_news_audio(item["path"]) or is_weather_audio(item["path"]) or is_shows_video(item["path"]))
     ]
 
     print(f"Bundling {len(files)} ChannelFlow assets from {REPO}@{GIT_REF} into {output_dir}")

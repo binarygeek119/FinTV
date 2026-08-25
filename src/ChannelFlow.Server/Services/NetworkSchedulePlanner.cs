@@ -46,14 +46,25 @@ public static class NetworkSchedulePlanner
 
         foreach (var block in blocks)
         {
+            var days = ParseDays(block.Days);
+            var start = Math.Clamp(block.StartSlot, 0, 47);
+            if (IsRerunBlock(block))
+            {
+                var rerunLength = Math.Clamp(block.SpanSlots ?? block.EpisodeBlock ?? 1, 1, 48 - start);
+                foreach (var day in days)
+                {
+                    PlaceRerun(weekly[day], start, rerunLength);
+                }
+
+                continue;
+            }
+
             var entry = ResolveEntry(block, catalogById, catalogByN);
             if (entry is null)
             {
                 continue;
             }
 
-            var days = ParseDays(block.Days);
-            var start = Math.Clamp(block.StartSlot, 0, 47);
             var isMovie = string.Equals(block.Kind, "movie", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(entry.Type, "Movie", StringComparison.OrdinalIgnoreCase);
             var length = isMovie
@@ -68,7 +79,7 @@ public static class NetworkSchedulePlanner
 
         foreach (var day in weekly.Keys.ToList())
         {
-            FillGaps(weekly[day], catalog, catalogMode, contentType, leaveOvernightEmpty: contentType == ChannelContentType.TvShow);
+            FillRemainingGaps(weekly[day], catalog, catalogMode, contentType);
         }
 
         return weekly;
@@ -134,29 +145,120 @@ public static class NetworkSchedulePlanner
     public static bool IsOvernightRerunSlot(int slotIndex)
         => slotIndex >= OvernightRerunStartSlot && slotIndex <= OvernightRerunEndSlot;
 
-    /// <summary>
-    /// TV show channels leave 2:00-6:00am empty so playout can copy the previous day's shows.
-    /// </summary>
-    public static void ClearOvernightSlots(Dictionary<DayOfWeek, List<LineupSlotDto>> weekly)
+    public static void ApplyTemplateRerunDayparts(
+        Dictionary<DayOfWeek, List<LineupSlotDto>> weekly,
+        AiPlayoutTemplate? template)
     {
-        foreach (var slots in weekly.Values)
+        if (template?.Dayparts is not { Count: > 0 } dayparts)
         {
-            foreach (var slot in slots.ToList())
-            {
-                if (IsOvernightRerunSlot(slot.SlotIndex))
-                {
-                    slot.Candidates = [];
-                    slot.SpanSlots = 1;
-                    continue;
-                }
+            return;
+        }
 
-                var end = slot.SlotIndex + Math.Max(1, slot.SpanSlots);
-                if (slot.SlotIndex < OvernightRerunStartSlot && end > OvernightRerunStartSlot)
+        foreach (var daypart in dayparts.Where(IsRerunDaypart))
+        {
+            foreach (var slots in weekly.Values)
+            {
+                for (var i = 0; i < 48; i++)
                 {
-                    slot.SpanSlots = Math.Max(1, OvernightRerunStartSlot - slot.SlotIndex);
+                    if (daypart.ContainsSlot(i))
+                    {
+                        PlaceRerun(slots, i, 1);
+                    }
                 }
             }
         }
+    }
+
+    private static bool IsRerunDaypart(AiPlayoutDaypart daypart)
+        => daypart.Name.Contains("rerun", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsRerunBlock(AiGeneratedBlock block)
+        => string.Equals(block.Kind, "rerun", StringComparison.OrdinalIgnoreCase);
+
+    public static void FillRemainingGaps(
+        List<LineupSlotDto> slots,
+        IReadOnlyList<AiCatalogEntry> catalog,
+        ChannelCatalogMode catalogMode,
+        ChannelContentType contentType)
+    {
+        var occupied = new bool[48];
+        foreach (var slot in slots.Where(s => s.IsRerunSlot || s.Candidates.Count > 0))
+        {
+            for (var i = slot.SlotIndex; i < slot.SlotIndex + slot.SpanSlots && i < 48; i++)
+            {
+                occupied[i] = true;
+            }
+        }
+
+        var seriesFirst = catalogMode is ChannelCatalogMode.TvOnly or ChannelCatalogMode.Mixed
+            && contentType == ChannelContentType.TvShow;
+        var fillQueue = catalog
+            .OrderBy(e => seriesFirst && e.Type is "Movie" or "Clip" ? 1 : 0)
+            .ThenBy(e => e.Year ?? int.MaxValue)
+            .ThenBy(e => e.Title, StringComparer.OrdinalIgnoreCase)
+            .Select(e => e.Id)
+            .ToList();
+        if (fillQueue.Count == 0)
+        {
+            return;
+        }
+
+        var q = 0;
+        for (var i = 0; i < 48; i++)
+        {
+            if (occupied[i])
+            {
+                continue;
+            }
+
+            if (slots.Any(s => s.SlotIndex == i && (s.IsRerunSlot || s.Candidates.Count > 0)))
+            {
+                continue;
+            }
+
+            Upsert(slots, i, 1, fillQueue[q % fillQueue.Count]);
+            q++;
+        }
+    }
+
+    public static void FillEmptySlotsWithChannelFilter(List<LineupSlotDto> slots, string? filterJson)
+    {
+        var occupied = new bool[48];
+        foreach (var slot in slots.Where(s => s.IsRerunSlot || s.Candidates.Count > 0))
+        {
+            for (var i = slot.SlotIndex; i < slot.SlotIndex + slot.SpanSlots && i < 48; i++)
+            {
+                occupied[i] = true;
+            }
+        }
+
+        var fallback = string.IsNullOrWhiteSpace(filterJson) ? "{}" : filterJson;
+        for (var i = 0; i < 48; i++)
+        {
+            if (occupied[i])
+            {
+                continue;
+            }
+
+            slots.RemoveAll(s => s.SlotIndex == i);
+            slots.Add(new LineupSlotDto
+            {
+                SlotIndex = i,
+                SpanSlots = 1,
+                Candidates =
+                [
+                    new SlotCandidateDto
+                    {
+                        Kind = SlotCandidateKind.FilterQuery,
+                        FilterJson = fallback,
+                        Weight = 1,
+                        SortOrder = 0
+                    }
+                ]
+            });
+        }
+
+        slots.Sort((a, b) => a.SlotIndex.CompareTo(b.SlotIndex));
     }
 
     private static void TryPlaceMovie(
@@ -183,6 +285,24 @@ public static class NetworkSchedulePlanner
 
     private static int CountMovies(List<LineupSlotDto> slots)
         => slots.Count(s => s.SpanSlots >= 3 && s.Candidates.Count > 0);
+
+    private static void PlaceRerun(List<LineupSlotDto> slots, int start, int length)
+    {
+        for (var i = 0; i < length && start + i < 48; i++)
+        {
+            var index = start + i;
+            slots.RemoveAll(s => s.SlotIndex == index);
+            slots.Add(new LineupSlotDto
+            {
+                SlotIndex = index,
+                SpanSlots = 1,
+                IsRerunSlot = true,
+                Candidates = []
+            });
+        }
+
+        slots.Sort((a, b) => a.SlotIndex.CompareTo(b.SlotIndex));
+    }
 
     private static void PlaceSeriesOrMovie(List<LineupSlotDto> slots, Guid itemId, int start, int length, bool isMovie)
     {
@@ -229,53 +349,6 @@ public static class NetworkSchedulePlanner
             ]
         });
         slots.Sort((a, b) => a.SlotIndex.CompareTo(b.SlotIndex));
-    }
-
-    private static void FillGaps(
-        List<LineupSlotDto> slots,
-        IReadOnlyList<AiCatalogEntry> catalog,
-        ChannelCatalogMode catalogMode,
-        ChannelContentType contentType,
-        bool leaveOvernightEmpty)
-    {
-        var occupied = new bool[48];
-        foreach (var slot in slots.Where(s => s.Candidates.Count > 0))
-        {
-            for (var i = slot.SlotIndex; i < slot.SlotIndex + slot.SpanSlots && i < 48; i++)
-            {
-                occupied[i] = true;
-            }
-        }
-
-        var seriesFirst = catalogMode is ChannelCatalogMode.TvOnly or ChannelCatalogMode.Mixed
-            && contentType == ChannelContentType.TvShow;
-        var fillQueue = catalog
-            .OrderBy(e => seriesFirst && e.Type is "Movie" or "Clip" ? 1 : 0)
-            .ThenBy(e => e.Year ?? int.MaxValue)
-            .ThenBy(e => e.Title, StringComparer.OrdinalIgnoreCase)
-            .Select(e => e.Id)
-            .ToList();
-        if (fillQueue.Count == 0)
-        {
-            return;
-        }
-
-        var q = 0;
-        for (var i = 0; i < 48; i++)
-        {
-            if (occupied[i] || (leaveOvernightEmpty && IsOvernightRerunSlot(i)))
-            {
-                continue;
-            }
-
-            if (slots.Any(s => s.SlotIndex == i && s.Candidates.Count > 0))
-            {
-                continue;
-            }
-
-            Upsert(slots, i, 1, fillQueue[q % fillQueue.Count]);
-            q++;
-        }
     }
 
     private static AiCatalogEntry? ResolveEntry(
@@ -354,6 +427,7 @@ public static class NetworkSchedulePlanner
         {
             SlotIndex = s.SlotIndex,
             SpanSlots = s.SpanSlots,
+            IsRerunSlot = s.IsRerunSlot,
             Candidates = (s.Candidates ?? []).Select(c => new SlotCandidateDto
             {
                 Kind = c.Kind,

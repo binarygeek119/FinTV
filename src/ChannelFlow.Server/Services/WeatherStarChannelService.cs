@@ -10,6 +10,10 @@ public class WeatherStarChannelService
 {
     public const string DefaultWeatherStarBaseUrl = "http://127.0.0.1:8080";
 
+    public const string WeatherAlertAttentionFileName = "weather_alert.ogg";
+
+    public const string WeatherAlertEndFileName = "weather_alert_single.mp3";
+
     public const string DefaultWeatherLocationQuery = "";
 
     public const string DefaultWeatherStarPermalinkQuery =
@@ -198,13 +202,13 @@ public class WeatherStarChannelService
             return;
         }
 
-        await PlayWeatherAlertToneAsync(channel, output, cancellationToken);
-
         var (width, height) = GetCutInResolution(channel);
         var skin = ResolveVariant(channel);
         var ffmpegPath = _mediaEncoder.EncoderPath;
         var backgroundMusicPath = ResolveWeatherMusicPath();
-        var durationSeconds = Math.Clamp(duration.TotalSeconds, 5, 120);
+        var middleSeconds = Math.Clamp(duration.TotalSeconds, 5, 120);
+        var tones = await CreateToneSandwichAsync(middleSeconds, cancellationToken);
+        var durationSeconds = tones.TotalSeconds;
 
         try
         {
@@ -213,7 +217,13 @@ public class WeatherStarChannelService
             linkedCts.CancelAfter(TimeSpan.FromSeconds(durationSeconds + 2));
             var ffmpegError = new System.Text.StringBuilder();
             var ffmpegTask = CliWrap.Cli.Wrap(ffmpegPath)
-                .WithArguments(_ffmpegBuilder.BuildWeatherCommand(width, height, CaptureFps, backgroundMusicPath, durationSeconds))
+                .WithArguments(_ffmpegBuilder.BuildWeatherCommand(
+                    width,
+                    height,
+                    CaptureFps,
+                    backgroundMusicPath,
+                    durationSeconds,
+                    tones.HasTones ? tones : null))
                 .WithStandardInputPipe(CliWrap.PipeSource.FromStream(frameStream))
                 .WithStandardOutputPipe(CliWrap.PipeTarget.ToStream(output, autoFlush: true))
                 .WithStandardErrorPipe(CliWrap.PipeTarget.ToStringBuilder(ffmpegError))
@@ -304,41 +314,86 @@ public class WeatherStarChannelService
         return path;
     }
 
-    private static string? PlayableMusicPath(string? path)
-        => !string.IsNullOrWhiteSpace(path) && File.Exists(path) ? path : null;
-
-    private async Task PlayWeatherAlertToneAsync(
-        Domain.Channel channel,
-        Stream output,
+    public async Task<WeatherAlertToneSandwich> CreateToneSandwichAsync(
+        double middleSeconds,
         CancellationToken cancellationToken)
     {
-        var tonePath = ResolveWeatherAlertTonePath();
-        if (string.IsNullOrWhiteSpace(tonePath))
+        var middle = Math.Max(1, middleSeconds);
+        var attentionPath = ResolveWeatherAlertAudioPath(WeatherAlertAttentionFileName);
+        var endPath = ResolveWeatherAlertAudioPath(WeatherAlertEndFileName);
+        var attentionSeconds = attentionPath is null
+            ? 0
+            : await ProbeAudioSecondsAsync(attentionPath, cancellationToken);
+        var endSeconds = endPath is null
+            ? 0
+            : await ProbeAudioSecondsAsync(endPath, cancellationToken);
+        if (attentionSeconds > 0.2)
         {
-            _logger.LogWarning("Weather alert tone weather_alert.ogg was not found; showing the alerts screen without it");
-            return;
+            _logger.LogInformation("Mixing weather alert attention tone {File} over video", Path.GetFileName(attentionPath));
         }
 
+        if (endSeconds > 0.2)
+        {
+            _logger.LogInformation("Mixing weather alert end chime {File} over video", Path.GetFileName(endPath));
+        }
+
+        return new WeatherAlertToneSandwich
+        {
+            AttentionPath = attentionPath,
+            AttentionSeconds = attentionSeconds,
+            EndPath = endPath,
+            EndSeconds = endSeconds,
+            MiddleSeconds = middle
+        };
+    }
+
+    private async Task<double> ProbeAudioSecondsAsync(string path, CancellationToken cancellationToken)
+    {
         try
         {
-            var args = _ffmpegBuilder.BuildWeatherAlertToneCommand(channel, tonePath);
-            _logger.LogInformation("Playing weather alert tone {File} before the alerts screen", Path.GetFileName(tonePath));
-            await CliWrap.Cli.Wrap(_mediaEncoder.EncoderPath)
-                .WithArguments(args)
-                .WithStandardOutputPipe(CliWrap.PipeTarget.ToStream(output, autoFlush: true))
+            var stdout = new System.Text.StringBuilder();
+            var encoderDir = Path.GetDirectoryName(_mediaEncoder.EncoderPath);
+            var probe = Path.Combine(
+                string.IsNullOrWhiteSpace(encoderDir) ? string.Empty : encoderDir,
+                OperatingSystem.IsWindows() ? "ffprobe.exe" : "ffprobe");
+            if (!File.Exists(probe))
+            {
+                probe = "ffprobe";
+            }
+
+            await CliWrap.Cli.Wrap(probe)
+                .WithArguments([
+                    "-v", "error",
+                    "-show_entries", "format=duration",
+                    "-of", "default=noprint_wrappers=1:nokey=1",
+                    path
+                ])
+                .WithStandardOutputPipe(CliWrap.PipeTarget.ToStringBuilder(stdout))
                 .WithValidation(CliWrap.CommandResultValidation.None)
                 .ExecuteAsync(cancellationToken);
+
+            return double.TryParse(
+                stdout.ToString().Trim(),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var seconds)
+                ? Math.Clamp(seconds, 0, 45)
+                : 0;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "Weather alert tone failed; showing the alerts screen");
+            _logger.LogDebug(ex, "Could not probe weather alert audio {File}", path);
+            return 0;
         }
     }
 
-    internal static string? ResolveWeatherAlertTonePath()
+    private static string? PlayableMusicPath(string? path)
+        => !string.IsNullOrWhiteSpace(path) && File.Exists(path) ? path : null;
+
+    internal static string? ResolveWeatherAlertAudioPath(string fileName)
     {
         var runtime = FinTvRuntime.Current;
-        if (runtime is null)
+        if (runtime is null || string.IsNullOrWhiteSpace(fileName))
         {
             return null;
         }
@@ -356,7 +411,7 @@ public class WeatherStarChannelService
                 continue;
             }
 
-            var path = Path.Combine(folder, "weather_alert.ogg");
+            var path = Path.Combine(folder, fileName);
             if (File.Exists(path))
             {
                 return path;

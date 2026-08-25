@@ -19,9 +19,34 @@ public static class PlayoutScheduleHelper
     }
 
     public static DateTime GetHorizonEndUtc(DateTime? fromUtc = null)
+        => GetScheduleDayStartUtc(fromUtc ?? DateTime.UtcNow, GetPlayoutDaysToBuild());
+
+    /// <summary>
+    /// Midnight of the schedule-time-zone calendar day that contains <paramref name="utc"/>,
+    /// plus <paramref name="dayOffset"/> local calendar days.
+    /// Using UTC <see cref="DateTime.Date"/> is wrong after evening in US time zones:
+    /// it jumps to the next UTC day and rebuilds from 7–8 PM local.
+    /// </summary>
+    public static DateTime GetScheduleDayStartUtc(DateTime utc, int dayOffset = 0, TimeZoneInfo? timeZone = null)
     {
-        var start = (fromUtc ?? DateTime.UtcNow).Date;
-        return start.AddDays(GetPlayoutDaysToBuild());
+        timeZone ??= ScheduleTimeZoneHelper.ResolveScheduleTimeZone();
+        if (utc.Kind != DateTimeKind.Utc)
+        {
+            utc = DateTime.SpecifyKind(utc, DateTimeKind.Utc);
+        }
+
+        var local = TimeZoneInfo.ConvertTimeFromUtc(utc, timeZone);
+        var startLocal = DateTime.SpecifyKind(
+            new DateTime(local.Year, local.Month, local.Day, 0, 0, 0).AddDays(dayOffset),
+            DateTimeKind.Unspecified);
+        try
+        {
+            return TimeZoneInfo.ConvertTimeToUtc(startLocal, timeZone);
+        }
+        catch (ArgumentException)
+        {
+            return TimeZoneInfo.ConvertTimeToUtc(startLocal.AddHours(1), timeZone);
+        }
     }
 
     /// <summary>

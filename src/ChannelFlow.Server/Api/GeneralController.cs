@@ -99,6 +99,7 @@ public class GeneralController : ControllerBase
                 }
 
                 plugin.Configuration.ScheduleTimeZone = resolvedId;
+                ScheduleTimeZoneHelper.ApplyAsProcessTimeZone();
             }
 
             if (request.PlayoutDaysToBuild.HasValue)

@@ -27,6 +27,7 @@ internal sealed class ChannelLiveSession
     private long _replayBytes;
     private long _pacedBytes;
     private Stopwatch? _paceClock;
+    private int _runAheadOverrideSeconds = -1;
 
     public ChannelLiveSession(
         Guid channelId,
@@ -93,8 +94,55 @@ internal sealed class ChannelLiveSession
     {
         lock (_gate)
         {
-            _replay.Clear();
-            _replayBytes = 0;
+            ClearBufferedVideoLocked(resetPace: true);
+        }
+    }
+
+    /// <summary>
+    /// Drops the run-ahead ring and unread tuner data, then paces at
+    /// <paramref name="runAheadSeconds"/> so an EBS alert is not stuck behind the full buffer.
+    /// </summary>
+    public void FlushForWeatherAlert(int runAheadSeconds)
+    {
+        lock (_gate)
+        {
+            ClearBufferedVideoLocked(resetPace: true);
+            foreach (var viewer in _viewers)
+            {
+                viewer.DropPending();
+            }
+
+            _runAheadOverrideSeconds = Math.Max(0, runAheadSeconds);
+        }
+
+        _logger.LogInformation(
+            "Flushed run-ahead buffer on channel {ChannelId} to {RunAheadSeconds}s for a weather alert",
+            _channelId,
+            Math.Max(0, runAheadSeconds));
+    }
+
+    /// <summary>
+    /// Lets the encoder fill back to the configured run-ahead after an EBS alert.
+    /// </summary>
+    public void RestoreRunAhead()
+    {
+        lock (_gate)
+        {
+            _runAheadOverrideSeconds = -1;
+        }
+
+        _logger.LogInformation(
+            "Restoring {RunAheadSeconds}s run-ahead buffer on channel {ChannelId} after a weather alert",
+            StreamService.GetRunAheadSeconds(),
+            _channelId);
+    }
+
+    private void ClearBufferedVideoLocked(bool resetPace)
+    {
+        _replay.Clear();
+        _replayBytes = 0;
+        if (resetPace)
+        {
             _pacedBytes = 0;
             _paceClock = null;
         }
@@ -289,7 +337,6 @@ internal sealed class ChannelLiveSession
         await PaceEncoderAsync(data.Length, cancellationToken);
 
         var copy = data.ToArray();
-        Viewer[] snapshot;
         lock (_gate)
         {
             if (_stopped)
@@ -300,32 +347,40 @@ internal sealed class ChannelLiveSession
             _replay.Enqueue(copy);
             _replayBytes += copy.Length;
             TrimReplayLocked();
-            snapshot = _viewers.Count == 0 ? [] : _viewers.ToArray();
-        }
-
-        foreach (var viewer in snapshot)
-        {
-            viewer.TryWrite(copy);
+            foreach (var viewer in _viewers)
+            {
+                viewer.TryWrite(copy);
+            }
         }
     }
 
     private async Task PaceEncoderAsync(int byteCount, CancellationToken cancellationToken)
     {
-        var runAhead = StreamService.GetRunAheadSeconds();
-        var written = Interlocked.Add(ref _pacedBytes, byteCount);
-        _paceClock ??= Stopwatch.StartNew();
-        var mediaSeconds = written / (double)StreamService.RunAheadBytesPerSecond;
-        var allowed = _paceClock.Elapsed.TotalSeconds + runAhead;
-        var extra = mediaSeconds - allowed;
+        double extra;
+        lock (_gate)
+        {
+            var runAhead = EffectiveRunAheadSecondsLocked();
+            _pacedBytes += byteCount;
+            _paceClock ??= Stopwatch.StartNew();
+            var mediaSeconds = _pacedBytes / (double)StreamService.RunAheadBytesPerSecond;
+            var allowed = _paceClock.Elapsed.TotalSeconds + runAhead;
+            extra = mediaSeconds - allowed;
+        }
+
         if (extra > 0.02)
         {
             await Task.Delay(TimeSpan.FromSeconds(extra), cancellationToken);
         }
     }
 
+    private int EffectiveRunAheadSecondsLocked()
+        => _runAheadOverrideSeconds >= 0
+            ? _runAheadOverrideSeconds
+            : StreamService.GetRunAheadSeconds();
+
     private void TrimReplayLocked()
     {
-        var maxBytes = StreamService.GetRunAheadRingBytes();
+        var maxBytes = Math.Max(1, EffectiveRunAheadSecondsLocked()) * StreamService.RunAheadBytesPerSecond;
         while (_replayBytes > maxBytes && _replay.Count > 1)
         {
             var old = _replay.Dequeue();
@@ -337,7 +392,7 @@ internal sealed class ChannelLiveSession
     {
         private readonly Channel<byte[]> _queue = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(8192)
         {
-            SingleReader = true,
+            SingleReader = false,
             SingleWriter = false,
             FullMode = BoundedChannelFullMode.DropOldest
         });
@@ -345,6 +400,13 @@ internal sealed class ChannelLiveSession
         public void TryWrite(byte[] chunk)
         {
             _queue.Writer.TryWrite(chunk);
+        }
+
+        public void DropPending()
+        {
+            while (_queue.Reader.TryRead(out _))
+            {
+            }
         }
 
         public void Complete()

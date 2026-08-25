@@ -13,6 +13,9 @@ namespace FinTv.Services;
 
 public class EpgService
 {
+    private const string MusicVideoHourGuideGroup = "music-video-hour";
+    private static readonly string[] MusicVideoHourCategories = ["Music Video"];
+
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
     private readonly FinTvDbContext _db;
@@ -65,14 +68,14 @@ public class EpgService
             .Where(p =>
                 p.Finish > fromUtc
                 && p.Start < toUtc
-                && (p.GuideGroup == null || p.GuideGroup != "commercial"))
+                && (p.GuideGroup == null || (p.GuideGroup != "commercial" && p.GuideGroup != LogoBumperService.GuideGroup)))
             .AsNoTracking()
             .ToListAsync(cancellationToken);
+        var channelsById = channels.ToDictionary(c => c.Id);
         items = MergeSplitPrograms(items);
-        PadProgramsToTimeSlots(items, tz);
+        items = CollapseMusicVideoHours(items, channelsById, tz);
 
         var metadataByItemId = _guideMetadata.ResolveBatch(items.Select(i => i.JellyfinItemId));
-        var channelsById = channels.ToDictionary(c => c.Id);
         var weatherItems = items
             .Where(i => i.IsVirtual && i.VirtualSource == VirtualContentSource.WeatherStar)
             .ToList();
@@ -85,6 +88,24 @@ public class EpgService
         var programs = new List<TvGuideProgram>(items.Count);
         foreach (var item in items)
         {
+            var start = AsUtc(item.Start);
+            var finish = AsUtc(item.Finish);
+            if (IsMusicVideoHourBlock(item) && channelsById.TryGetValue(item.ChannelId, out var musicChannel))
+            {
+                programs.Add(new TvGuideProgram
+                {
+                    Id = item.Id,
+                    ChannelId = item.ChannelId,
+                    Start = start,
+                    Finish = finish,
+                    Title = musicChannel.Name,
+                    Categories = MusicVideoHourCategories,
+                    PosterUrl = GetLogoUrl(musicChannel, baseUrl),
+                    IsNow = start <= nowUtc && finish > nowUtc
+                });
+                continue;
+            }
+
             GuideProgramMetadata? metadata = null;
             if (weatherMetadataByPlayoutId.TryGetValue(item.Id, out var weatherMetadata))
             {
@@ -95,11 +116,9 @@ public class EpgService
                 metadataByItemId.TryGetValue(item.JellyfinItemId.Value, out metadata);
             }
 
-            var start = AsUtc(item.Start);
-            var finish = AsUtc(item.Finish);
             var posterUrl = !string.IsNullOrWhiteSpace(metadata?.IconUrl)
                 ? metadata.IconUrl
-                : GuideMetadataService.GetPosterUrl(baseUrl, metadata?.PosterItemId);
+                : _guideMetadata.GetPosterUrlIfAvailable(baseUrl, metadata?.PosterItemId);
 
             programs.Add(new TvGuideProgram
             {
@@ -174,34 +193,92 @@ public class EpgService
     }
 
     /// <summary>
-    /// Extends programme stops to the next 30-minute clock slot so commercial padding
-    /// does not leave holes in the guide. Never overlaps the following programme.
+    /// Music-video channels list as hour-long blocks of the channel name.
+    /// Clip titles, artists, and posters stay off the guide; playout is unchanged.
     /// </summary>
-    private static void PadProgramsToTimeSlots(List<PlayoutItem> items, TimeZoneInfo tz)
+    private static List<PlayoutItem> CollapseMusicVideoHours(
+        List<PlayoutItem> items,
+        IReadOnlyDictionary<Guid, Channel> channels,
+        TimeZoneInfo tz)
     {
-        foreach (var channelItems in items.GroupBy(item => item.ChannelId))
+        var musicVideoIds = channels.Values
+            .Where(channel => channel.ContentType == ChannelContentType.MusicVideo)
+            .Select(channel => channel.Id)
+            .ToHashSet();
+        if (musicVideoIds.Count == 0)
         {
-            var ordered = channelItems.OrderBy(item => item.Start).ThenBy(item => item.Finish).ToList();
-            for (var index = 0; index < ordered.Count; index++)
-            {
-                var item = ordered[index];
-                var finish = AsUtc(item.Finish);
-                var padded = ScheduleTimeZoneHelper.CeilToHalfHourUtc(finish, tz);
-                if (index + 1 < ordered.Count)
-                {
-                    var nextStart = AsUtc(ordered[index + 1].Start);
-                    if (padded > nextStart)
-                    {
-                        padded = nextStart;
-                    }
-                }
+            return items;
+        }
 
-                if (padded > finish)
-                {
-                    item.Finish = padded;
-                }
+        var result = new List<PlayoutItem>(items.Count);
+        foreach (var item in items)
+        {
+            if (!musicVideoIds.Contains(item.ChannelId))
+            {
+                result.Add(item);
             }
         }
+
+        foreach (var channelId in musicVideoIds)
+        {
+            if (!channels.TryGetValue(channelId, out var channel))
+            {
+                continue;
+            }
+
+            var channelItems = items.Where(item => item.ChannelId == channelId).ToList();
+            if (channelItems.Count == 0)
+            {
+                continue;
+            }
+
+            var minStart = channelItems.Min(item => AsUtc(item.Start));
+            var maxFinish = channelItems.Max(item => AsUtc(item.Finish));
+            var hour = ScheduleTimeZoneHelper.FloorToHourUtc(minStart, tz);
+            var guard = 0;
+            while (hour < maxFinish && guard++ < 24 * (PlayoutScheduleHelper.MaxPlayoutDays + 2))
+            {
+                var hourEnd = ScheduleTimeZoneHelper.AddLocalHoursUtc(hour, 1, tz);
+                if (hourEnd <= hour)
+                {
+                    break;
+                }
+
+                result.Add(new PlayoutItem
+                {
+                    ChannelId = channelId,
+                    Start = hour,
+                    Finish = hourEnd,
+                    Title = channel.Name,
+                    GuideGroup = MusicVideoHourGuideGroup
+                });
+                hour = hourEnd;
+            }
+        }
+
+        return result;
+    }
+
+    private static bool IsMusicVideoHourBlock(PlayoutItem item)
+        => string.Equals(item.GuideGroup, MusicVideoHourGuideGroup, StringComparison.Ordinal);
+
+    private XElement BuildMusicVideoHourProgramme(PlayoutItem item, Channel channel, string baseUrl)
+    {
+        var programme = new XElement(
+            "programme",
+            new XAttribute("start", FormatXmlTvDate(item.Start)),
+            new XAttribute("stop", FormatXmlTvDate(item.Finish)),
+            new XAttribute("channel", item.ChannelId.ToString("N")),
+            CreateLangElement("title", channel.Name, null),
+            CreateLangElement("category", "Music Video", null));
+
+        var logoUrl = GetLogoUrl(channel, baseUrl);
+        if (!string.IsNullOrWhiteSpace(logoUrl))
+        {
+            programme.Add(new XElement("icon", new XAttribute("src", logoUrl)));
+        }
+
+        return programme;
     }
 
     private async Task<XDocument> BuildXmlTvDocumentAsync(string baseUrl, CancellationToken cancellationToken)
@@ -230,14 +307,14 @@ public class EpgService
             .Where(p =>
                 p.Finish > start
                 && p.Start < end
-                && (p.GuideGroup == null || p.GuideGroup != "commercial"))
+                && (p.GuideGroup == null || (p.GuideGroup != "commercial" && p.GuideGroup != LogoBumperService.GuideGroup)))
             .AsNoTracking()
             .ToListAsync(cancellationToken);
+        var channelsById = channels.ToDictionary(c => c.Id);
         items = MergeSplitPrograms(items);
-        PadProgramsToTimeSlots(items, ScheduleTimeZoneHelper.ResolveScheduleTimeZone());
+        items = CollapseMusicVideoHours(items, channelsById, ScheduleTimeZoneHelper.ResolveScheduleTimeZone());
 
         var metadataByItemId = _guideMetadata.ResolveBatch(items.Select(i => i.JellyfinItemId));
-        var channelsById = channels.ToDictionary(c => c.Id);
         var weatherItems = items
             .Where(i => i.IsVirtual && i.VirtualSource == VirtualContentSource.WeatherStar)
             .ToList();
@@ -249,6 +326,12 @@ public class EpgService
 
         foreach (var item in items)
         {
+            if (IsMusicVideoHourBlock(item) && channelsById.TryGetValue(item.ChannelId, out var musicChannel))
+            {
+                root.Add(BuildMusicVideoHourProgramme(item, musicChannel, baseUrl));
+                continue;
+            }
+
             GuideProgramMetadata? metadata = null;
             if (weatherMetadataByPlayoutId.TryGetValue(item.Id, out var weatherMetadata))
             {
@@ -265,7 +348,7 @@ public class EpgService
         return new XDocument(new XDeclaration("1.0", "UTF-8", null), root);
     }
 
-    private static XElement BuildProgrammeElement(PlayoutItem item, GuideProgramMetadata? metadata, string baseUrl)
+    private XElement BuildProgrammeElement(PlayoutItem item, GuideProgramMetadata? metadata, string baseUrl)
     {
         var programme = new XElement(
             "programme",
@@ -328,7 +411,7 @@ public class EpgService
 
         var posterUrl = !string.IsNullOrWhiteSpace(metadata?.IconUrl)
             ? metadata.IconUrl
-            : GuideMetadataService.GetPosterUrl(baseUrl, metadata?.PosterItemId);
+            : _guideMetadata.GetPosterUrlIfAvailable(baseUrl, metadata?.PosterItemId);
         if (!string.IsNullOrWhiteSpace(posterUrl))
         {
             programme.Add(new XElement("icon", new XAttribute("src", posterUrl)));

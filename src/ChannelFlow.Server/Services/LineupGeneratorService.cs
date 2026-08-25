@@ -15,6 +15,7 @@ public class LineupGeneratorService
     private readonly HolidayChannelService _holidays;
     private readonly GuideUpdateTracker _guideUpdates;
     private readonly StreamService _stream;
+    private readonly LogoBumperService _bumpers;
 
     public LineupGeneratorService(
         FinTvDbContext db,
@@ -24,7 +25,8 @@ public class LineupGeneratorService
         ChannelService channelService,
         HolidayChannelService holidays,
         GuideUpdateTracker guideUpdates,
-        StreamService stream)
+        StreamService stream,
+        LogoBumperService bumpers)
     {
         _db = db;
         _lineupService = lineupService;
@@ -34,6 +36,7 @@ public class LineupGeneratorService
         _holidays = holidays;
         _guideUpdates = guideUpdates;
         _stream = stream;
+        _bumpers = bumpers;
     }
 
     public async Task BuildPlayoutAsync(
@@ -65,6 +68,7 @@ public class LineupGeneratorService
         }
 
         var builtPrograms = new List<PlayoutItem>();
+        var toonTakeoverBumperDates = new HashSet<DateOnly>();
 
         var snapshot = await _lineupService.LoadResolutionSnapshotAsync(channel.Id, cancellationToken);
         var slotsByDate = new Dictionary<DateOnly, IReadOnlyList<LineupSlot>>();
@@ -88,45 +92,42 @@ public class LineupGeneratorService
             }
 
             var slot = slots.FirstOrDefault(s => s.SlotIndex == slotIndex);
+            if (IsRerunTimeslot(slot, channel, slotIndex))
+            {
+                var rerunStartLocal = local.Date.AddMinutes(slotIndex * 30);
+                var rerunSpan = Math.Clamp(slot?.SpanSlots ?? 1, 1, 8);
+                var rerunEndLocal = rerunStartLocal.AddMinutes(30 * rerunSpan);
+                var rerunStart = TimeZoneInfo.ConvertTimeToUtc(rerunStartLocal, tz);
+                var rerunEnd = TimeZoneInfo.ConvertTimeToUtc(rerunEndLocal, tz);
+                if (rerunStart < cursor)
+                {
+                    rerunStart = cursor;
+                }
+
+                var overnightEnd = await TryAddOvernightRerunAsync(
+                    channel,
+                    date,
+                    tz,
+                    rerunStart,
+                    rerunEnd,
+                    builtPrograms,
+                    cancellationToken).ConfigureAwait(false);
+                if (overnightEnd is DateTime paddedOvernightEnd)
+                {
+                    cursor = paddedOvernightEnd;
+                    continue;
+                }
+            }
+
             if (slot is null || slot.Candidates.Count == 0)
             {
                 if (PastTenseNewsCatalog.IsPastTenseNewsChannel(channel))
                 {
                     slot = CreatePastTenseNewsSlot(channel, slotIndex);
                 }
-                else if (channel.ContentType == ChannelContentType.TvShow
-                    && NetworkSchedulePlanner.IsOvernightRerunSlot(slotIndex))
-                {
-                    var rerunStartLocal = local.Date.AddMinutes(slotIndex * 30);
-                    var rerunEndLocal = rerunStartLocal.AddMinutes(30);
-                    var rerunStart = TimeZoneInfo.ConvertTimeToUtc(rerunStartLocal, tz);
-                    var rerunEnd = TimeZoneInfo.ConvertTimeToUtc(rerunEndLocal, tz);
-                    if (rerunStart < cursor)
-                    {
-                        rerunStart = cursor;
-                    }
-
-                    var overnightEnd = await TryAddOvernightRerunAsync(
-                        channel,
-                        date,
-                        tz,
-                        rerunStart,
-                        rerunEnd,
-                        builtPrograms,
-                        cancellationToken).ConfigureAwait(false);
-                    if (overnightEnd is DateTime paddedOvernightEnd)
-                    {
-                        cursor = paddedOvernightEnd;
-                        continue;
-                    }
-
-                    cursor = cursor.AddMinutes(30);
-                    continue;
-                }
                 else
                 {
-                    cursor = cursor.AddMinutes(30);
-                    continue;
+                    slot = CreateFilterFallbackSlot(channel, slotIndex);
                 }
             }
 
@@ -182,7 +183,31 @@ public class LineupGeneratorService
                 continue;
             }
 
+            if (_bumpers.ShouldOpenToonTakeover(channel, slotIndex) && toonTakeoverBumperDates.Add(date))
+            {
+                var bumperEnd = await TryAddToonTakeoverBumperAsync(channel, slotStart, cancellationToken);
+                if (bumperEnd is DateTime insertedEnd)
+                {
+                    slotStart = insertedEnd;
+                    if (slotStart >= blockEnd)
+                    {
+                        cursor = slotStart;
+                        continue;
+                    }
+                }
+            }
+
             var picked = await _smartSelection.PickCandidateAsync(channel, slot, date, anchor, cancellationToken);
+            if (picked is null && !slot.Candidates.Any(c => c.Kind == SlotCandidateKind.FilterQuery))
+            {
+                picked = await _smartSelection.PickCandidateAsync(
+                    channel,
+                    CreateFilterFallbackSlot(channel, slotIndex),
+                    date,
+                    anchor,
+                    cancellationToken);
+            }
+
             if (picked is null)
             {
                 cursor = blockEnd;
@@ -347,6 +372,32 @@ public class LineupGeneratorService
         await _db.SaveChangesAsync(cancellationToken);
     }
 
+    private async Task<DateTime?> TryAddToonTakeoverBumperAsync(
+        Channel channel,
+        DateTime start,
+        CancellationToken cancellationToken)
+    {
+        var duration = await _bumpers.TryResolveToonTakeoverDurationAsync(cancellationToken);
+        if (duration is not TimeSpan length || length <= TimeSpan.Zero)
+        {
+            return null;
+        }
+
+        var finish = start.Add(length);
+        _db.PlayoutItems.Add(new PlayoutItem
+        {
+            ChannelId = channel.Id,
+            Start = start,
+            Finish = finish,
+            Title = "Slappy's Toon Takeover",
+            IsVirtual = true,
+            VirtualSource = VirtualContentSource.LogoBumper,
+            FillerKind = FillerKind.PreRoll,
+            GuideGroup = LogoBumperService.GuideGroup
+        });
+        return finish;
+    }
+
     private Task AddHolidayOfflineBlockAsync(
         Channel channel,
         DateTime start,
@@ -367,7 +418,26 @@ public class LineupGeneratorService
         return Task.CompletedTask;
     }
 
+    private static bool IsRerunTimeslot(LineupSlot? slot, Channel channel, int slotIndex)
+    {
+        if (channel.ContentType != ChannelContentType.TvShow)
+        {
+            return false;
+        }
+
+        if (slot?.IsRerunSlot == true)
+        {
+            return true;
+        }
+
+        return (slot is null || slot.Candidates.Count == 0)
+            && NetworkSchedulePlanner.IsOvernightRerunSlot(slotIndex);
+    }
+
     private static LineupSlot CreatePastTenseNewsSlot(Channel channel, int slotIndex)
+        => CreateFilterFallbackSlot(channel, slotIndex);
+
+    private static LineupSlot CreateFilterFallbackSlot(Channel channel, int slotIndex)
         => new()
         {
             SlotIndex = slotIndex,
@@ -489,7 +559,7 @@ public class LineupGeneratorService
     {
         var episodeIds = removed
             .Where(p => p.JellyfinItemId.HasValue
-                && !string.Equals(p.GuideGroup, "commercial", StringComparison.OrdinalIgnoreCase))
+                && !LogoBumperService.IsHiddenFromGuide(p.GuideGroup))
             .Select(p => p.JellyfinItemId!.Value)
             .ToList();
         if (episodeIds.Count == 0 || anchor.SeriesEpisodeIndex.Count == 0)
@@ -618,7 +688,7 @@ public class LineupGeneratorService
     }
 
     private static bool IsProgramRerunSource(PlayoutItem item)
-        => !string.Equals(item.GuideGroup, "commercial", StringComparison.OrdinalIgnoreCase)
+        => !LogoBumperService.IsHiddenFromGuide(item.GuideGroup)
             && !item.IsVirtual
             && item.JellyfinItemId.HasValue
             && item.InPoint == TimeSpan.Zero
