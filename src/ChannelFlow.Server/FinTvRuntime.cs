@@ -74,6 +74,7 @@ public sealed class FinTvRuntime
 
         EnsureApiKey();
         _configuration.Transcode ??= new TranscodeSettings();
+        _configuration.Normalization ??= new NormalizationSettings();
         _configuration.YouTube ??= new YouTubeSettings();
         ScheduleTimeZoneHelper.ApplyAsProcessTimeZone();
     }

@@ -5362,6 +5362,19 @@
                 ['FFmpeg', transcode.ffmpegVersion],
                 ['Environment default', `${transcode.environmentAcceleration || 'none'} / ${transcode.environmentEncoder || 'libx264'}`]
             ]);
+            const normalization = info.normalization || {};
+            renderAboutDl('about-normalization', [
+                ['Target', normalization.summary],
+                ['Resolution', normalization.resolution],
+                ['Frame rate', normalization.frameRate],
+                ['Video', normalization.videoCodec],
+                ['Profile', normalization.videoProfile],
+                ['Video bitrate', normalization.videoBitrate],
+                ['Audio', normalization.audioCodec],
+                ['Channels', normalization.audioChannels],
+                ['Sample rate', normalization.audioSampleRate],
+                ['Audio bitrate', normalization.audioBitrate]
+            ]);
         } catch (err) {
             reportApiError(err, 'Could not load About information.');
             renderAboutDl('about-app', [['Status', err.message || 'Could not load About information.']]);
@@ -5495,6 +5508,86 @@
         toast('Transcode settings reset to container environment.', 'success');
         await loadTranscode();
         renderTranscodeStatus(saved);
+    }
+
+    function syncNormalizationUi() {
+        const mpeg2 = $('norm-video-codec')?.value === 'mpeg2';
+        const profileField = $('norm-profile-field');
+        if (profileField) {
+            profileField.classList.toggle('hidden', mpeg2);
+        }
+    }
+
+    function fillNormalizationForm(settings) {
+        const fields = {
+            'norm-resolution': settings.resolution || 'match',
+            'norm-framerate': settings.frameRate || '30',
+            'norm-video-codec': settings.videoCodec || 'h264',
+            'norm-video-profile': settings.videoProfile || 'main',
+            'norm-video-bitrate': settings.videoBitrate || 'auto',
+            'norm-audio-codec': settings.audioCodec || 'aac',
+            'norm-audio-channels': mapNormAudioChannels(settings.audioChannels),
+            'norm-audio-rate': String(settings.audioSampleRate || '48000'),
+            'norm-audio-bitrate': settings.audioBitrate || '192k'
+        };
+        Object.entries(fields).forEach(([id, value]) => {
+            const el = $(id);
+            if (el) {
+                el.value = value;
+            }
+        });
+        const status = $('normalization-status');
+        if (status) {
+            status.textContent = settings.summary
+                ? `Live streams use ${settings.summary}.`
+                : 'Live streams use the selected target format.';
+        }
+        syncNormalizationUi();
+    }
+
+    function mapNormAudioChannels(value) {
+        const v = String(value || '2.0').toLowerCase();
+        if (v === '5.1' || v === '7.1' || v === '7.2') {
+            return v;
+        }
+        return '2.0';
+    }
+
+    async function loadNormalization() {
+        try {
+            const settings = await api('/normalization/settings');
+            fillNormalizationForm(settings);
+        } catch (err) {
+            reportApiError(err, 'Could not load normalization settings.');
+        }
+    }
+
+    async function saveNormalizationSettings() {
+        const saved = await api('/normalization/settings', {
+            method: 'PUT',
+            body: JSON.stringify({
+                resolution: $('norm-resolution')?.value || 'match',
+                frameRate: $('norm-framerate')?.value || '30',
+                videoCodec: $('norm-video-codec')?.value || 'h264',
+                videoProfile: $('norm-video-profile')?.value || 'main',
+                videoBitrate: $('norm-video-bitrate')?.value || 'auto',
+                audioCodec: $('norm-audio-codec')?.value || 'aac',
+                audioChannels: $('norm-audio-channels')?.value || '2.0',
+                audioSampleRate: $('norm-audio-rate')?.value || '48000',
+                audioBitrate: $('norm-audio-bitrate')?.value || '192k'
+            })
+        });
+        toast('Normalization saved. The next program on each channel uses this format.', 'success');
+        fillNormalizationForm(saved);
+    }
+
+    async function resetNormalizationSettings() {
+        const saved = await api('/normalization/settings', {
+            method: 'PUT',
+            body: JSON.stringify({ resetToDefaults: true })
+        });
+        toast('Normalization restored to 1080p H.264 Main, 30 fps, AAC 2.0 48 kHz.', 'success');
+        fillNormalizationForm(saved);
     }
 
     async function loadGeneral() {
@@ -6613,6 +6706,7 @@
         ai: '/ai',
         weather: '/weather',
         news: '/news',
+        normalization: '/normalization',
         transcode: '/transcode',
         general: '/general',
         tasks: '/tasks',
@@ -6636,6 +6730,7 @@
         ai: 'AI',
         weather: 'Weather',
         news: 'News',
+        normalization: 'Normalization',
         transcode: 'Transcode',
         general: 'General',
         tasks: 'Tasks',
@@ -6659,6 +6754,7 @@
         ai: 'AI lineup generation and tagging',
         weather: 'WeatherStar live channels',
         news: 'FlowWire News',
+        normalization: 'Target video and audio for live MPEG-TS streams',
         transcode: 'Hardware encoding for live MPEG-TS streams',
         general: 'Server-wide ChannelFlow-Server settings',
         tasks: 'Rebuild playouts, clear the guide, and maintenance',
@@ -6788,6 +6884,7 @@
         if (name === 'ai') loadAi();
         if (name === 'weather') loadWeather();
         if (name === 'news') loadNews();
+        if (name === 'normalization') loadNormalization();
         if (name === 'transcode') loadTranscode();
         if (name === 'about') loadAbout();
         if (name === 'presets') loadPresets();
@@ -7013,6 +7110,9 @@
         click('btn-test-transcode', () => testTranscode().catch((e) => toast(e.message, 'error')));
         click('btn-reset-transcode', () => resetTranscodeSettings().catch((e) => toast(e.message, 'error')));
         change('transcode-hwaccel', syncTranscodeUi);
+        click('btn-save-normalization', () => saveNormalizationSettings().catch((e) => toast(e.message, 'error')));
+        click('btn-reset-normalization', () => resetNormalizationSettings().catch((e) => toast(e.message, 'error')));
+        change('norm-video-codec', syncNormalizationUi);
         click('btn-save-news-feeds', () => saveNewsFeeds().catch((e) => toast(e.message, 'error')));
         click('btn-add-news-feed', addNewsFeedRow);
         click('btn-preview-news', () => loadNewsPreview(true).catch((e) => toast(e.message, 'error')));

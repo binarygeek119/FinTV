@@ -66,6 +66,8 @@ public class DatabaseInitializer : IHostedService
         FinTvRuntime.Current = runtime;
         scope.ServiceProvider.GetRequiredService<FinTv.Streaming.FfmpegEncodingService>()
             .ApplyFromSaved(runtime.Configuration.Transcode);
+        scope.ServiceProvider.GetRequiredService<FinTv.Streaming.StreamNormalizationService>()
+            .ApplyFromSaved(runtime.Configuration.Normalization);
 
         try
         {

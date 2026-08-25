@@ -118,7 +118,7 @@ public class WeatherStarChannelService
             var started = DateTime.UtcNow;
             var ffmpegError = new System.Text.StringBuilder();
             var ffmpegTask = CliWrap.Cli.Wrap(ffmpegPath)
-                .WithArguments(_ffmpegBuilder.BuildWeatherCommand(width, height, CaptureFps, backgroundMusicPath))
+                .WithArguments(_ffmpegBuilder.BuildWeatherCommand(width, height, CaptureFps, backgroundMusicPath, aspect: channel.AspectRatio))
                 .WithStandardInputPipe(CliWrap.PipeSource.FromStream(frameStream))
                 .WithStandardOutputPipe(CliWrap.PipeTarget.ToStream(output, autoFlush: true))
                 .WithStandardErrorPipe(CliWrap.PipeTarget.ToStringBuilder(ffmpegError))
@@ -223,7 +223,8 @@ public class WeatherStarChannelService
                     CaptureFps,
                     backgroundMusicPath,
                     durationSeconds,
-                    tones.HasTones ? tones : null))
+                    tones.HasTones ? tones : null,
+                    channel.AspectRatio))
                 .WithStandardInputPipe(CliWrap.PipeSource.FromStream(frameStream))
                 .WithStandardOutputPipe(CliWrap.PipeTarget.ToStream(output, autoFlush: true))
                 .WithStandardErrorPipe(CliWrap.PipeTarget.ToStringBuilder(ffmpegError))

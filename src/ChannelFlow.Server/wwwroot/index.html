@@ -167,6 +167,7 @@
                 <a href="ai" class="tab" data-tab="ai" role="tab">AI</a>
                 <a href="weather" class="tab" data-tab="weather" role="tab">Weather</a>
                 <a href="news" class="tab" data-tab="news" role="tab">News</a>
+                <a href="normalization" class="tab" data-tab="normalization" role="tab">Normalization</a>
                 <a href="transcode" class="tab" data-tab="transcode" role="tab">Transcode</a>
                 <a href="general" class="tab" data-tab="general" role="tab">General</a>
                 <a href="tasks" class="tab" data-tab="tasks" role="tab">Tasks</a>
@@ -952,10 +953,104 @@
                 </div>
             </section>
 
+            <section id="tab-normalization" class="tab-panel hidden" hidden>
+                <div class="card section-card">
+                    <h2>Normalization</h2>
+                    <p class="hint">Every live MPEG-TS stream is transcoded to this target format so tuners see the same video and audio, including 720p H.264 with 44.1 kHz AC3. Hardware encode is still chosen on the Transcode tab. New streams pick this up on the next item.</p>
+                    <div id="normalization-status" class="status-card">Loading normalization…</div>
+                    <label class="field">
+                        <span>Resolution</span>
+                        <select id="norm-resolution" class="emby-select">
+                            <option value="match">Match channel (1080p 16:9 or 4:3)</option>
+                            <option value="480p">480p</option>
+                            <option value="720p">720p</option>
+                            <option value="1080p">1080p</option>
+                        </select>
+                    </label>
+                    <label class="field">
+                        <span>Frame rate</span>
+                        <select id="norm-framerate" class="emby-select">
+                            <option value="23.976">23.976</option>
+                            <option value="24">24</option>
+                            <option value="25">25</option>
+                            <option value="29.97">29.97</option>
+                            <option value="30">30</option>
+                            <option value="50">50</option>
+                            <option value="59.94">59.94</option>
+                            <option value="60">60</option>
+                        </select>
+                    </label>
+                    <label class="field">
+                        <span>Video codec</span>
+                        <select id="norm-video-codec" class="emby-select">
+                            <option value="h264">H.264</option>
+                            <option value="mpeg2">MPEG-2</option>
+                        </select>
+                    </label>
+                    <label class="field" id="norm-profile-field">
+                        <span>H.264 profile</span>
+                        <select id="norm-video-profile" class="emby-select">
+                            <option value="baseline">Baseline</option>
+                            <option value="main">Main</option>
+                            <option value="high">High</option>
+                        </select>
+                    </label>
+                    <label class="field">
+                        <span>Video bitrate</span>
+                        <select id="norm-video-bitrate" class="emby-select">
+                            <option value="auto">Auto (quality)</option>
+                            <option value="2000k">2 Mbps</option>
+                            <option value="4000k">4 Mbps</option>
+                            <option value="6000k">6 Mbps</option>
+                            <option value="8000k">8 Mbps</option>
+                        </select>
+                    </label>
+                    <label class="field">
+                        <span>Audio codec</span>
+                        <select id="norm-audio-codec" class="emby-select">
+                            <option value="aac">AAC</option>
+                            <option value="ac3">Dolby Digital (AC-3)</option>
+                        </select>
+                    </label>
+                    <label class="field">
+                        <span>Audio channels</span>
+                        <select id="norm-audio-channels" class="emby-select">
+                            <option value="2.0">2.0 stereo</option>
+                            <option value="5.1">5.1 surround</option>
+                            <option value="7.1">7.1 surround</option>
+                            <option value="7.2">7.2 surround</option>
+                        </select>
+                    </label>
+                    <p class="hint">2.0 is stereo. 5.1, 7.1, and 7.2 upmix when the file has fewer speakers. Dolby Digital (AC-3) is 5.1 max; 7.1 and 7.2 encode as E-AC-3. Use 384 kbps or higher for surround.</p>
+                    <label class="field">
+                        <span>Sample rate</span>
+                        <select id="norm-audio-rate" class="emby-select">
+                            <option value="48000">48 kHz</option>
+                            <option value="44100">44.1 kHz</option>
+                        </select>
+                    </label>
+                    <label class="field">
+                        <span>Audio bitrate</span>
+                        <select id="norm-audio-bitrate" class="emby-select">
+                            <option value="128k">128 kbps</option>
+                            <option value="192k">192 kbps</option>
+                            <option value="256k">256 kbps</option>
+                            <option value="320k">320 kbps</option>
+                            <option value="448k">448 kbps</option>
+                            <option value="640k">640 kbps</option>
+                        </select>
+                    </label>
+                    <div class="actions">
+                        <button type="button" id="btn-save-normalization" class="raised button-submit emby-button">Save Normalization</button>
+                        <button type="button" id="btn-reset-normalization" class="emby-button">Use Defaults</button>
+                    </div>
+                </div>
+            </section>
+
             <section id="tab-transcode" class="tab-panel hidden" hidden>
                 <div class="card section-card">
                     <h2>Transcode</h2>
-                    <p class="hint">Live MPEG-TS encoding for every ChannelFlow channel, including news and weather. Saved settings override <code>FFMPEG_HWACCEL</code>, <code>FFMPEG_VIDEO_ENCODER</code>, and <code>FFMPEG_VAAPI_DEVICE</code> without restarting the container. In-progress streams pick this up on the next retry.</p>
+                    <p class="hint">Hardware acceleration for live MPEG-TS encoding. The output size, frame rate, and audio format are set on the Normalization tab. Saved settings override <code>FFMPEG_HWACCEL</code>, <code>FFMPEG_VIDEO_ENCODER</code>, and <code>FFMPEG_VAAPI_DEVICE</code> without restarting the container. In-progress streams pick this up on the next retry.</p>
                     <div id="transcode-status" class="status-card">Loading transcode status…</div>
                     <label class="field">
                         <span>Hardware acceleration</span>
@@ -1101,6 +1196,11 @@
                     <h3>Transcode</h3>
                     <p class="hint">Live MPEG-TS encoder in use right now. Change this on the Transcode tab.</p>
                     <dl id="about-transcode" class="about-dl"></dl>
+                </div>
+                <div class="card section-card">
+                    <h3>Normalization</h3>
+                    <p class="hint">Target stream format. Change this on the Normalization tab.</p>
+                    <dl id="about-normalization" class="about-dl"></dl>
                 </div>
             </section>
 
@@ -1273,7 +1373,7 @@
       </div>
     </div>
   </div>
-  <script src="js/app.js?v=inappedit1-mapch2-weeks1"></script>
+  <script src="js/app.js?v=norm2"></script>
   <script src="js/shell.js"></script>
 </body>
 </html>

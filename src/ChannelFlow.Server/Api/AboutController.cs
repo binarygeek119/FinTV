@@ -20,6 +20,7 @@ public class AboutController : ControllerBase
 
     private readonly IWebHostEnvironment _env;
     private readonly FfmpegEncodingService _encoding;
+    private readonly StreamNormalizationService _normalization;
     private readonly IFfmpegLocator _ffmpeg;
     private readonly StreamService _streams;
     private readonly ILogger<AboutController> _logger;
@@ -27,12 +28,14 @@ public class AboutController : ControllerBase
     public AboutController(
         IWebHostEnvironment env,
         FfmpegEncodingService encoding,
+        StreamNormalizationService normalization,
         IFfmpegLocator ffmpeg,
         StreamService streams,
         ILogger<AboutController> logger)
     {
         _env = env;
         _encoding = encoding;
+        _normalization = normalization;
         _ffmpeg = ffmpeg;
         _streams = streams;
         _logger = logger;
@@ -111,7 +114,8 @@ public class AboutController : ControllerBase
                 source = transcodeSource,
                 environmentAcceleration = _encoding.EnvironmentHardwareAcceleration,
                 environmentEncoder = _encoding.EnvironmentVideoEncoder
-            }
+            },
+            normalization = _normalization.Describe()
         });
     }
 

@@ -837,13 +837,29 @@ public class StreamService : IDisposable
         return channel.ChannelLogoPath;
     }
 
-    private static async Task RunFfmpegToStreamAsync(string ffmpegPath, IReadOnlyList<string> args, Stream output, CancellationToken cancellationToken)
+    private async Task RunFfmpegToStreamAsync(string ffmpegPath, IReadOnlyList<string> args, Stream output, CancellationToken cancellationToken)
     {
-        await CliWrap.Cli.Wrap(ffmpegPath)
+        var stderr = new StringBuilder();
+        var result = await CliWrap.Cli.Wrap(ffmpegPath)
             .WithArguments(args)
             .WithStandardOutputPipe(CliWrap.PipeTarget.ToStream(output))
-            .WithStandardErrorPipe(CliWrap.PipeTarget.ToStringBuilder(new StringBuilder()))
+            .WithStandardErrorPipe(CliWrap.PipeTarget.ToStringBuilder(stderr))
             .WithValidation(CliWrap.CommandResultValidation.None)
             .ExecuteAsync(cancellationToken);
+
+        if (result.ExitCode != 0 && !cancellationToken.IsCancellationRequested)
+        {
+            var error = stderr.ToString().Trim();
+            if (error.Length > 2000)
+            {
+                error = error[^2000..];
+            }
+
+            _logger.LogWarning("ffmpeg exited {ExitCode}: {Error}", result.ExitCode, error);
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(error)
+                    ? $"ffmpeg exited {result.ExitCode}"
+                    : $"ffmpeg exited {result.ExitCode}: {error}");
+        }
     }
 }

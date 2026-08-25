@@ -123,6 +123,7 @@ builder.Services.AddSingleton<IFfmpegLocator>(sp => sp.GetRequiredService<Ffmpeg
 builder.Services.AddSingleton<PublicBaseUrl>();
 builder.Services.AddSingleton<IPublicBaseUrl>(sp => sp.GetRequiredService<PublicBaseUrl>());
 builder.Services.AddSingleton<FfmpegEncodingService>();
+builder.Services.AddSingleton<StreamNormalizationService>();
 builder.Services.AddSingleton<FfmpegCommandBuilder>();
 builder.Services.AddSingleton<YtDlpLocator>();
 builder.Services.AddSingleton<YouTubeCookieStore>();

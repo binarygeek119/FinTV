@@ -6,10 +6,12 @@ namespace FinTv.Streaming;
 public class FfmpegCommandBuilder
 {
     private readonly FfmpegEncodingService _encoding;
+    private readonly StreamNormalizationService _normalization;
 
-    public FfmpegCommandBuilder(FfmpegEncodingService encoding)
+    public FfmpegCommandBuilder(FfmpegEncodingService encoding, StreamNormalizationService normalization)
     {
         _encoding = encoding;
+        _normalization = normalization;
     }
 
     public IReadOnlyList<string> BuildMediaCommand(
@@ -37,7 +39,8 @@ public class FfmpegCommandBuilder
         var args = new List<string>
         {
             "-hide_banner",
-            "-loglevel", "warning"
+            "-loglevel", "warning",
+            "-fflags", "+genpts+discardcorrupt"
         };
         args.AddRange(context.HardwareDeviceArgs);
         args.AddRange(context.HardwareDecodeArgs);
@@ -65,19 +68,9 @@ public class FfmpegCommandBuilder
             fadeBugOut: fadeBugOut,
             alertTones: alertTones);
         AppendVideoEncoderArgs(args, context);
-        args.AddRange(new[]
-        {
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-ac", "2",
-            "-ar", "48000",
-            "-f", "mpegts",
-            "-mpegts_flags", "+resend_headers+initial_discontinuity",
-            "-muxdelay", "0",
-            "-muxpreload", "0",
-            "-flush_packets", "1",
-            "pipe:1"
-        });
+        AppendBroadcastAudioFilter(args);
+        AppendAacStereo48k(args);
+        AppendMpegTsPipe(args);
 
         return args;
     }
@@ -136,6 +129,7 @@ public class FfmpegCommandBuilder
         {
             args.AddRange(new[]
             {
+                "-fflags", "+genpts+discardcorrupt",
                 "-ss", startSeconds.ToString("F3", CultureInfo.InvariantCulture),
                 "-t", durationSeconds.ToString("F3", CultureInfo.InvariantCulture)
             });
@@ -160,19 +154,14 @@ public class FfmpegCommandBuilder
         AppendVideoEncoderArgs(args, context);
         if (!string.IsNullOrEmpty(skipExpr) && !args.Contains("-filter_complex"))
         {
-            args.AddRange(new[]
-            {
-                "-af", $"aselect='{skipExpr}',asetpts=N/SR/TB"
-            });
+            AppendBroadcastAudioFilter(args, skipExpr);
+        }
+        else
+        {
+            AppendBroadcastAudioFilter(args);
         }
 
-        args.AddRange(new[]
-        {
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-ac", "2",
-            "-ar", "48000"
-        });
+        AppendAacStereo48k(args);
         if (isPipe)
         {
             args.AddRange(new[]
@@ -181,15 +170,7 @@ public class FfmpegCommandBuilder
             });
         }
 
-        args.AddRange(new[]
-        {
-            "-f", "mpegts",
-            "-mpegts_flags", "+resend_headers+initial_discontinuity",
-            "-muxdelay", "0",
-            "-muxpreload", "0",
-            "-flush_packets", "1",
-            "pipe:1"
-        });
+        AppendMpegTsPipe(args);
 
         return args;
     }
@@ -257,10 +238,9 @@ public class FfmpegCommandBuilder
             args.Add(encodeSeconds.Value.ToString("F3", CultureInfo.InvariantCulture));
         }
 
+        AppendAacStereo48k(args);
         args.AddRange(new[]
         {
-            "-c:a", "aac",
-            "-b:a", "192k",
             "-shortest",
             "-f", "mpegts",
             "pipe:1"
@@ -523,24 +503,26 @@ public class FfmpegCommandBuilder
         return silentArgs;
     }
 
-    private static IReadOnlyList<string> BuildLavfiAudioInput(EbsAudioMode audioMode)
+    private IReadOnlyList<string> BuildLavfiAudioInput(EbsAudioMode audioMode)
     {
+        var target = _normalization.Current;
+        var rate = target.AudioSampleRate.ToString();
         return audioMode switch
         {
             EbsAudioMode.WhiteNoise => new List<string>
             {
                 "-f", "lavfi",
-                "-i", "anoisesrc=color=white:amplitude=0.01:sample_rate=48000"
+                "-i", $"anoisesrc=color=white:amplitude=0.01:sample_rate={rate}"
             },
             EbsAudioMode.BeepTone => new List<string>
             {
                 "-f", "lavfi",
-                "-i", "sine=frequency=960:sample_rate=48000,aeval=val(0)*if(lt(mod(t\\,1)\\,0.5)\\,1\\,0)"
+                "-i", $"sine=frequency=960:sample_rate={rate},aeval=val(0)*if(lt(mod(t\\,1)\\,0.5)\\,1\\,0)"
             },
             _ => new List<string>
             {
                 "-f", "lavfi",
-                "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"
+                "-i", $"anullsrc=channel_layout={target.AudioLayout}:sample_rate={rate}"
             }
         };
     }
@@ -551,13 +533,18 @@ public class FfmpegCommandBuilder
         double captureFps,
         string? audioPath,
         double? durationSeconds = null,
-        WeatherAlertToneSandwich? alertTones = null)
+        WeatherAlertToneSandwich? alertTones = null,
+        AspectRatioMode aspect = AspectRatioMode.SixteenNine)
     {
+        var target = _normalization.Current;
+        var (outW, outH) = _normalization.ResolveSize(aspect);
+        _ = width;
+        _ = height;
         var fps = captureFps.ToString(CultureInfo.InvariantCulture);
         var hasAudio = !string.IsNullOrWhiteSpace(audioPath) && File.Exists(audioPath);
-        var context = CreateEncodingContext(width, height);
+        var context = CreateEncodingContext(outW, outH);
         var videoChain =
-            $"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,format=yuv420p";
+            $"fps={target.FpsFilter},scale={outW}:{outH}:force_original_aspect_ratio=decrease,pad={outW}:{outH}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,format=yuv420p";
         var vf = _encoding.AdaptVideoFilterForEncoder(videoChain, context.Encoder);
         var encodeSeconds = alertTones is { HasTones: true }
             ? alertTones.TotalSeconds
@@ -593,7 +580,7 @@ public class FfmpegCommandBuilder
             args.AddRange(new[]
             {
                 "-f", "lavfi",
-                "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"
+                "-i", $"anullsrc=channel_layout={target.AudioLayout}:sample_rate={target.AudioSampleRate}"
             });
         }
 
@@ -617,18 +604,12 @@ public class FfmpegCommandBuilder
                 "-vf", vf,
                 "-map", "0:v:0",
                 "-map", "1:a:0?",
-                "-af", "aresample=async=1:first_pts=0,aformat=sample_rates=48000:channel_layouts=stereo"
+                "-af", BuildBroadcastAudioFilter()
             });
         }
 
         AppendVideoEncoderArgs(args, context, stillImage: true);
-        args.AddRange(new[]
-        {
-            "-c:a", "aac",
-            "-b:a", "192k",
-            "-ac", "2",
-            "-ar", "48000"
-        });
+        AppendAacStereo48k(args);
         if (encodeSeconds is > 0)
         {
             args.Add("-t");
@@ -699,14 +680,45 @@ public class FfmpegCommandBuilder
         _ = width;
         _ = height;
         _ = mediaPath;
+        if (_normalization.Current.IsMpeg2)
+        {
+            return new EncodingContext("mpeg2video", [], []);
+        }
+
         return new EncodingContext(_encoding.Encoder, _encoding.HardwareDeviceArgs, _encoding.HardwareDecodeArgs);
     }
 
     private void AppendVideoEncoderArgs(List<string> args, EncodingContext context, bool stillImage = false)
     {
+        var target = _normalization.Current;
         args.Add("-c:v");
         args.Add(context.Encoder);
-        args.AddRange(_encoding.GetVideoEncoderArguments(stillImage));
+        if (target.IsMpeg2)
+        {
+            var bitrate = target.VideoBitrate is "2000k" or "4000k" or "6000k" or "8000k"
+                ? target.VideoBitrate
+                : "5000k";
+            args.AddRange(
+            [
+                "-q:v", "4",
+                "-b:v", bitrate,
+                "-maxrate", bitrate,
+                "-bufsize", "10000k",
+                "-r", target.FpsOutput,
+                "-g", (stillImage ? Math.Min(12, target.Gop) : target.Gop).ToString(),
+                "-bf", "0",
+                "-pix_fmt", "yuv420p"
+            ]);
+            return;
+        }
+
+        args.AddRange(_encoding.GetVideoEncoderArguments(
+            stillImage,
+            target.VideoProfile,
+            target.Level,
+            target.FpsOutput,
+            target.Gop,
+            target.VideoBitrate));
     }
 
     private void AppendMediaVideoGraph(
@@ -740,6 +752,7 @@ public class FfmpegCommandBuilder
         {
             args.Add("-vf");
             args.Add(_encoding.AdaptVideoFilterForEncoder(linear, context.Encoder));
+            args.AddRange(["-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn"]);
             return;
         }
 
@@ -748,7 +761,7 @@ public class FfmpegCommandBuilder
             args.AddRange(
             [
                 "-loop", "1",
-                "-framerate", "30",
+                "-framerate", _normalization.Current.FpsOutput,
                 "-i", bug
             ]);
         }
@@ -777,7 +790,7 @@ public class FfmpegCommandBuilder
 
         if (!string.IsNullOrEmpty(skipExpr) && sandwich is null)
         {
-            graph += $";[0:a]aselect='{skipExpr}',asetpts=N/SR/TB[aout]";
+            graph += $";[0:a]aselect='{skipExpr}',asetpts=N/SR/TB,{BuildBroadcastAudioFilter()}[aout]";
         }
         else if (sandwich is not null)
         {
@@ -786,12 +799,14 @@ public class FfmpegCommandBuilder
 
         var audioMap = sandwich is not null || !string.IsNullOrEmpty(skipExpr)
             ? "[aout]"
-            : "0:a?";
+            : "0:a:0?";
         args.AddRange(
         [
             "-filter_complex", _encoding.AdaptFilterComplexForEncoder(graph, context.Encoder),
             "-map", "[vout]",
             "-map", audioMap,
+            "-sn",
+            "-dn",
             "-shortest"
         ]);
     }
@@ -812,7 +827,7 @@ public class FfmpegCommandBuilder
         return !string.IsNullOrWhiteSpace(resolved) && File.Exists(resolved) ? resolved : null;
     }
 
-    private static string BuildLinearVideoFilters(
+    private string BuildLinearVideoFilters(
         Channel channel,
         int width,
         int height,
@@ -821,6 +836,7 @@ public class FfmpegCommandBuilder
     {
         var filters = new List<string>
         {
+            $"fps={_normalization.Current.FpsFilter}",
             $"scale={width}:{height}:force_original_aspect_ratio=decrease",
             $"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black"
         };
@@ -836,6 +852,8 @@ public class FfmpegCommandBuilder
         }
 
         AppendWeatherAlertTicker(filters, height, alertTickerPath);
+        filters.Add("setsar=1");
+        filters.Add("format=yuv420p");
         return string.Join(',', filters);
     }
 
@@ -942,11 +960,51 @@ public class FfmpegCommandBuilder
             sourceWidth,
             sourceHeight);
 
-    private static (int Width, int Height) GetResolution(Channel channel)
+    private (int Width, int Height) GetResolution(Channel channel)
+        => _normalization.ResolveSize(channel.AspectRatio);
+
+    private string BuildBroadcastAudioFilter()
     {
-        return channel.AspectRatio == AspectRatioMode.FourThree
-            ? (1440, 1080)
-            : (1920, 1080);
+        var target = _normalization.Current;
+        return $"aresample=async=1:first_pts=0:ocl={target.AudioLayout},aformat=sample_fmts=fltp:sample_rates={target.AudioSampleRate}:channel_layouts={target.AudioLayout}";
+    }
+
+    private void AppendBroadcastAudioFilter(List<string> args, string? skipExpr = null)
+    {
+        if (args.Contains("-af"))
+        {
+            return;
+        }
+
+        var filter = string.IsNullOrEmpty(skipExpr)
+            ? BuildBroadcastAudioFilter()
+            : $"aselect='{skipExpr}',asetpts=N/SR/TB,{BuildBroadcastAudioFilter()}";
+        args.AddRange(["-af", filter]);
+    }
+
+    private void AppendAacStereo48k(List<string> args)
+    {
+        var target = _normalization.Current;
+        args.AddRange(
+        [
+            "-c:a", target.EncoderAudioCodec,
+            "-b:a", target.AudioBitrate,
+            "-ac", target.AudioChannelCount.ToString(),
+            "-ar", target.AudioSampleRate.ToString()
+        ]);
+    }
+
+    private static void AppendMpegTsPipe(List<string> args)
+    {
+        args.AddRange(
+        [
+            "-f", "mpegts",
+            "-mpegts_flags", "+resend_headers+initial_discontinuity",
+            "-muxdelay", "0",
+            "-muxpreload", "0",
+            "-flush_packets", "1",
+            "pipe:1"
+        ]);
     }
 
     private static string? ResolveBugPath(Channel channel)
@@ -998,11 +1056,13 @@ public class FfmpegCommandBuilder
         }
     }
 
-    private static string BuildAlertToneAudioGraph(
+    private string BuildAlertToneAudioGraph(
         int programAudioInputIndex,
         int firstExtraInputIndex,
         WeatherAlertToneSandwich sandwich)
     {
+        var target = _normalization.Current;
+        var aformat = $"aformat=sample_rates={target.AudioSampleRate}:channel_layouts={target.AudioLayout}";
         var mid = sandwich.MiddleSeconds.ToString("F3", CultureInfo.InvariantCulture);
         var parts = new List<string>();
         var labels = new List<string>();
@@ -1010,17 +1070,17 @@ public class FfmpegCommandBuilder
         if (sandwich.HasAttention)
         {
             var att = sandwich.AttentionSeconds.ToString("F3", CultureInfo.InvariantCulture);
-            parts.Add($"[{extra}:a]atrim=0:{att},asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo[att]");
+            parts.Add($"[{extra}:a]atrim=0:{att},asetpts=PTS-STARTPTS,{aformat}[att]");
             labels.Add("[att]");
             extra++;
         }
 
-        parts.Add($"[{programAudioInputIndex}:a]atrim=0:{mid},asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo[prog]");
+        parts.Add($"[{programAudioInputIndex}:a]atrim=0:{mid},asetpts=PTS-STARTPTS,{aformat}[prog]");
         labels.Add("[prog]");
         if (sandwich.HasEnd)
         {
             var end = sandwich.EndSeconds.ToString("F3", CultureInfo.InvariantCulture);
-            parts.Add($"[{extra}:a]atrim=0:{end},asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo[end]");
+            parts.Add($"[{extra}:a]atrim=0:{end},asetpts=PTS-STARTPTS,{aformat}[end]");
             labels.Add("[end]");
         }
 

@@ -148,37 +148,95 @@ public class FfmpegEncodingService
         => filter.Contains(step, StringComparison.OrdinalIgnoreCase);
 
     public IReadOnlyList<string> GetVideoEncoderArguments(bool stillImage)
+        => GetVideoEncoderArguments(stillImage, "main", "4.1", "30", stillImage ? 12 : 30, "auto");
+
+    public IReadOnlyList<string> GetVideoEncoderArguments(
+        bool stillImage,
+        string profile,
+        string level,
+        string frameRate,
+        int gop,
+        string videoBitrate)
     {
+        var safeProfile = profile is "baseline" or "high" ? profile : "main";
+        var safeLevel = string.IsNullOrWhiteSpace(level) ? "4.1" : level;
+        var safeRate = string.IsNullOrWhiteSpace(frameRate) ? "30" : frameRate;
+        var keyint = Math.Max(1, stillImage ? Math.Min(12, gop) : gop);
+        var bitrate = videoBitrate is "2000k" or "4000k" or "6000k" or "8000k" ? videoBitrate : null;
+        var maxrate = bitrate ?? (stillImage ? "2500k" : "5000k");
+        var bufsize = bitrate is null
+            ? (stillImage ? "4000k" : "10000k")
+            : DoubleBitrate(bitrate);
+
         if (Encoder.Contains("vaapi", StringComparison.OrdinalIgnoreCase))
         {
-            return
-            [
-                "-b:v", stillImage ? "1500k" : "4000k",
-                "-maxrate", stillImage ? "2500k" : "5000k",
-                "-bufsize", stillImage ? "4000k" : "8000k",
-                "-profile:v", "main",
-                "-level", "4.1",
-                "-g", stillImage ? "12" : "30",
+            var args = new List<string>
+            {
+                "-b:v", bitrate ?? (stillImage ? "1500k" : "4000k"),
+                "-maxrate", bitrate ?? (stillImage ? "2500k" : "5000k"),
+                "-bufsize", bufsize,
+                "-profile:v", safeProfile,
+                "-level", safeLevel,
+                "-r", safeRate,
+                "-g", keyint.ToString(),
                 "-bf", "0"
-            ];
+            };
+            return args;
         }
 
         if (Encoder.Contains("nvenc", StringComparison.OrdinalIgnoreCase))
         {
-            return ["-preset", "p4", "-b:v", stillImage ? "1500k" : "4000k", "-maxrate", "5000k"];
+            return
+            [
+                "-preset", "p4",
+                "-profile:v", safeProfile,
+                "-level", safeLevel,
+                "-b:v", bitrate ?? (stillImage ? "1500k" : "4000k"),
+                "-maxrate", bitrate ?? "5000k",
+                "-r", safeRate,
+                "-g", keyint.ToString(),
+                "-bf", "0",
+                "-pix_fmt", "yuv420p"
+            ];
         }
 
-        return
-        [
+        var software = new List<string>
+        {
             "-preset", "veryfast",
             "-tune", stillImage ? "stillimage" : "film",
-            "-crf", stillImage ? "23" : "21",
-            "-maxrate", stillImage ? "2500k" : "5000k",
-            "-bufsize", stillImage ? "4000k" : "10000k",
+            "-profile:v", safeProfile,
+            "-level", safeLevel
+        };
+        if (bitrate is null)
+        {
+            software.AddRange(["-crf", stillImage ? "23" : "21"]);
+        }
+        else
+        {
+            software.AddRange(["-b:v", bitrate]);
+        }
+
+        software.AddRange(
+        [
+            "-maxrate", maxrate,
+            "-bufsize", bufsize,
             "-pix_fmt", "yuv420p",
-            "-g", stillImage ? "12" : "30",
-            "-bf", "0"
-        ];
+            "-r", safeRate,
+            "-g", keyint.ToString(),
+            "-bf", "0",
+            "-sc_threshold", "0"
+        ]);
+        return software;
+    }
+
+    private static string DoubleBitrate(string bitrate)
+    {
+        if (bitrate.EndsWith('k') && int.TryParse(bitrate[..^1], out var kbps))
+        {
+            return $"{kbps * 2}k";
+        }
+
+        return "8000k";
     }
 
     public void AppendVideoEncoder(List<string> args, bool stillImage = false)
@@ -286,7 +344,8 @@ public class FfmpegEncodingService
 
     private static bool IsHardware(string encoder)
         => !string.IsNullOrWhiteSpace(encoder)
-           && !encoder.StartsWith("lib", StringComparison.OrdinalIgnoreCase);
+           && (encoder.Contains("vaapi", StringComparison.OrdinalIgnoreCase)
+               || encoder.Contains("nvenc", StringComparison.OrdinalIgnoreCase));
 
     public sealed record EncodingStatus(
         string HardwareAcceleration,

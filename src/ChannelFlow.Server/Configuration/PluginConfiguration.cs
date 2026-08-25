@@ -128,6 +128,11 @@ public class PluginConfiguration
     /// Live MPEG-TS ffmpeg encode settings. Empty values follow <c>FFMPEG_*</c> environment defaults.
     /// </summary>
     public TranscodeSettings Transcode { get; set; } = new();
+
+    /// <summary>
+    /// Target video/audio format for every live MPEG-TS stream.
+    /// </summary>
+    public NormalizationSettings Normalization { get; set; } = new();
 }
 
 public class TranscodeSettings
@@ -158,6 +163,39 @@ public class TranscodeSettings
     public const int MaxRunAheadSeconds = 600;
 
     public static int ClampRunAheadSeconds(int value) => Math.Clamp(value, 0, MaxRunAheadSeconds);
+}
+
+public class NormalizationSettings
+{
+    public string Resolution { get; set; } = DefaultResolution;
+
+    public string FrameRate { get; set; } = DefaultFrameRate;
+
+    public string VideoCodec { get; set; } = DefaultVideoCodec;
+
+    public string VideoProfile { get; set; } = DefaultVideoProfile;
+
+    public string VideoBitrate { get; set; } = DefaultVideoBitrate;
+
+    public string AudioCodec { get; set; } = DefaultAudioCodec;
+
+    public string AudioChannels { get; set; } = DefaultAudioChannels;
+
+    public string AudioSampleRate { get; set; } = DefaultAudioSampleRate;
+
+    public string AudioBitrate { get; set; } = DefaultAudioBitrate;
+
+    public const string DefaultResolution = "match";
+    public const string DefaultFrameRate = "30";
+    public const string DefaultVideoCodec = "h264";
+    public const string DefaultVideoProfile = "main";
+    public const string DefaultVideoBitrate = "auto";
+    public const string DefaultAudioCodec = "aac";
+    public const string DefaultAudioChannels = "2.0";
+    public const string DefaultAudioSampleRate = "48000";
+    public const string DefaultAudioBitrate = "192k";
+
+    public static NormalizationSettings CreateDefault() => new();
 }
 
 public class Ws4kpDockerSettings : IWeatherStarDockerSettings
