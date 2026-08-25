@@ -91,12 +91,14 @@ public class LogoSetService
         var flowWireIntro = Path.Combine(storagePath, "News", "FlowWire-intro.mp3");
         var flowWireOutro = Path.Combine(storagePath, "News", "FlowWire-outro.mp3");
         var catherinePortrait = Path.Combine(storagePath, "News", "Catherine_Wolfe.jpg");
+        var weatherAlertTone = Path.Combine(storagePath, "Weather", "weather_alert.ogg");
 
         if (localCount == 0
             || !File.Exists(flowWireLogo)
             || !File.Exists(flowWireIntro)
             || !File.Exists(flowWireOutro)
-            || !File.Exists(catherinePortrait))
+            || !File.Exists(catherinePortrait)
+            || !File.Exists(weatherAlertTone))
         {
             await DownloadBinarygeek119SetFromGitHubAsync(storagePath, cancellationToken);
         }
@@ -825,9 +827,15 @@ public class LogoSetService
             path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
 
     private static bool IsBundledAssetFile(string path)
-        => IsImageFile(path) || IsNewsAudioFile(path);
+        => IsImageFile(path) || IsNewsAudioFile(path) || IsWeatherAudioFile(path);
 
     private static bool IsNewsAudioFile(string path)
+        => IsAudioUnderFolder(path, "News");
+
+    private static bool IsWeatherAudioFile(string path)
+        => IsAudioUnderFolder(path, "Weather");
+
+    private static bool IsAudioUnderFolder(string path, string folder)
     {
         if (!path.EndsWith(".mp3", StringComparison.OrdinalIgnoreCase)
             && !path.EndsWith(".wav", StringComparison.OrdinalIgnoreCase)
@@ -841,8 +849,8 @@ public class LogoSetService
         }
 
         var normalized = path.Replace('\\', '/');
-        return normalized.Contains("/News/", StringComparison.OrdinalIgnoreCase)
-            || normalized.StartsWith("News/", StringComparison.OrdinalIgnoreCase);
+        return normalized.Contains("/" + folder + "/", StringComparison.OrdinalIgnoreCase)
+            || normalized.StartsWith(folder + "/", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsImageFile(string path)

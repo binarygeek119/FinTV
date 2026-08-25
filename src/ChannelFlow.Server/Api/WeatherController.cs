@@ -209,7 +209,7 @@ public class WeatherController : ControllerBase
             var preview = await _alerts.StartTestAsync(mode, TimeSpan.FromSeconds(seconds), cancellationToken);
             var first = preview.Alerts.FirstOrDefault();
             var liveHint = mode == WeatherAlertOverlayMode.CutIn
-                ? "Live TV, movies, and music switch to this screen at the next program break for the next couple of minutes."
+                ? "Live TV, movies, and music play the attention tone, then switch to this screen at the next program break for the next couple of minutes."
                 : "Live TV, movies, and music show the scrolling bar on the next program for the next couple of minutes.";
             return Ok(new
             {

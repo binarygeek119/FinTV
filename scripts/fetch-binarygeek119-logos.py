@@ -39,6 +39,10 @@ def is_news_audio(path: str) -> bool:
     return path.startswith("News/") and Path(path).suffix.lower() in AUDIO_SUFFIXES
 
 
+def is_weather_audio(path: str) -> bool:
+    return path.startswith("Weather/") and Path(path).suffix.lower() in AUDIO_SUFFIXES
+
+
 def is_logo_path(path: str) -> bool:
     return any(path.startswith(prefix) for prefix in LOGO_PREFIXES)
 
@@ -98,7 +102,7 @@ def main() -> int:
         for item in fetch_tree()
         if item.get("type") == "blob"
         and is_logo_path(item.get("path", ""))
-        and (is_image(item["path"]) or is_news_audio(item["path"]))
+        and (is_image(item["path"]) or is_news_audio(item["path"]) or is_weather_audio(item["path"]))
     ]
 
     print(f"Bundling {len(files)} ChannelFlow assets from {REPO}@{GIT_REF} into {output_dir}")

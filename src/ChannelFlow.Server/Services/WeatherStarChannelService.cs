@@ -198,6 +198,8 @@ public class WeatherStarChannelService
             return;
         }
 
+        await PlayWeatherAlertToneAsync(channel, output, cancellationToken);
+
         var (width, height) = GetCutInResolution(channel);
         var skin = ResolveVariant(channel);
         var ffmpegPath = _mediaEncoder.EncoderPath;
@@ -304,6 +306,65 @@ public class WeatherStarChannelService
 
     private static string? PlayableMusicPath(string? path)
         => !string.IsNullOrWhiteSpace(path) && File.Exists(path) ? path : null;
+
+    private async Task PlayWeatherAlertToneAsync(
+        Domain.Channel channel,
+        Stream output,
+        CancellationToken cancellationToken)
+    {
+        var tonePath = ResolveWeatherAlertTonePath();
+        if (string.IsNullOrWhiteSpace(tonePath))
+        {
+            _logger.LogWarning("Weather alert tone weather_alert.ogg was not found; showing the alerts screen without it");
+            return;
+        }
+
+        try
+        {
+            var args = _ffmpegBuilder.BuildWeatherAlertToneCommand(channel, tonePath);
+            _logger.LogInformation("Playing weather alert tone {File} before the alerts screen", Path.GetFileName(tonePath));
+            await CliWrap.Cli.Wrap(_mediaEncoder.EncoderPath)
+                .WithArguments(args)
+                .WithStandardOutputPipe(CliWrap.PipeTarget.ToStream(output, autoFlush: true))
+                .WithValidation(CliWrap.CommandResultValidation.None)
+                .ExecuteAsync(cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Weather alert tone failed; showing the alerts screen");
+        }
+    }
+
+    internal static string? ResolveWeatherAlertTonePath()
+    {
+        var runtime = FinTvRuntime.Current;
+        if (runtime is null)
+        {
+            return null;
+        }
+
+        foreach (var folder in new[]
+                 {
+                     Path.Combine(runtime.LogosFolder, "binarygeek119", "Weather"),
+                     Path.Combine(runtime.BundledLogosFolder, "Weather"),
+                     Path.Combine(runtime.LogosFolder, "binarygeek119", EbsService.EbsFolderName),
+                     runtime.EbsFolder
+                 })
+        {
+            if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder))
+            {
+                continue;
+            }
+
+            var path = Path.Combine(folder, "weather_alert.ogg");
+            if (File.Exists(path))
+            {
+                return path;
+            }
+        }
+
+        return null;
+    }
 
     internal static string BuildWeatherPageUrl(
         string locationQuery,

@@ -595,6 +595,45 @@ public class FfmpegCommandBuilder
         return args;
     }
 
+    public IReadOnlyList<string> BuildWeatherAlertToneCommand(Channel channel, string audioPath)
+    {
+        var (width, height) = GetResolution(channel);
+        var context = CreateEncodingContext(width, height, audioPath);
+        var args = new List<string>
+        {
+            "-hide_banner",
+            "-loglevel", "warning",
+            "-fflags", "+genpts"
+        };
+        args.AddRange(context.HardwareDeviceArgs);
+        args.AddRange(new[]
+        {
+            "-f", "lavfi",
+            "-i", $"color=c=black:s={width}x{height}:r=30",
+            "-i", audioPath,
+            "-map", "0:v:0",
+            "-map", "1:a:0",
+            "-af", "aresample=async=1:first_pts=0,aformat=sample_rates=48000:channel_layouts=stereo"
+        });
+        AppendVideoEncoderArgs(args, context, stillImage: true);
+        args.AddRange(new[]
+        {
+            "-c:a", "aac",
+            "-b:a", "192k",
+            "-ac", "2",
+            "-ar", "48000",
+            "-t", "30",
+            "-shortest",
+            "-f", "mpegts",
+            "-mpegts_flags", "+resend_headers+initial_discontinuity",
+            "-muxdelay", "0",
+            "-muxpreload", "0",
+            "-flush_packets", "1",
+            "pipe:1"
+        });
+        return args;
+    }
+
     public IReadOnlyList<string> BuildOfflineSlateCommand(Channel channel)
     {
         var (width, height) = GetResolution(channel);
