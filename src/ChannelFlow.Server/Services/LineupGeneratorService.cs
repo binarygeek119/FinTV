@@ -2,6 +2,7 @@ using System.Text.Json;
 using FinTv.Data;
 using FinTv.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace FinTv.Services;
 
@@ -17,6 +18,7 @@ public class LineupGeneratorService
     private readonly StreamService _stream;
     private readonly LogoBumperService _bumpers;
     private readonly OriginalBroadcastSimulator _originalBroadcast;
+    private readonly ILogger<LineupGeneratorService> _logger;
 
     public LineupGeneratorService(
         FinTvDbContext db,
@@ -28,7 +30,8 @@ public class LineupGeneratorService
         GuideUpdateTracker guideUpdates,
         StreamService stream,
         LogoBumperService bumpers,
-        OriginalBroadcastSimulator originalBroadcast)
+        OriginalBroadcastSimulator originalBroadcast,
+        ILogger<LineupGeneratorService> logger)
     {
         _db = db;
         _lineupService = lineupService;
@@ -40,6 +43,7 @@ public class LineupGeneratorService
         _stream = stream;
         _bumpers = bumpers;
         _originalBroadcast = originalBroadcast;
+        _logger = logger;
     }
 
     public async Task BuildPlayoutAsync(
@@ -75,6 +79,11 @@ public class LineupGeneratorService
         var toonTakeoverBumperDates = new HashSet<DateOnly>();
 
         var snapshot = await _lineupService.LoadResolutionSnapshotAsync(channel.Id, cancellationToken);
+        _logger.LogInformation(
+            "Loaded lineup snapshot for {ChannelName}; filling {Start:u} to {End:u}",
+            channel.Name,
+            startUtc,
+            endUtc);
         var slotsByDate = new Dictionary<DateOnly, IReadOnlyList<LineupSlot>>();
         var anniversaryByDate = new Dictionary<DateOnly, Queue<AnniversaryPick>>();
         var stealEnabled = OriginalBroadcastSimulator.IsEnabled(channel);
@@ -82,8 +91,23 @@ public class LineupGeneratorService
             ? AiPlayoutTemplates.GetPrimetimeSlotRange(channel)
             : (38, 41);
         var cursor = startUtc;
+        var steps = 0;
+        var maxSteps = Math.Max(96, (int)((endUtc - startUtc).TotalMinutes / 10) + 48);
         while (cursor < endUtc)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (++steps > maxSteps)
+            {
+                _logger.LogError(
+                    "Playout build for {ChannelName} stopped after {Steps} steps at {Cursor:u} (end {End:u})",
+                    channel.Name,
+                    steps,
+                    cursor,
+                    endUtc);
+                break;
+            }
+
+            var cursorBefore = cursor;
             var local = TimeZoneInfo.ConvertTimeFromUtc(cursor, tz);
             var date = DateOnly.FromDateTime(local);
             if (!slotsByDate.TryGetValue(date, out var slots))
@@ -183,7 +207,7 @@ public class LineupGeneratorService
 
             if (blockEnd <= cursor)
             {
-                cursor = blockEnd;
+                cursor = AdvanceCursorOrSkip(channel.Name, cursorBefore, cursor.AddMinutes(30));
                 continue;
             }
 
@@ -191,6 +215,13 @@ public class LineupGeneratorService
             {
                 slotStart = cursor;
             }
+
+            _logger.LogInformation(
+                "Playout slot {SlotIndex} for {ChannelName}: {Start:u} to {End:u}",
+                slotIndex,
+                channel.Name,
+                slotStart,
+                blockEnd);
 
             if (_holidays.IsHolidayChannel(channel) && _holidays.GetActiveHoliday(date) is null)
             {
@@ -241,6 +272,10 @@ public class LineupGeneratorService
                 }
             }
 
+            _logger.LogInformation(
+                "Selecting program for {ChannelName} slot {SlotIndex}",
+                channel.Name,
+                slotIndex);
             var picked = await _smartSelection.PickCandidateAsync(channel, slot, date, anchor, cancellationToken);
             if (picked is null && !slot.Candidates.Any(c => c.Kind == SlotCandidateKind.FilterQuery))
             {
@@ -261,27 +296,38 @@ public class LineupGeneratorService
             if (picked.SeriesId is null && picked.JellyfinItemId is Guid pickedId)
             {
                 picked.SeriesId = await _db.Episodes.AsNoTracking()
-                    .Where(e => e.Id == pickedId)
+                    .Where(e => e.Id == pickedId || e.JellyfinItemId == pickedId)
                     .Select(e => e.SeriesId)
                     .FirstOrDefaultAsync(cancellationToken);
             }
+
+            _logger.LogInformation(
+                "Selected {Title} ({Duration}) series {SeriesId} for {ChannelName} slot {SlotIndex}",
+                picked.Title,
+                picked.Duration,
+                picked.SeriesId,
+                channel.Name,
+                slotIndex);
 
             if (channel.ContentType != ChannelContentType.Music
                 && ShortEpisodeBlocks.IsShortRuntime(picked.Duration)
                 && picked.SeriesId is Guid shortSeriesId
                 && shortSeriesId != Guid.Empty)
             {
-                cursor = await PackShortEpisodeBlockAsync(
-                    channel,
-                    picked,
-                    shortSeriesId,
-                    date,
-                    anchor,
-                    slotStart,
-                    blockEnd,
-                    tz,
-                    builtPrograms,
-                    cancellationToken);
+                cursor = AdvanceCursorOrSkip(
+                    channel.Name,
+                    cursorBefore,
+                    await PackShortEpisodeBlockAsync(
+                        channel,
+                        picked,
+                        shortSeriesId,
+                        date,
+                        anchor,
+                        slotStart,
+                        blockEnd,
+                        tz,
+                        builtPrograms,
+                        cancellationToken));
                 continue;
             }
 
@@ -320,8 +366,14 @@ public class LineupGeneratorService
                 Title = picked.Title
             });
 
-            cursor = padUntil;
+            cursor = AdvanceCursorOrSkip(channel.Name, cursorBefore, padUntil);
         }
+
+        _logger.LogInformation(
+            "Finished filling playout window for {ChannelName}: {Steps} slots, cursor {Cursor:u}",
+            channel.Name,
+            steps,
+            cursor);
 
         await _channelService.SaveAnchorAsync(channel.Id, anchor, cancellationToken);
         await _db.Channels
@@ -586,12 +638,30 @@ public class LineupGeneratorService
         List<PlayoutItem> builtPrograms,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        _logger.LogInformation(
+            "Packing shorts for {ChannelName}: {Title} series {SeriesId} from {Start:u} to {End:u}",
+            channel.Name,
+            first.Title,
+            seriesId,
+            slotStart,
+            blockEnd);
+
+        var seriesEpisodes = await _smartSelection.LoadSeriesShortEpisodesAsync(seriesId, cancellationToken);
+        _logger.LogInformation(
+            "Loaded {Count} short episodes for {Title} ({SeriesId})",
+            seriesEpisodes.Count,
+            first.Title,
+            seriesId);
+
         var fillStart = slotStart;
         var packed = 0;
         var usedIds = new HashSet<Guid>();
         var current = first;
-        while (current is not null && fillStart < blockEnd - TimeSpan.FromSeconds(8) && packed < 8)
+        const int maxPacked = 8;
+        while (current is not null && fillStart < blockEnd - TimeSpan.FromSeconds(8) && packed < maxPacked)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var duration = current.Duration > TimeSpan.Zero ? current.Duration : TimeSpan.FromMinutes(7);
             if (packed > 0 && fillStart + duration > blockEnd)
             {
@@ -623,15 +693,28 @@ public class LineupGeneratorService
                 usedIds.Add(usedId);
             }
 
-            fillStart = scheduled.TimelineEnd;
+            var nextStart = scheduled.TimelineEnd > fillStart
+                ? scheduled.TimelineEnd
+                : fillStart.Add(duration);
+            if (nextStart <= fillStart)
+            {
+                _logger.LogWarning(
+                    "Short pack did not advance timeline for {Title} at {Start:u}; stopping pack",
+                    current.Title,
+                    fillStart);
+                fillStart = nextStart;
+                packed++;
+                break;
+            }
+
+            fillStart = nextStart;
             packed++;
-            current = await _smartSelection.PickNextSeriesEpisodeAsync(
-                channel,
+            current = _smartSelection.TakeNextShortEpisode(
+                seriesEpisodes,
                 seriesId,
                 date,
                 anchor,
-                usedIds,
-                cancellationToken);
+                usedIds);
         }
 
         var padUntil = ResolveSlotPadEnd(fillStart, blockEnd, tz);
@@ -640,6 +723,13 @@ public class LineupGeneratorService
             await _commercialService.PadToSlotAsync(channel, fillStart, padUntil, cancellationToken);
             fillStart = padUntil;
         }
+
+        _logger.LogInformation(
+            "Packed {Packed} shorts for {ChannelName} ({Title}); moving to {Cursor:u}",
+            packed,
+            channel.Name,
+            first.Title,
+            fillStart);
 
         return fillStart;
     }
@@ -740,6 +830,22 @@ public class LineupGeneratorService
 
             anchor.SeriesEpisodeIndex[key] = Math.Max(0, index - count);
         }
+    }
+
+    private DateTime AdvanceCursorOrSkip(string channelName, DateTime cursorBefore, DateTime cursor)
+    {
+        if (cursor > cursorBefore)
+        {
+            return cursor;
+        }
+
+        var forced = cursorBefore.AddMinutes(30);
+        _logger.LogWarning(
+            "Playout cursor did not advance for {ChannelName} at {Cursor:u}; skipping to {Next:u}",
+            channelName,
+            cursorBefore,
+            forced);
+        return forced;
     }
 
     private static DateTime ResolveSlotPadEnd(DateTime contentEnd, DateTime blockEnd, TimeZoneInfo tz)

@@ -28,6 +28,7 @@ public class LineupService
     public async Task<Lineup?> GetDefaultLineupAsync(Guid channelId, CancellationToken cancellationToken = default)
     {
         return await _db.Lineups
+            .AsSplitQuery()
             .Include(l => l.Slots.OrderBy(s => s.SlotIndex))
                 .ThenInclude(s => s.Candidates.OrderBy(c => c.SortOrder))
             .FirstOrDefaultAsync(l => l.ChannelId == channelId && l.IsDefault, cancellationToken);
@@ -36,6 +37,7 @@ public class LineupService
     public async Task<List<LineupOverride>> GetOverridesAsync(Guid channelId, CancellationToken cancellationToken = default)
     {
         return await _db.LineupOverrides
+            .AsSplitQuery()
             .Include(o => o.Slots.OrderBy(s => s.SlotIndex))
                 .ThenInclude(s => s.Candidates.OrderBy(c => c.SortOrder))
             .Where(o => o.ChannelId == channelId)
@@ -46,6 +48,7 @@ public class LineupService
     public async Task<LineupOverride?> GetOverrideAsync(Guid overrideId, CancellationToken cancellationToken = default)
     {
         return await _db.LineupOverrides
+            .AsSplitQuery()
             .Include(o => o.Slots.OrderBy(s => s.SlotIndex))
                 .ThenInclude(s => s.Candidates)
             .FirstOrDefaultAsync(o => o.Id == overrideId, cancellationToken);
@@ -295,6 +298,7 @@ public class LineupService
         var overrides = await GetOverridesAsync(channelId, cancellationToken);
         var defaultLineup = await _db.Lineups
             .AsNoTracking()
+            .AsSplitQuery()
             .Include(l => l.Slots.OrderBy(s => s.SlotIndex))
                 .ThenInclude(s => s.Candidates.OrderBy(c => c.SortOrder))
             .FirstOrDefaultAsync(l => l.ChannelId == channelId && l.IsDefault, cancellationToken);

@@ -79,6 +79,110 @@ public class SmartSelectionService
     }
 
     /// <summary>
+    /// Short episodes of one series, loaded once from the Episodes table (no catalog scan).
+    /// </summary>
+    public async Task<IReadOnlyList<ResolvedCandidate>> LoadSeriesShortEpisodesAsync(
+        Guid seriesId,
+        CancellationToken cancellationToken = default)
+    {
+        var seriesIds = await _db.TvShows.AsNoTracking()
+            .Where(show => show.Id == seriesId || show.JellyfinItemId == seriesId)
+            .Select(show => show.Id)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        if (seriesIds.Count == 0)
+        {
+            seriesIds.Add(seriesId);
+        }
+
+        var rows = await _db.Episodes.AsNoTracking()
+            .Where(episode => !episode.IsMissing
+                && episode.SeriesId != null
+                && seriesIds.Contains(episode.SeriesId.Value))
+            .OrderBy(episode => episode.SeasonNumber ?? 0)
+            .ThenBy(episode => episode.EpisodeNumber ?? 0)
+            .ThenBy(episode => episode.PremiereDate)
+            .ThenBy(episode => episode.Name)
+            .Select(episode => new
+            {
+                episode.Id,
+                episode.Name,
+                episode.SeriesId,
+                episode.SeriesName,
+                episode.SeasonNumber,
+                episode.EpisodeNumber,
+                episode.RuntimeTicks
+            })
+            .ToListAsync(cancellationToken);
+
+        var result = new List<ResolvedCandidate>(rows.Count);
+        foreach (var row in rows)
+        {
+            var duration = row.RuntimeTicks is > 0
+                ? TimeSpan.FromTicks(row.RuntimeTicks.Value)
+                : TimeSpan.Zero;
+            if (!ShortEpisodeBlocks.IsShortRuntime(duration))
+            {
+                continue;
+            }
+
+            result.Add(new ResolvedCandidate
+            {
+                JellyfinItemId = row.Id,
+                SeriesId = row.SeriesId ?? seriesId,
+                Title = FormatEpisodeTitle(row.SeriesName, row.SeasonNumber, row.EpisodeNumber, row.Name),
+                Duration = duration
+            });
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Next short episode from a preloaded series run, skipping items already used in this timeslot.
+    /// Walks the list at most once; does not re-query the catalog.
+    /// </summary>
+    public ResolvedCandidate? TakeNextShortEpisode(
+        IReadOnlyList<ResolvedCandidate> episodes,
+        Guid seriesId,
+        DateOnly scheduleDate,
+        PlayoutAnchorState anchor,
+        ISet<Guid> excludeItemIds)
+    {
+        if (episodes.Count == 0)
+        {
+            return null;
+        }
+
+        var key = seriesId.ToString("N");
+        anchor.SeriesEpisodeIndex.TryGetValue(key, out var index);
+        if (index < 0)
+        {
+            index = 0;
+        }
+
+        for (var scanned = 0; scanned < episodes.Count; scanned++)
+        {
+            var pos = (index + scanned) % episodes.Count;
+            var pick = episodes[pos];
+            if (pick.JellyfinItemId is Guid id && excludeItemIds.Contains(id))
+            {
+                continue;
+            }
+
+            anchor.SeriesEpisodeIndex[key] = pos + 1;
+            if (pick.JellyfinItemId.HasValue)
+            {
+                anchor.LastAired[pick.JellyfinItemId.Value] = scheduleDate.ToDateTime(TimeOnly.MinValue);
+            }
+
+            return pick;
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Next short episode of the same series, skipping items already used in this timeslot.
     /// </summary>
     public async Task<ResolvedCandidate?> PickNextSeriesEpisodeAsync(
@@ -89,39 +193,25 @@ public class SmartSelectionService
         ISet<Guid> excludeItemIds,
         CancellationToken cancellationToken = default)
     {
-        for (var attempt = 0; attempt < 12; attempt++)
+        _ = channel;
+        var episodes = await LoadSeriesShortEpisodesAsync(seriesId, cancellationToken);
+        return TakeNextShortEpisode(episodes, seriesId, scheduleDate, anchor, excludeItemIds);
+    }
+
+    private static string FormatEpisodeTitle(string? seriesName, int? season, int? episode, string name)
+    {
+        var onScreen = GuideMetadataService.FormatOnScreen(season, episode);
+        if (!string.IsNullOrWhiteSpace(seriesName) && !string.IsNullOrWhiteSpace(onScreen))
         {
-            var resolved = await _catalog.ResolveItemAsync(
-                seriesId,
-                channel,
-                anchor,
-                scheduleDate,
-                cancellationToken);
-            var pick = resolved.FirstOrDefault();
-            if (pick is null)
-            {
-                return null;
-            }
-
-            if (pick.JellyfinItemId is Guid id && excludeItemIds.Contains(id))
-            {
-                continue;
-            }
-
-            if (!ShortEpisodeBlocks.IsShortRuntime(pick.Duration))
-            {
-                return null;
-            }
-
-            if (pick.JellyfinItemId.HasValue)
-            {
-                anchor.LastAired[pick.JellyfinItemId.Value] = scheduleDate.ToDateTime(TimeOnly.MinValue);
-            }
-
-            return pick;
+            return $"{seriesName} · {onScreen} · {name}";
         }
 
-        return null;
+        if (!string.IsNullOrWhiteSpace(seriesName))
+        {
+            return $"{seriesName} · {name}";
+        }
+
+        return name;
     }
 
     private static double ComputeScore(ResolvedCandidate item, int weight, List<Guid?> recentIds, PlayoutAnchorState anchor)

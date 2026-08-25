@@ -71,6 +71,12 @@ internal static class FileLogging
 
         builder.Host.UseSerilog();
         Log.Information(
+            "Clock utc={Utc:yyyy-MM-dd HH:mm:ss}Z TZ={TimeZone} local={Local:yyyy-MM-dd HH:mm:ss zzz} (TZ env {TzEnv})",
+            DateTime.UtcNow,
+            TimeZoneInfo.Local.Id,
+            DateTimeOffset.Now,
+            Environment.GetEnvironmentVariable("TZ") ?? "(unset)");
+        Log.Information(
             "Writing logs to {LogDirectory} as {ActiveFile}",
             logsDir,
             ActiveFileName(today));

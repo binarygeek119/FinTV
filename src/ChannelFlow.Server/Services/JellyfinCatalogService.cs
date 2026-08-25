@@ -11,6 +11,7 @@ public class JellyfinCatalogService
     private static readonly TimeSpan MusicAudioCacheTtl = TimeSpan.FromMinutes(2);
     private static readonly ConcurrentDictionary<string, (DateTime Utc, IReadOnlyList<BaseItem> Tracks)> MusicAudioCache = new(StringComparer.Ordinal);
 
+    private readonly Dictionary<string, IReadOnlyList<BaseItem>> _queryCache = new(StringComparer.Ordinal);
     private readonly ILibraryManager _libraryManager;
     private readonly HolidayChannelService _holidays;
     private readonly FinTvListService _lists;
@@ -146,6 +147,12 @@ public class JellyfinCatalogService
         Guid? parentId = null,
         DateOnly? scheduleDate = null)
     {
+        var cacheKey = $"{channel.Id:N}|{scheduleDate?.DayNumber.ToString() ?? ""}|{parentId?.ToString("N") ?? ""}|{collectionName ?? ""}|{JsonSerializer.Serialize(filter)}";
+        if (_queryCache.TryGetValue(cacheKey, out var cached))
+        {
+            return cached;
+        }
+
         var query = new InternalItemsQuery
         {
             Recursive = true,
@@ -198,12 +205,14 @@ public class JellyfinCatalogService
                 return fallbackQuery;
             });
 
-        return ApplyFilterDefinitionConstraints(
+        var result = ApplyFilterDefinitionConstraints(
             ApplyChannelFilterMetadata(
                 ApplyCatalogConstraints(items, channel, scheduleDate),
                 channel),
             filter,
             ChannelAiRules.GetYearConstraints(channel));
+        _queryCache[cacheKey] = result;
+        return result;
     }
 
     public IReadOnlyList<BaseItem> BrowseForAiManifest(Channel channel, ChannelCatalogMode catalogMode, int limit)
@@ -1132,10 +1141,30 @@ public class JellyfinCatalogService
         return new ResolvedCandidate
         {
             JellyfinItemId = item.Id,
-            SeriesId = item is Episode episode && episode.SeriesId != Guid.Empty ? episode.SeriesId : null,
+            SeriesId = MapSeriesId(item),
             Title = BuildPlayoutTitle(item),
             Duration = duration
         };
+    }
+
+    private static Guid? MapSeriesId(BaseItem item)
+    {
+        if (item is not Episode episode)
+        {
+            return null;
+        }
+
+        if (episode.SeriesId != Guid.Empty)
+        {
+            return episode.SeriesId;
+        }
+
+        if (episode.Series?.Id is Guid fromSeries && fromSeries != Guid.Empty)
+        {
+            return fromSeries;
+        }
+
+        return null;
     }
 
     private string BuildPlayoutTitle(BaseItem item)
