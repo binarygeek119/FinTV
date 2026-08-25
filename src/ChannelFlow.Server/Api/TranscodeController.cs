@@ -16,20 +16,31 @@ namespace FinTv.Api;
 public class TranscodeController : ControllerBase
 {
     private readonly FfmpegEncodingService _encoding;
+    private readonly GpuCapabilityService _gpu;
+    private readonly StreamNormalizationService _normalization;
+    private readonly FfmpegCommandBuilder _commands;
     private readonly IFfmpegLocator _ffmpeg;
 
-    public TranscodeController(FfmpegEncodingService encoding, IFfmpegLocator ffmpeg)
+    public TranscodeController(
+        FfmpegEncodingService encoding,
+        GpuCapabilityService gpu,
+        StreamNormalizationService normalization,
+        FfmpegCommandBuilder commands,
+        IFfmpegLocator ffmpeg)
     {
         _encoding = encoding;
+        _gpu = gpu;
+        _normalization = normalization;
+        _commands = commands;
         _ffmpeg = ffmpeg;
     }
 
     [HttpGet("settings")]
-    public ActionResult<object> GetSettings()
+    public async Task<ActionResult<object>> GetSettings(CancellationToken cancellationToken)
     {
         try
         {
-            return Ok(BuildPayload());
+            return Ok(await BuildPayloadAsync(cancellationToken));
         }
         catch (Exception ex)
         {
@@ -38,7 +49,7 @@ public class TranscodeController : ControllerBase
     }
 
     [HttpPut("settings")]
-    public IActionResult UpdateSettings([FromBody] TranscodeSettingsRequest? request)
+    public async Task<IActionResult> UpdateSettings([FromBody] TranscodeSettingsRequest? request, CancellationToken cancellationToken)
     {
         var plugin = FinTvRuntime.Current;
         if (plugin is null)
@@ -54,6 +65,7 @@ public class TranscodeController : ControllerBase
         try
         {
             plugin.Configuration.Transcode ??= new TranscodeSettings();
+            var previousDevice = _encoding.VaapiDevice;
             if (request.ResetToEnvironment == true)
             {
                 plugin.Configuration.Transcode.HardwareAcceleration = null;
@@ -62,12 +74,13 @@ public class TranscodeController : ControllerBase
             }
             else
             {
-                plugin.Configuration.Transcode.HardwareAcceleration =
-                    FfmpegEncodingService.NormalizeAcceleration(request.HardwareAcceleration, request.VideoEncoder);
-                plugin.Configuration.Transcode.VideoEncoder = NormalizeEncoder(request.VideoEncoder);
-                plugin.Configuration.Transcode.VaapiDevice = string.IsNullOrWhiteSpace(request.VaapiDevice)
-                    ? null
-                    : request.VaapiDevice.Trim();
+                await _gpu.GetAsync(cancellationToken);
+                var accel = _gpu.ClampAcceleration(request.HardwareAcceleration, request.VideoEncoder);
+                plugin.Configuration.Transcode.HardwareAcceleration = accel;
+                plugin.Configuration.Transcode.VideoEncoder = NormalizeEncoder(_gpu.ClampEncoder(request.VideoEncoder, accel));
+                plugin.Configuration.Transcode.VaapiDevice = accel == "vaapi"
+                    ? _gpu.ClampVaapiDevice(request.VaapiDevice)
+                    : string.IsNullOrWhiteSpace(request.VaapiDevice) ? null : request.VaapiDevice.Trim();
                 if (request.RunAheadSeconds.HasValue)
                 {
                     plugin.Configuration.Transcode.RunAheadSeconds =
@@ -76,8 +89,23 @@ public class TranscodeController : ControllerBase
             }
 
             plugin.SaveConfiguration();
+            var deviceChanged = !string.Equals(
+                previousDevice,
+                plugin.Configuration.Transcode.VaapiDevice,
+                StringComparison.Ordinal);
+            if (request.ResetToEnvironment == true || deviceChanged)
+            {
+                _gpu.Invalidate();
+            }
+
+            await _gpu.GetAsync(cancellationToken);
             _encoding.ApplyFromSaved(plugin.Configuration.Transcode);
-            return Ok(BuildPayload());
+            plugin.Configuration.Normalization = _gpu.ClampNormalization(
+                plugin.Configuration.Normalization ?? NormalizationSettings.CreateDefault(),
+                _encoding.Describe().HardwareAcceleration);
+            plugin.SaveConfiguration();
+            _normalization.ApplyFromSaved(plugin.Configuration.Normalization);
+            return Ok(await BuildPayloadAsync(cancellationToken));
         }
         catch (Exception ex)
         {
@@ -88,13 +116,7 @@ public class TranscodeController : ControllerBase
     [HttpPost("test")]
     public async Task<ActionResult<object>> TestEncode(CancellationToken cancellationToken)
     {
-        var args = new List<string> { "-hide_banner", "-loglevel", "error", "-y" };
-        args.AddRange(_encoding.HardwareDeviceArgs);
-        args.AddRange(["-f", "lavfi", "-i", "color=c=black:s=320x180:r=30:d=1"]);
-        args.AddRange(["-vf", _encoding.AdaptVideoFilterForEncoder("format=yuv420p", _encoding.Encoder)]);
-        _encoding.AppendVideoEncoder(args, stillImage: true);
-        args.AddRange(["-an", "-f", "null", "-"]);
-
+        var args = _commands.BuildTestEncodeCommand().ToList();
         var stderr = new StringBuilder();
         try
         {
@@ -104,12 +126,14 @@ public class TranscodeController : ControllerBase
                 .WithStandardErrorPipe(PipeTarget.ToStringBuilder(stderr))
                 .ExecuteAsync(cancellationToken);
 
+            var pipeline = _commands.DescribePipeline();
             var error = stderr.ToString().Trim();
             return Ok(new
             {
                 ok = result.ExitCode == 0,
                 exitCode = result.ExitCode,
-                encoder = _encoding.Encoder,
+                encoder = pipeline.Encoder,
+                summary = pipeline.Summary,
                 ffmpegPath = _ffmpeg.EncoderPath,
                 error = error.Length > 2000 ? error[^2000..] : error
             });
@@ -120,29 +144,40 @@ public class TranscodeController : ControllerBase
             {
                 ok = false,
                 exitCode = -1,
-                encoder = _encoding.Encoder,
+                encoder = _encoding.ResolveVideoEncoder(_normalization.Current.IsMpeg2),
+                summary = _commands.DescribePipeline().Summary,
                 ffmpegPath = _ffmpeg.EncoderPath,
                 error = ex.Message
             });
         }
     }
 
-    private object BuildPayload()
+    private async Task<object> BuildPayloadAsync(CancellationToken cancellationToken)
     {
+        var caps = await _gpu.GetAsync(cancellationToken);
         var saved = FinTvRuntime.Current?.Configuration.Transcode ?? new TranscodeSettings();
         var status = _encoding.Describe();
         var usingSaved = !string.IsNullOrWhiteSpace(saved.HardwareAcceleration)
             || !string.IsNullOrWhiteSpace(saved.VideoEncoder)
             || !string.IsNullOrWhiteSpace(saved.VaapiDevice);
+        var requestedAccel = usingSaved
+            ? FfmpegEncodingService.NormalizeAcceleration(saved.HardwareAcceleration, saved.VideoEncoder)
+            : _encoding.EnvironmentHardwareAcceleration;
+        var accel = _gpu.ClampAcceleration(requestedAccel, saved.VideoEncoder);
+        var encoder = usingSaved
+            ? _gpu.ClampEncoder(string.IsNullOrWhiteSpace(saved.VideoEncoder) ? "auto" : saved.VideoEncoder, accel)
+            : "auto";
+        var vaapiDevice = accel == "vaapi"
+            ? _gpu.ClampVaapiDevice(FirstNonEmpty(saved.VaapiDevice, status.VaapiDevice, _encoding.EnvironmentVaapiDevice))
+            : FirstNonEmpty(saved.VaapiDevice, status.VaapiDevice, _encoding.EnvironmentVaapiDevice);
         return new
         {
-            hardwareAcceleration = usingSaved
-                ? FfmpegEncodingService.NormalizeAcceleration(saved.HardwareAcceleration, saved.VideoEncoder)
-                : _encoding.EnvironmentHardwareAcceleration,
-            videoEncoder = string.IsNullOrWhiteSpace(saved.VideoEncoder) ? "auto" : saved.VideoEncoder,
-            vaapiDevice = FirstNonEmpty(saved.VaapiDevice, status.VaapiDevice, _encoding.EnvironmentVaapiDevice),
+            hardwareAcceleration = accel,
+            videoEncoder = encoder,
+            vaapiDevice,
             runAheadSeconds = StreamService.GetRunAheadSeconds(),
-            effectiveEncoder = status.Encoder,
+            effectiveEncoder = _encoding.ResolveVideoEncoder(_normalization.Current.IsMpeg2),
+            pipeline = _commands.DescribePipeline(),
             useVaapi = status.UseVaapi,
             vaapiRequested = status.VaapiRequested,
             vaapiDeviceExists = status.VaapiDeviceExists,
@@ -153,6 +188,19 @@ public class TranscodeController : ControllerBase
                 hardwareAcceleration = _encoding.EnvironmentHardwareAcceleration,
                 videoEncoder = _encoding.EnvironmentVideoEncoder,
                 vaapiDevice = _encoding.EnvironmentVaapiDevice
+            },
+            capabilities = new
+            {
+                summary = caps.Summary,
+                driver = caps.Driver,
+                accelerations = caps.Accelerations.Select(item => new
+                {
+                    value = item.Id,
+                    label = item.Label,
+                    encoders = item.Encoders,
+                    devices = item.Devices
+                }),
+                formats = caps.Formats
             }
         };
     }

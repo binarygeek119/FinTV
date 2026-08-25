@@ -11,18 +11,28 @@ namespace FinTv.Api;
 public class NormalizationController : ControllerBase
 {
     private readonly StreamNormalizationService _normalization;
+    private readonly FfmpegEncodingService _encoding;
+    private readonly GpuCapabilityService _gpu;
+    private readonly FfmpegCommandBuilder _commands;
 
-    public NormalizationController(StreamNormalizationService normalization)
+    public NormalizationController(
+        StreamNormalizationService normalization,
+        FfmpegEncodingService encoding,
+        GpuCapabilityService gpu,
+        FfmpegCommandBuilder commands)
     {
         _normalization = normalization;
+        _encoding = encoding;
+        _gpu = gpu;
+        _commands = commands;
     }
 
     [HttpGet("settings")]
-    public ActionResult<object> GetSettings()
+    public async Task<ActionResult<object>> GetSettings(CancellationToken cancellationToken)
     {
         try
         {
-            return Ok(BuildPayload());
+            return Ok(await BuildPayloadAsync(cancellationToken));
         }
         catch (Exception ex)
         {
@@ -31,7 +41,9 @@ public class NormalizationController : ControllerBase
     }
 
     [HttpPut("settings")]
-    public IActionResult UpdateSettings([FromBody] NormalizationSettingsRequest? request)
+    public async Task<IActionResult> UpdateSettings(
+        [FromBody] NormalizationSettingsRequest? request,
+        CancellationToken cancellationToken)
     {
         var plugin = FinTvRuntime.Current;
         if (plugin is null)
@@ -46,23 +58,27 @@ public class NormalizationController : ControllerBase
 
         try
         {
+            await _gpu.GetAsync(cancellationToken);
+            var accel = _encoding.Describe().HardwareAcceleration;
             plugin.Configuration.Normalization = request.ResetToDefaults == true
-                ? NormalizationSettings.CreateDefault()
-                : NormalizationTarget.FromSettings(new NormalizationSettings
-                {
-                    Resolution = request.Resolution ?? NormalizationSettings.DefaultResolution,
-                    FrameRate = request.FrameRate ?? NormalizationSettings.DefaultFrameRate,
-                    VideoCodec = request.VideoCodec ?? NormalizationSettings.DefaultVideoCodec,
-                    VideoProfile = request.VideoProfile ?? NormalizationSettings.DefaultVideoProfile,
-                    VideoBitrate = request.VideoBitrate ?? NormalizationSettings.DefaultVideoBitrate,
-                    AudioCodec = request.AudioCodec ?? NormalizationSettings.DefaultAudioCodec,
-                    AudioChannels = request.AudioChannels ?? NormalizationSettings.DefaultAudioChannels,
-                    AudioSampleRate = request.AudioSampleRate ?? NormalizationSettings.DefaultAudioSampleRate,
-                    AudioBitrate = request.AudioBitrate ?? NormalizationSettings.DefaultAudioBitrate
-                }).ToSettings();
+                ? _gpu.ClampNormalization(NormalizationSettings.CreateDefault(), accel)
+                : _gpu.ClampNormalization(
+                    NormalizationTarget.FromSettings(new NormalizationSettings
+                    {
+                        Resolution = request.Resolution ?? NormalizationSettings.DefaultResolution,
+                        FrameRate = request.FrameRate ?? NormalizationSettings.DefaultFrameRate,
+                        VideoCodec = request.VideoCodec ?? NormalizationSettings.DefaultVideoCodec,
+                        VideoProfile = request.VideoProfile ?? NormalizationSettings.DefaultVideoProfile,
+                        VideoBitrate = request.VideoBitrate ?? NormalizationSettings.DefaultVideoBitrate,
+                        AudioCodec = request.AudioCodec ?? NormalizationSettings.DefaultAudioCodec,
+                        AudioChannels = request.AudioChannels ?? NormalizationSettings.DefaultAudioChannels,
+                        AudioSampleRate = request.AudioSampleRate ?? NormalizationSettings.DefaultAudioSampleRate,
+                        AudioBitrate = request.AudioBitrate ?? NormalizationSettings.DefaultAudioBitrate
+                    }).ToSettings(),
+                    accel);
             plugin.SaveConfiguration();
             _normalization.ApplyFromSaved(plugin.Configuration.Normalization);
-            return Ok(BuildPayload());
+            return Ok(await BuildPayloadAsync(cancellationToken));
         }
         catch (Exception ex)
         {
@@ -70,8 +86,39 @@ public class NormalizationController : ControllerBase
         }
     }
 
-    private object BuildPayload()
-        => _normalization.Describe();
+    private async Task<object> BuildPayloadAsync(CancellationToken cancellationToken)
+    {
+        var caps = await _gpu.GetAsync(cancellationToken);
+        var accel = _encoding.Describe().HardwareAcceleration;
+        var clamped = _gpu.ClampNormalization(_normalization.Current.ToSettings(), accel);
+        _normalization.ApplyFromSaved(clamped);
+        var target = _normalization.Current;
+        var format = _gpu.FormatFor(accel);
+        return new
+        {
+            resolution = target.Resolution,
+            frameRate = target.FrameRate,
+            videoCodec = target.VideoCodec,
+            videoProfile = target.VideoProfile,
+            videoBitrate = target.VideoBitrate,
+            audioCodec = target.AudioCodec,
+            audioChannels = target.AudioChannels,
+            audioSampleRate = target.AudioSampleRate.ToString(),
+            audioBitrate = target.AudioBitrate,
+            summary = target.Summary,
+            pipeline = _commands.DescribePipeline(),
+            capabilities = new
+            {
+                summary = caps.Summary,
+                driver = caps.Driver,
+                acceleration = accel,
+                videoCodecs = format.VideoCodecs,
+                h264Profiles = format.H264Profiles,
+                resolutions = format.Resolutions,
+                frameRates = format.FrameRates
+            }
+        };
+    }
 }
 
 public class NormalizationSettingsRequest

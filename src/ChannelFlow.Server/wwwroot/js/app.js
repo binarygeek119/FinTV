@@ -5353,32 +5353,70 @@
             const vaapi = transcode.useVaapi
                 ? `Available (${transcode.vaapiDevice})`
                 : (transcode.vaapiDeviceExists ? transcode.vaapiDevice : `Missing (${transcode.vaapiDevice || 'none'})`);
-            renderAboutDl('about-transcode', [
-                ['Encoder', transcode.encoder],
-                ['Hardware acceleration', transcode.hardwareAcceleration],
-                ['Source', transcode.source === 'saved' ? 'Saved on Transcode tab' : 'Container / environment default'],
+            const pipeline = info.pipeline || transcode.pipeline || {};
+            const normalization = info.normalization || pipeline.target || {};
+            renderAboutDl('about-stream', [
+                ['Pipeline', pipeline.summary],
+                ['Encoder', pipeline.encoder || transcode.encoder],
+                ['Hardware acceleration', pipeline.acceleration || transcode.hardwareAcceleration],
+                ['Source', transcode.source === 'saved' ? 'Saved on Transcode' : 'Container / environment default'],
                 ['VAAPI device', vaapi],
-                ['FFmpeg path', transcode.ffmpegPath],
-                ['FFmpeg', transcode.ffmpegVersion],
-                ['Environment default', `${transcode.environmentAcceleration || 'none'} / ${transcode.environmentEncoder || 'libx264'}`]
-            ]);
-            const normalization = info.normalization || {};
-            renderAboutDl('about-normalization', [
+                ['GPU', transcode.gpuSummary],
                 ['Target', normalization.summary],
                 ['Resolution', normalization.resolution],
                 ['Frame rate', normalization.frameRate],
                 ['Video', normalization.videoCodec],
                 ['Profile', normalization.videoProfile],
-                ['Video bitrate', normalization.videoBitrate],
-                ['Audio', normalization.audioCodec],
-                ['Channels', normalization.audioChannels],
-                ['Sample rate', normalization.audioSampleRate],
-                ['Audio bitrate', normalization.audioBitrate]
+                ['Audio', `${normalization.audioCodec || ''} ${normalization.audioChannels || ''}`.trim()],
+                ['FFmpeg path', transcode.ffmpegPath],
+                ['FFmpeg', transcode.ffmpegVersion]
             ]);
         } catch (err) {
             reportApiError(err, 'Could not load About information.');
             renderAboutDl('about-app', [['Status', err.message || 'Could not load About information.']]);
         }
+    }
+
+    let gpuCapabilities = null;
+
+    function replaceSelectOptions(selectId, options, selected) {
+        const select = $(selectId);
+        if (!select || !Array.isArray(options) || options.length === 0) {
+            return selected;
+        }
+
+        const wanted = selected == null || selected === undefined ? select.value : String(selected);
+        select.innerHTML = '';
+        options.forEach((item) => {
+            const opt = document.createElement('option');
+            opt.value = item.value;
+            opt.textContent = item.label || item.value;
+            select.appendChild(opt);
+        });
+        if ([...select.options].some((option) => option.value === wanted)) {
+            select.value = wanted;
+            return wanted;
+        }
+
+        select.value = select.options[0].value;
+        return select.value;
+    }
+
+    function selectedAccelOption() {
+        const accel = $('transcode-hwaccel')?.value || 'none';
+        const list = gpuCapabilities?.accelerations || [];
+        return list.find((item) => item.value === accel) || list[0] || null;
+    }
+
+    function applyNormalizationLimits(limits, settings) {
+        if (!limits) {
+            return;
+        }
+
+        replaceSelectOptions('norm-resolution', limits.resolutions, settings?.resolution);
+        replaceSelectOptions('norm-framerate', limits.frameRates, settings?.frameRate);
+        replaceSelectOptions('norm-video-codec', limits.videoCodecs, settings?.videoCodec);
+        replaceSelectOptions('norm-video-profile', limits.h264Profiles, settings?.videoProfile);
     }
 
     function syncTranscodeUi() {
@@ -5392,88 +5430,135 @@
         if (vaapiHint) {
             vaapiHint.classList.toggle('hidden', !showVaapi);
         }
+
+        const selected = selectedAccelOption();
+        if (showVaapi && selected?.devices?.length) {
+            replaceSelectOptions('transcode-vaapi-device', selected.devices, $('transcode-vaapi-device')?.value);
+        }
+
+        const format = gpuCapabilities?.formats?.[accel];
+        if (format) {
+            applyNormalizationLimits(format);
+        }
+        syncNormalizationUi();
+        updateEncoderHint();
     }
 
-    function renderTranscodeStatus(settings) {
-        const el = $('transcode-status');
-        if (!el || !settings) {
+    function updateEncoderHint() {
+        const el = $('stream-encoder-hint');
+        if (!el) {
             return;
         }
+
+        const accel = $('transcode-hwaccel')?.value || 'none';
+        const codec = $('norm-video-codec')?.value || 'h264';
+        if (codec === 'mpeg2') {
+            el.textContent = accel === 'vaapi'
+                ? 'Encoder: mpeg2_vaapi when this GPU can encode MPEG-2, otherwise mpeg2video.'
+                : 'Encoder: mpeg2video (software). NVIDIA NVENC does not encode MPEG-2.';
+            return;
+        }
+
+        if (accel === 'vaapi') {
+            el.textContent = 'Encoder: h264_vaapi with the H.264 profile selected above.';
+            return;
+        }
+        if (accel === 'nvenc') {
+            el.textContent = 'Encoder: h264_nvenc with the H.264 profile selected above.';
+            return;
+        }
+        el.textContent = 'Encoder: libx264 with the H.264 profile selected above.';
+    }
+
+    function renderPipelineStatus(transcode, normalization) {
+        const el = $('stream-pipeline-status');
+        if (!el) {
+            return;
+        }
+
+        const pipeline = transcode?.pipeline || normalization?.pipeline || {};
+        const runAhead = Number(transcode?.runAheadSeconds ?? 180);
         const lines = [
-            `Effective encoder: ${settings.effectiveEncoder || 'libx264'}`,
-            `FFmpeg: ${settings.ffmpegPath || 'ffmpeg'}`,
-            `Source: ${settings.source === 'saved' ? 'saved on this tab' : 'container environment'}`
+            pipeline.summary || 'Live streams use the Normalization format through the Transcode encoder.'
         ];
-        if (settings.vaapiRequested && !settings.vaapiDeviceExists) {
-            lines.push(`VAAPI device ${settings.vaapiDevice || '/dev/dri/renderD128'} was not found. Using software encode.`);
-        } else if (settings.useVaapi) {
-            lines.push(`VAAPI device ${settings.vaapiDevice} is available.`);
+        if (transcode?.capabilities?.summary) {
+            lines.push(`GPU: ${transcode.capabilities.summary}`);
         }
-        if (settings.environment) {
-            lines.push(`Container default: ${settings.environment.hardwareAcceleration || 'none'} / ${settings.environment.videoEncoder || 'libx264'}`);
-        }
-        const runAhead = Number(settings.runAheadSeconds ?? 180);
         lines.push(runAhead > 0
             ? `Run-ahead buffer: ${runAhead}s`
             : 'Run-ahead buffer: off (real time)');
+        if (transcode?.source) {
+            lines.push(`Encoder source: ${transcode.source === 'saved' ? 'saved' : 'container environment'}`);
+        }
         el.textContent = lines.join('\n');
     }
 
-    async function loadTranscode() {
+    function applyTranscodeForm(settings) {
+        gpuCapabilities = settings.capabilities || gpuCapabilities;
+        if (gpuCapabilities?.accelerations) {
+            replaceSelectOptions(
+                'transcode-hwaccel',
+                gpuCapabilities.accelerations.map((item) => ({ value: item.value, label: item.label })),
+                settings.hardwareAcceleration || 'none'
+            );
+        } else if ($('transcode-hwaccel')) {
+            $('transcode-hwaccel').value = settings.hardwareAcceleration || 'none';
+        }
+        syncTranscodeUi();
+        if ($('transcode-vaapi-device')) {
+            $('transcode-vaapi-device').value = settings.vaapiDevice || '/dev/dri/renderD128';
+        }
+        if ($('transcode-runahead')) {
+            $('transcode-runahead').value = String(settings.runAheadSeconds ?? 180);
+        }
+        syncTranscodeUi();
+    }
+
+    async function loadStreamOutput() {
         try {
-            const settings = await api('/transcode/settings');
-            if ($('transcode-hwaccel')) {
-                $('transcode-hwaccel').value = settings.hardwareAcceleration || 'none';
-            }
-            if ($('transcode-encoder')) {
-                const encoder = settings.videoEncoder || 'auto';
-                const select = $('transcode-encoder');
-                if (![...select.options].some((o) => o.value === encoder)) {
-                    const extra = document.createElement('option');
-                    extra.value = encoder;
-                    extra.textContent = encoder;
-                    select.appendChild(extra);
-                }
-                select.value = encoder;
-            }
-            if ($('transcode-vaapi-device')) {
-                $('transcode-vaapi-device').value = settings.vaapiDevice || '/dev/dri/renderD128';
-            }
-            if ($('transcode-runahead')) {
-                $('transcode-runahead').value = String(settings.runAheadSeconds ?? 180);
-            }
-            renderTranscodeStatus(settings);
-            syncTranscodeUi();
+            const [transcode, normalization] = await Promise.all([
+                api('/transcode/settings'),
+                api('/normalization/settings')
+            ]);
+            applyTranscodeForm(transcode);
+            fillNormalizationForm(normalization);
+            updateEncoderHint();
+            renderPipelineStatus(transcode, normalization);
         } catch (err) {
-            reportApiError(err, 'Could not load transcode settings.');
+            reportApiError(err, 'Could not load stream settings.');
         }
     }
 
-    async function saveTranscodeSettings() {
-        const saved = await api('/transcode/settings', {
+    async function loadTranscode() {
+        await loadStreamOutput();
+    }
+
+    async function saveStreamSettings() {
+        await api('/transcode/settings', {
             method: 'PUT',
             body: JSON.stringify({
                 hardwareAcceleration: $('transcode-hwaccel')?.value || 'none',
-                videoEncoder: $('transcode-encoder')?.value || 'auto',
+                videoEncoder: 'auto',
                 vaapiDevice: ($('transcode-vaapi-device')?.value || '').trim(),
                 runAheadSeconds: Number($('transcode-runahead')?.value || '180')
             })
         });
-        toast('Transcode settings saved. New streams use these settings immediately.', 'success');
-        renderTranscodeStatus(saved);
-        if ($('transcode-hwaccel')) {
-            $('transcode-hwaccel').value = saved.hardwareAcceleration || 'none';
-        }
-        if ($('transcode-encoder')) {
-            $('transcode-encoder').value = saved.videoEncoder || 'auto';
-        }
-        if ($('transcode-vaapi-device')) {
-            $('transcode-vaapi-device').value = saved.vaapiDevice || '/dev/dri/renderD128';
-        }
-        if ($('transcode-runahead')) {
-            $('transcode-runahead').value = String(saved.runAheadSeconds ?? 180);
-        }
-        syncTranscodeUi();
+        await api('/normalization/settings', {
+            method: 'PUT',
+            body: JSON.stringify({
+                resolution: $('norm-resolution')?.value || 'match',
+                frameRate: $('norm-framerate')?.value || '30',
+                videoCodec: $('norm-video-codec')?.value || 'h264',
+                videoProfile: $('norm-video-profile')?.value || 'main',
+                videoBitrate: $('norm-video-bitrate')?.value || 'auto',
+                audioCodec: $('norm-audio-codec')?.value || 'aac',
+                audioChannels: $('norm-audio-channels')?.value || '2.0',
+                audioSampleRate: $('norm-audio-rate')?.value || '48000',
+                audioBitrate: $('norm-audio-bitrate')?.value || '192k'
+            })
+        });
+        toast('Stream settings saved. The next program on each channel uses this pipeline.', 'success');
+        await loadStreamOutput();
         const result = $('transcode-test-result');
         if (result) {
             result.textContent = '';
@@ -5483,13 +5568,16 @@
     async function testTranscode() {
         const resultEl = $('transcode-test-result');
         if (resultEl) {
-            resultEl.textContent = 'Running a 1-second test encode…';
+            resultEl.textContent = 'Running a 1-second test encode of the current Normalization target…';
         }
         const result = await api('/transcode/test', { method: 'POST' });
         if (result.ok) {
-            toast(`Test encode succeeded with ${result.encoder}.`, 'success');
+            const line = result.summary
+                ? `Test encode succeeded: ${result.summary}`
+                : `Test encode succeeded with ${result.encoder}.`;
+            toast(line, 'success');
             if (resultEl) {
-                resultEl.textContent = `Test encode succeeded with ${result.encoder}.`;
+                resultEl.textContent = line;
             }
             return;
         }
@@ -5501,13 +5589,12 @@
     }
 
     async function resetTranscodeSettings() {
-        const saved = await api('/transcode/settings', {
+        await api('/transcode/settings', {
             method: 'PUT',
             body: JSON.stringify({ resetToEnvironment: true })
         });
-        toast('Transcode settings reset to container environment.', 'success');
-        await loadTranscode();
-        renderTranscodeStatus(saved);
+        toast('Encoder reset to container environment.', 'success');
+        await loadStreamOutput();
     }
 
     function syncNormalizationUi() {
@@ -5519,6 +5606,7 @@
     }
 
     function fillNormalizationForm(settings) {
+        applyNormalizationLimits(settings.capabilities, settings);
         const fields = {
             'norm-resolution': settings.resolution || 'match',
             'norm-framerate': settings.frameRate || '30',
@@ -5536,13 +5624,8 @@
                 el.value = value;
             }
         });
-        const status = $('normalization-status');
-        if (status) {
-            status.textContent = settings.summary
-                ? `Live streams use ${settings.summary}.`
-                : 'Live streams use the selected target format.';
-        }
         syncNormalizationUi();
+        updateEncoderHint();
     }
 
     function mapNormAudioChannels(value) {
@@ -5554,40 +5637,16 @@
     }
 
     async function loadNormalization() {
-        try {
-            const settings = await api('/normalization/settings');
-            fillNormalizationForm(settings);
-        } catch (err) {
-            reportApiError(err, 'Could not load normalization settings.');
-        }
-    }
-
-    async function saveNormalizationSettings() {
-        const saved = await api('/normalization/settings', {
-            method: 'PUT',
-            body: JSON.stringify({
-                resolution: $('norm-resolution')?.value || 'match',
-                frameRate: $('norm-framerate')?.value || '30',
-                videoCodec: $('norm-video-codec')?.value || 'h264',
-                videoProfile: $('norm-video-profile')?.value || 'main',
-                videoBitrate: $('norm-video-bitrate')?.value || 'auto',
-                audioCodec: $('norm-audio-codec')?.value || 'aac',
-                audioChannels: $('norm-audio-channels')?.value || '2.0',
-                audioSampleRate: $('norm-audio-rate')?.value || '48000',
-                audioBitrate: $('norm-audio-bitrate')?.value || '192k'
-            })
-        });
-        toast('Normalization saved. The next program on each channel uses this format.', 'success');
-        fillNormalizationForm(saved);
+        await loadStreamOutput();
     }
 
     async function resetNormalizationSettings() {
-        const saved = await api('/normalization/settings', {
+        await api('/normalization/settings', {
             method: 'PUT',
             body: JSON.stringify({ resetToDefaults: true })
         });
-        toast('Normalization restored to 1080p H.264 Main, 30 fps, AAC 2.0 48 kHz.', 'success');
-        fillNormalizationForm(saved);
+        toast('Format restored to 1080p H.264 Main, 30 fps, AAC 2.0 48 kHz, clamped to this GPU.', 'success');
+        await loadStreamOutput();
     }
 
     async function loadGeneral() {
@@ -6754,8 +6813,8 @@
         ai: 'AI lineup generation and tagging',
         weather: 'WeatherStar live channels',
         news: 'FlowWire News',
-        normalization: 'Target video and audio for live MPEG-TS streams',
-        transcode: 'Hardware encoding for live MPEG-TS streams',
+        normalization: 'Target format for the live MPEG-TS pipeline',
+        transcode: 'Encoder for the live MPEG-TS pipeline',
         general: 'Server-wide ChannelFlow-Server settings',
         tasks: 'Rebuild playouts, clear the guide, and maintenance',
         about: 'Version, system, and transcode information',
@@ -6864,9 +6923,15 @@
             closeDeepChannelEditor({ skipHistory: true, stay: true });
         }
 
-        qa('.channelflow-tabs .tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
+        qa('.channelflow-tabs .tab').forEach((t) => {
+            const stream = name === 'normalization' || name === 'transcode';
+            const on = t.dataset.tab === name
+                || (stream && (t.dataset.tab === 'normalization' || t.dataset.tab === 'transcode'));
+            t.classList.toggle('active', on);
+        });
         document.querySelectorAll('.tab-panel').forEach((p) => {
-            const on = p.id === 'tab-' + name;
+            const panelId = (name === 'normalization' || name === 'transcode') ? 'tab-stream' : ('tab-' + name);
+            const on = p.id === panelId;
             p.classList.toggle('active', on);
             p.classList.toggle('hidden', !on);
             p.hidden = !on;
@@ -6884,8 +6949,7 @@
         if (name === 'ai') loadAi();
         if (name === 'weather') loadWeather();
         if (name === 'news') loadNews();
-        if (name === 'normalization') loadNormalization();
-        if (name === 'transcode') loadTranscode();
+        if (name === 'normalization' || name === 'transcode') loadStreamOutput();
         if (name === 'about') loadAbout();
         if (name === 'presets') loadPresets();
         if (name === 'lineups') loadLineups();
@@ -7106,13 +7170,15 @@
         click('btn-save-news', () => saveNewsSettings().catch((e) => toast(e.message, 'error')));
         change('news-no-music', syncNewsMusicUi);
         change('news-tts', syncNewsTtsUi);
-        click('btn-save-transcode', () => saveTranscodeSettings().catch((e) => toast(e.message, 'error')));
+        click('btn-save-stream', () => saveStreamSettings().catch((e) => toast(e.message, 'error')));
         click('btn-test-transcode', () => testTranscode().catch((e) => toast(e.message, 'error')));
         click('btn-reset-transcode', () => resetTranscodeSettings().catch((e) => toast(e.message, 'error')));
         change('transcode-hwaccel', syncTranscodeUi);
-        click('btn-save-normalization', () => saveNormalizationSettings().catch((e) => toast(e.message, 'error')));
         click('btn-reset-normalization', () => resetNormalizationSettings().catch((e) => toast(e.message, 'error')));
-        change('norm-video-codec', syncNormalizationUi);
+        change('norm-video-codec', () => {
+            syncNormalizationUi();
+            updateEncoderHint();
+        });
         click('btn-save-news-feeds', () => saveNewsFeeds().catch((e) => toast(e.message, 'error')));
         click('btn-add-news-feed', addNewsFeedRow);
         click('btn-preview-news', () => loadNewsPreview(true).catch((e) => toast(e.message, 'error')));

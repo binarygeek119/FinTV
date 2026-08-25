@@ -21,6 +21,8 @@ public class AboutController : ControllerBase
     private readonly IWebHostEnvironment _env;
     private readonly FfmpegEncodingService _encoding;
     private readonly StreamNormalizationService _normalization;
+    private readonly GpuCapabilityService _gpu;
+    private readonly FfmpegCommandBuilder _commands;
     private readonly IFfmpegLocator _ffmpeg;
     private readonly StreamService _streams;
     private readonly ILogger<AboutController> _logger;
@@ -29,6 +31,8 @@ public class AboutController : ControllerBase
         IWebHostEnvironment env,
         FfmpegEncodingService encoding,
         StreamNormalizationService normalization,
+        GpuCapabilityService gpu,
+        FfmpegCommandBuilder commands,
         IFfmpegLocator ffmpeg,
         StreamService streams,
         ILogger<AboutController> logger)
@@ -36,6 +40,8 @@ public class AboutController : ControllerBase
         _env = env;
         _encoding = encoding;
         _normalization = normalization;
+        _gpu = gpu;
+        _commands = commands;
         _ffmpeg = ffmpeg;
         _streams = streams;
         _logger = logger;
@@ -63,6 +69,7 @@ public class AboutController : ControllerBase
         var saved = FinTvRuntime.Current?.Configuration.Transcode;
         var transcodeSource = HasSavedTranscode(saved) ? "saved" : "environment";
         var ffmpegVersion = await ReadFfmpegVersionAsync(_ffmpeg.EncoderPath, cancellationToken);
+        var gpu = await _gpu.GetAsync(cancellationToken);
         var viewers = _streams.GetActiveStreams().Sum(item => item.ViewerCount);
         var gc = GC.GetGCMemoryInfo();
 
@@ -107,15 +114,19 @@ public class AboutController : ControllerBase
                 ffmpegPath = _ffmpeg.EncoderPath,
                 ffmpegVersion,
                 hardwareAcceleration = encoding.HardwareAcceleration,
-                encoder = encoding.Encoder,
+                encoder = _encoding.ResolveVideoEncoder(_normalization.Current.IsMpeg2),
                 vaapiDevice = encoding.VaapiDevice,
                 vaapiDeviceExists = encoding.VaapiDeviceExists,
                 useVaapi = encoding.UseVaapi,
                 source = transcodeSource,
+                gpuSummary = gpu.Summary,
+                gpuDriver = gpu.Driver,
+                pipeline = _commands.DescribePipeline(),
                 environmentAcceleration = _encoding.EnvironmentHardwareAcceleration,
                 environmentEncoder = _encoding.EnvironmentVideoEncoder
             },
-            normalization = _normalization.Describe()
+            normalization = _normalization.Describe(),
+            pipeline = _commands.DescribePipeline()
         });
     }
 

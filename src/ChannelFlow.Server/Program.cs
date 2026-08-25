@@ -122,6 +122,7 @@ builder.Services.AddSingleton<FfmpegLocator>();
 builder.Services.AddSingleton<IFfmpegLocator>(sp => sp.GetRequiredService<FfmpegLocator>());
 builder.Services.AddSingleton<PublicBaseUrl>();
 builder.Services.AddSingleton<IPublicBaseUrl>(sp => sp.GetRequiredService<PublicBaseUrl>());
+builder.Services.AddSingleton<GpuCapabilityService>();
 builder.Services.AddSingleton<FfmpegEncodingService>();
 builder.Services.AddSingleton<StreamNormalizationService>();
 builder.Services.AddSingleton<FfmpegCommandBuilder>();

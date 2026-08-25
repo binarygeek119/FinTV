@@ -8,6 +8,7 @@ namespace FinTv.Streaming;
 public class FfmpegEncodingService
 {
     private readonly object _gate = new();
+    private readonly GpuCapabilityService _gpu;
     private readonly string _envHardwareAcceleration;
     private readonly string _envVideoEncoder;
     private readonly string _envVaapiDevice;
@@ -51,8 +52,9 @@ public class FfmpegEncodingService
 
     public string EnvironmentVaapiDevice => _envVaapiDevice;
 
-    public FfmpegEncodingService(IConfiguration configuration)
+    public FfmpegEncodingService(IConfiguration configuration, GpuCapabilityService gpu)
     {
+        _gpu = gpu;
         _envVideoEncoder = FirstNonEmpty(
             configuration["FFMPEG_VIDEO_ENCODER"],
             Environment.GetEnvironmentVariable("FFMPEG_VIDEO_ENCODER"),
@@ -170,13 +172,13 @@ public class FfmpegEncodingService
 
         if (Encoder.Contains("vaapi", StringComparison.OrdinalIgnoreCase))
         {
+            var vaapiProfile = _gpu.MapVaapiH264Profile(safeProfile);
             var args = new List<string>
             {
                 "-b:v", bitrate ?? (stillImage ? "1500k" : "4000k"),
                 "-maxrate", bitrate ?? (stillImage ? "2500k" : "5000k"),
                 "-bufsize", bufsize,
-                "-profile:v", safeProfile,
-                "-level", safeLevel,
+                "-profile:v", vaapiProfile,
                 "-r", safeRate,
                 "-g", keyint.ToString(),
                 "-bf", "0"
@@ -239,6 +241,16 @@ public class FfmpegEncodingService
         return "8000k";
     }
 
+    public string ResolveVideoEncoder(bool mpeg2)
+    {
+        if (!mpeg2)
+        {
+            return Encoder;
+        }
+
+        return UseVaapi && _gpu.SupportsMpeg2Vaapi() ? "mpeg2_vaapi" : "mpeg2video";
+    }
+
     public void AppendVideoEncoder(List<string> args, bool stillImage = false)
     {
         args.Add("-c:v");
@@ -268,8 +280,8 @@ public class FfmpegEncodingService
                 true,
                 true,
                 true,
-                ["-vaapi_device", vaapiDevice],
-                ["-hwaccel", "vaapi", "-hwaccel_device", vaapiDevice, "-hwaccel_output_format", "nv12"]);
+                ["-init_hw_device", $"vaapi=va:{vaapiDevice}", "-filter_hw_device", "va"],
+                ["-hwaccel", "vaapi", "-hwaccel_device", "va", "-hwaccel_output_format", "nv12"]);
         }
 
         if (wantNvenc)

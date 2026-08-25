@@ -658,6 +658,7 @@ public class FfmpegCommandBuilder
         {
             "-hide_banner"
         };
+        args.AddRange(_encoding.HardwareDeviceArgs);
         args.AddRange(_encoding.HardwareDecodeArgs);
         args.AddRange(new[]
         {
@@ -667,6 +668,51 @@ public class FfmpegCommandBuilder
             "-f", "null",
             "-"
         });
+        return args;
+    }
+
+    public StreamPipelineInfo DescribePipeline()
+    {
+        var target = _normalization.Current;
+        var status = _encoding.Describe();
+        var encoder = _encoding.ResolveVideoEncoder(target.IsMpeg2);
+        return new StreamPipelineInfo(
+            $"{target.Summary} via {encoder}",
+            encoder,
+            status.HardwareAcceleration,
+            status.HardwareAcceleration == "none" ? "software" : status.HardwareAcceleration,
+            status.VaapiDevice,
+            encoder.Contains("vaapi", StringComparison.OrdinalIgnoreCase),
+            _normalization.Describe());
+    }
+
+    public IReadOnlyList<string> BuildTestEncodeCommand()
+    {
+        var target = _normalization.Current;
+        var (width, height) = target.ResolveSize(AspectRatioMode.SixteenNine);
+        var context = CreateEncodingContext(width, height);
+        var args = new List<string>
+        {
+            "-hide_banner",
+            "-loglevel", "error",
+            "-y"
+        };
+        args.AddRange(context.HardwareDeviceArgs);
+        args.AddRange(
+        [
+            "-f", "lavfi",
+            "-i", $"color=c=black:s={width}x{height}:r={target.FpsOutput}:d=1",
+            "-f", "lavfi",
+            "-i", $"anullsrc=channel_layout={target.AudioLayout}:sample_rate={target.AudioSampleRate}:d=1",
+            "-vf", _encoding.AdaptVideoFilterForEncoder(
+                $"fps={target.FpsFilter},scale={width}:{height}:flags=bicubic,setsar=1,format=yuv420p",
+                context.Encoder),
+            "-map", "0:v:0",
+            "-map", "1:a:0"
+        ]);
+        AppendVideoEncoderArgs(args, context);
+        AppendAacStereo48k(args);
+        args.AddRange(["-t", "1", "-f", "null", "-"]);
         return args;
     }
 
@@ -680,12 +726,12 @@ public class FfmpegCommandBuilder
         _ = width;
         _ = height;
         _ = mediaPath;
-        if (_normalization.Current.IsMpeg2)
-        {
-            return new EncodingContext("mpeg2video", [], []);
-        }
-
-        return new EncodingContext(_encoding.Encoder, _encoding.HardwareDeviceArgs, _encoding.HardwareDecodeArgs);
+        var encoder = _encoding.ResolveVideoEncoder(_normalization.Current.IsMpeg2);
+        var hardware = encoder.Contains("vaapi", StringComparison.OrdinalIgnoreCase)
+            || encoder.Contains("nvenc", StringComparison.OrdinalIgnoreCase);
+        return hardware
+            ? new EncodingContext(encoder, _encoding.HardwareDeviceArgs, _encoding.HardwareDecodeArgs)
+            : new EncodingContext(encoder, [], []);
     }
 
     private void AppendVideoEncoderArgs(List<string> args, EncodingContext context, bool stillImage = false)
@@ -698,17 +744,24 @@ public class FfmpegCommandBuilder
             var bitrate = target.VideoBitrate is "2000k" or "4000k" or "6000k" or "8000k"
                 ? target.VideoBitrate
                 : "5000k";
-            args.AddRange(
-            [
-                "-q:v", "4",
-                "-b:v", bitrate,
-                "-maxrate", bitrate,
-                "-bufsize", "10000k",
-                "-r", target.FpsOutput,
-                "-g", (stillImage ? Math.Min(12, target.Gop) : target.Gop).ToString(),
-                "-bf", "0",
-                "-pix_fmt", "yuv420p"
-            ]);
+            var mpeg2 =
+                new List<string>
+                {
+                    "-b:v", bitrate,
+                    "-maxrate", bitrate,
+                    "-bufsize", "10000k",
+                    "-r", target.FpsOutput,
+                    "-g", (stillImage ? Math.Min(12, target.Gop) : target.Gop).ToString(),
+                    "-bf", "0"
+                };
+            if (!context.Encoder.Contains("vaapi", StringComparison.OrdinalIgnoreCase))
+            {
+                mpeg2.InsertRange(0, ["-q:v", "4"]);
+                mpeg2.Add("-pix_fmt");
+                mpeg2.Add("yuv420p");
+            }
+
+            args.AddRange(mpeg2);
             return;
         }
 
@@ -966,7 +1019,7 @@ public class FfmpegCommandBuilder
     private string BuildBroadcastAudioFilter()
     {
         var target = _normalization.Current;
-        return $"aresample=async=1:first_pts=0:ocl={target.AudioLayout},aformat=sample_fmts=fltp:sample_rates={target.AudioSampleRate}:channel_layouts={target.AudioLayout}";
+        return $"aresample=async=1:first_pts=0:ochl={target.AudioLayout},aformat=sample_fmts=fltp:sample_rates={target.AudioSampleRate}:channel_layouts={target.AudioLayout}";
     }
 
     private void AppendBroadcastAudioFilter(List<string> args, string? skipExpr = null)
@@ -1112,3 +1165,12 @@ public sealed class WeatherAlertToneSandwich
     public double TotalSeconds
         => (HasAttention ? AttentionSeconds : 0) + MiddleSeconds + (HasEnd ? EndSeconds : 0);
 }
+
+public sealed record StreamPipelineInfo(
+    string Summary,
+    string Encoder,
+    string Acceleration,
+    string Hardware,
+    string? VaapiDevice,
+    bool UseVaapi,
+    object Target);

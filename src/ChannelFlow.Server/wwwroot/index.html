@@ -953,11 +953,22 @@
                 </div>
             </section>
 
-            <section id="tab-normalization" class="tab-panel hidden" hidden>
+            <section id="tab-stream" class="tab-panel hidden" hidden>
+                <div class="card section-card">
+                    <h2>Live stream</h2>
+                    <p class="hint">Normalization is the picture and sound tuners receive. Transcode is the encoder that produces that format. They are one pipeline: ChannelFlow probes the GPU and only offers combinations that work together. Save once; the next program on each channel picks it up.</p>
+                    <div id="stream-pipeline-status" class="status-card">Loading stream pipeline…</div>
+                    <div class="actions">
+                        <button type="button" id="btn-save-stream" class="raised button-submit emby-button">Save Stream Settings</button>
+                        <button type="button" id="btn-test-transcode" class="emby-button">Test Encode</button>
+                    </div>
+                    <p id="transcode-test-result" class="hint"></p>
+                </div>
+
                 <div class="card section-card">
                     <h2>Normalization</h2>
-                    <p class="hint">Every live MPEG-TS stream is transcoded to this target format so tuners see the same video and audio, including 720p H.264 with 44.1 kHz AC3. Hardware encode is still chosen on the Transcode tab. New streams pick this up on the next item.</p>
-                    <div id="normalization-status" class="status-card">Loading normalization…</div>
+                    <p class="hint">Target video and audio. Codec, profile, size, and frame rate follow the encoder on the Transcode card below.</p>
+                    <div id="normalization-status" class="status-card hidden" hidden></div>
                     <label class="field">
                         <span>Resolution</span>
                         <select id="norm-resolution" class="emby-select">
@@ -1041,51 +1052,38 @@
                         </select>
                     </label>
                     <div class="actions">
-                        <button type="button" id="btn-save-normalization" class="raised button-submit emby-button">Save Normalization</button>
-                        <button type="button" id="btn-reset-normalization" class="emby-button">Use Defaults</button>
+                        <button type="button" id="btn-reset-normalization" class="emby-button">Reset Format Defaults</button>
                     </div>
                 </div>
-            </section>
 
-            <section id="tab-transcode" class="tab-panel hidden" hidden>
                 <div class="card section-card">
                     <h2>Transcode</h2>
-                    <p class="hint">Hardware acceleration for live MPEG-TS encoding. The output size, frame rate, and audio format are set on the Normalization tab. Saved settings override <code>FFMPEG_HWACCEL</code>, <code>FFMPEG_VIDEO_ENCODER</code>, and <code>FFMPEG_VAAPI_DEVICE</code> without restarting the container. In-progress streams pick this up on the next retry.</p>
-                    <div id="transcode-status" class="status-card">Loading transcode status…</div>
+                    <p class="hint">How FFmpeg encodes that format. The encoder name is chosen from the codec above plus this acceleration — there is no separate encoder list. Saved settings override <code>FFMPEG_HWACCEL</code> and <code>FFMPEG_VAAPI_DEVICE</code> without restarting the container.</p>
+                    <div id="transcode-status" class="status-card hidden" hidden></div>
                     <label class="field">
                         <span>Hardware acceleration</span>
                         <select id="transcode-hwaccel" class="emby-select">
-                            <option value="none">Software (libx264)</option>
-                            <option value="vaapi">Intel VAAPI</option>
+                            <option value="none">Software</option>
+                            <option value="vaapi">Intel / AMD VAAPI</option>
                             <option value="nvenc">NVIDIA NVENC</option>
                         </select>
                     </label>
                     <label class="field" id="transcode-vaapi-field">
                         <span>VAAPI device</span>
-                        <input id="transcode-vaapi-device" type="text" class="emby-input" placeholder="/dev/dri/renderD128" autocomplete="off" spellcheck="false">
-                    </label>
-                    <p class="hint" id="transcode-vaapi-hint">Pass <code>/dev/dri</code> into the container for Intel Quick Sync. Typical Unraid/Linux path is <code>/dev/dri/renderD128</code>.</p>
-                    <label class="field">
-                        <span>Video encoder</span>
-                        <select id="transcode-encoder" class="emby-select">
-                            <option value="auto">Auto (match acceleration)</option>
-                            <option value="libx264">libx264</option>
-                            <option value="h264_vaapi">h264_vaapi</option>
-                            <option value="h264_nvenc">h264_nvenc</option>
+                        <select id="transcode-vaapi-device" class="emby-select">
+                            <option value="/dev/dri/renderD128">/dev/dri/renderD128</option>
                         </select>
                     </label>
-                    <p class="hint">Auto picks <code>h264_vaapi</code>, <code>h264_nvenc</code>, or <code>libx264</code> from the acceleration setting. If the VAAPI device is missing, ChannelFlow falls back to software encode.</p>
+                    <p class="hint" id="transcode-vaapi-hint">Render nodes ChannelFlow found under <code>/dev/dri</code>. Pass <code>/dev/dri</code> into the container for Intel Quick Sync or AMD VAAPI.</p>
+                    <p class="hint" id="stream-encoder-hint">Encoder: matching the Normalization codec to this acceleration.</p>
                     <label class="field">
                         <span>Run-ahead buffer (seconds)</span>
                         <input id="transcode-runahead" type="number" min="0" max="600" step="1" value="180" class="emby-input">
                     </label>
                     <p class="hint">Lets ffmpeg encode ahead of the tuner and hold that video so a hitch or commercial switch does not freeze the picture. New tuners also start from this buffer. 0 stays live (real time). 180–300 seconds (3–5 minutes) is the right size if the picture pauses. Maximum is 600 (10 minutes).</p>
                     <div class="actions">
-                        <button type="button" id="btn-save-transcode" class="raised button-submit emby-button">Save Transcode Settings</button>
-                        <button type="button" id="btn-test-transcode" class="emby-button">Test Encode</button>
-                        <button type="button" id="btn-reset-transcode" class="emby-button">Use Container Defaults</button>
+                        <button type="button" id="btn-reset-transcode" class="emby-button">Reset Encoder to Container Defaults</button>
                     </div>
-                    <p id="transcode-test-result" class="hint"></p>
                 </div>
             </section>
 
@@ -1193,14 +1191,9 @@
                     <dl id="about-system" class="about-dl"></dl>
                 </div>
                 <div class="card section-card">
-                    <h3>Transcode</h3>
-                    <p class="hint">Live MPEG-TS encoder in use right now. Change this on the Transcode tab.</p>
-                    <dl id="about-transcode" class="about-dl"></dl>
-                </div>
-                <div class="card section-card">
-                    <h3>Normalization</h3>
-                    <p class="hint">Target stream format. Change this on the Normalization tab.</p>
-                    <dl id="about-normalization" class="about-dl"></dl>
+                    <h3>Live stream</h3>
+                    <p class="hint">Normalization format plus Transcode encoder. Change this on the Normalization or Transcode tab.</p>
+                    <dl id="about-stream" class="about-dl"></dl>
                 </div>
             </section>
 

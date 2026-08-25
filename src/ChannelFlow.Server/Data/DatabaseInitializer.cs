@@ -64,10 +64,15 @@ public class DatabaseInitializer : IHostedService
         var runtime = scope.ServiceProvider.GetRequiredService<FinTvRuntime>();
         await runtime.LoadAsync(cancellationToken);
         FinTvRuntime.Current = runtime;
-        scope.ServiceProvider.GetRequiredService<FinTv.Streaming.FfmpegEncodingService>()
-            .ApplyFromSaved(runtime.Configuration.Transcode);
-        scope.ServiceProvider.GetRequiredService<FinTv.Streaming.StreamNormalizationService>()
-            .ApplyFromSaved(runtime.Configuration.Normalization);
+        var gpu = scope.ServiceProvider.GetRequiredService<FinTv.Streaming.GpuCapabilityService>();
+        await gpu.GetAsync(cancellationToken);
+        var encoding = scope.ServiceProvider.GetRequiredService<FinTv.Streaming.FfmpegEncodingService>();
+        encoding.ApplyFromSaved(runtime.Configuration.Transcode);
+        var normalization = scope.ServiceProvider.GetRequiredService<FinTv.Streaming.StreamNormalizationService>();
+        var clampedNorm = gpu.ClampNormalization(
+            runtime.Configuration.Normalization ?? Configuration.NormalizationSettings.CreateDefault(),
+            encoding.Describe().HardwareAcceleration);
+        normalization.ApplyFromSaved(clampedNorm);
 
         try
         {
