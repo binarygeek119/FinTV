@@ -83,6 +83,35 @@ public class GuideController : ControllerBase
         return TimeZoneInfo.ConvertTimeToUtc(startLocal, tz);
     }
 
+    /// <summary>
+    /// Serves a library poster for the TV Guide programme details modal.
+    /// </summary>
+    [HttpGet("poster/{itemId:guid}")]
+    [ResponseCache(Duration = 3600, Location = ResponseCacheLocation.Client)]
+    public IActionResult GetPoster(Guid itemId, [FromServices] GuideMetadataService guideMetadata)
+    {
+        var path = guideMetadata.GetPosterImagePath(itemId);
+        if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path))
+        {
+            return NotFound();
+        }
+
+        return PhysicalFile(path, GetPosterContentType(path));
+    }
+
+    private static string GetPosterContentType(string path)
+    {
+        var extension = Path.GetExtension(path);
+        return extension.ToLowerInvariant() switch
+        {
+            ".png" => "image/png",
+            ".webp" => "image/webp",
+            ".gif" => "image/gif",
+            ".bmp" => "image/bmp",
+            _ => "image/jpeg"
+        };
+    }
+
     private static DateTime ToUtc(DateTime value)
     {
         return value.Kind switch

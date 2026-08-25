@@ -327,15 +327,60 @@ input, select, textarea {
 .tv-guide-block.type-weather { border-left-color: #22d3ee; }
 .tv-guide-block.type-news { border-left-color: #fbbf24; }
 .tv-guide-block.is-virtual { border-style: dashed; }
+
+.slot-card.type-movie {
+    background: linear-gradient(180deg, rgba(127, 29, 29, 0.95), rgba(185, 28, 28, 0.78));
+    border-color: #f87171;
+}
+.slot-card.type-tvshow {
+    background: linear-gradient(180deg, rgba(20, 83, 45, 0.95), rgba(21, 128, 61, 0.78));
+    border-color: #4ade80;
+}
+.slot-card.type-short-block {
+    background: linear-gradient(180deg, rgba(76, 29, 149, 0.95), rgba(126, 34, 206, 0.78));
+    border-color: #c084fc;
+}
+.slot-card.type-movie .time,
+.slot-card.type-movie .summary,
+.slot-card.type-movie .count { color: #fecaca; }
+.slot-card.type-tvshow .time,
+.slot-card.type-tvshow .summary,
+.slot-card.type-tvshow .count { color: #bbf7d0; }
+.slot-card.type-short-block .time,
+.slot-card.type-short-block .summary,
+.slot-card.type-short-block .count { color: #e9d5ff; }
+.slot-card.type-movie:hover,
+.slot-card.type-tvshow:hover,
+.slot-card.type-short-block:hover { filter: brightness(1.12); }
+.tv-guide-program {
+    display: flex;
+    gap: 1rem;
+    align-items: flex-start;
+}
 .tv-guide-poster {
-    width: 120px;
-    max-height: 180px;
+    width: 140px;
+    max-height: 210px;
     object-fit: cover;
-    float: right;
-    margin: 0 0 0.75rem 0.75rem;
+    flex-shrink: 0;
     border-radius: 6px;
     background: #111;
 }
+.tv-guide-program-meta {
+    min-width: 0;
+    flex: 1;
+}
+.tv-guide-program-meta h4 { margin: 0.35rem 0; }
+.tv-guide-program-meta p { margin: 0.35rem 0; }
+.tv-guide-episodes { display: grid; gap: 0.85rem; margin-top: 0.35rem; }
+.tv-guide-episode {
+    padding: 0.65rem 0.75rem;
+    background: #141414;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+.tv-guide-episode h4 { margin: 0; }
+.tv-guide-episode .hint { margin: 0.2rem 0 0; }
+.tv-guide-episode p { margin: 0.4rem 0 0; }
 .weather-zip-list { display: grid; gap: 0.65rem; margin-top: 0.85rem; }
 .weather-zip-row { display: grid; grid-template-columns: minmax(140px, 1fr) 140px; gap: 0.65rem; align-items: end; }
 .weather-zip-row .wx-channel-label { color: var(--muted); font-size: 0.85rem; padding-bottom: 0.45rem; }
@@ -386,14 +431,24 @@ input, select, textarea {
 .credits-list a { color: var(--accent-hover); }
 #general-api-key { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 
-body.channel-editor-open .app-drawer { display: none; }
-body.channel-editor-open .app-topbar { padding-bottom: 0; }
-.channel-editor { max-width: 980px; }
+body.channel-editor-open {
+    overflow: hidden;
+}
+.channel-editor {
+    position: fixed;
+    inset: 0;
+    z-index: 8500;
+    max-width: none;
+    overflow: auto;
+    padding: 1rem 1.5rem 2rem;
+    background: var(--page-bg);
+}
 .channel-editor-toolbar {
     display: flex;
     align-items: center;
     gap: 1rem;
-    margin: 0.25rem 0 1.15rem;
+    margin: 0.25rem auto 1.15rem;
+    max-width: 980px;
 }
 .channel-editor-heading { flex: 1; min-width: 0; }
 .channel-editor-heading h2 { margin: 0.1rem 0 0; font-size: 1.35rem; }
@@ -401,11 +456,40 @@ body.channel-editor-open .app-topbar { padding-bottom: 0; }
     display: grid;
     gap: 1rem;
     grid-template-columns: 1fr 1fr;
+    max-width: 980px;
+    margin: 0 auto;
 }
 .channel-editor-grid .commercial-playlist-card,
 .channel-editor-grid .section-card:nth-child(3) { grid-column: 1 / -1; }
 .channel-editor-grid h3 { margin: 0 0 0.65rem; font-size: 1rem; }
+.inner-tabs {
+    display: flex;
+    gap: 0.35rem;
+    margin: 0 0 1.1rem;
+    flex-wrap: wrap;
+}
+.inner-tabs .inner-tab {
+    background: transparent;
+    color: var(--text);
+    border: 0;
+    border-radius: 6px;
+    padding: 0.5rem 0.9rem;
+    cursor: pointer;
+    font: inherit;
+}
+.inner-tabs .inner-tab:hover:not(.active) { background: #2c2c2c; }
+.inner-tabs .inner-tab.active { background: var(--accent); color: #fff; }
 .playlist-stack { display: grid; gap: 0.5rem; }
+.playlist-add {
+    display: flex;
+    gap: 0.65rem;
+    align-items: center;
+    margin-top: 0.75rem;
+    flex-wrap: wrap;
+}
+.playlist-add .emby-select { flex: 1; min-width: 12rem; }
+.map-ch-toolbar { align-items: flex-end; }
+.map-ch-toolbar .emby-select { min-width: 16rem; }
 .playlist-empty {
     border: 1px dashed var(--border);
     border-radius: 10px;

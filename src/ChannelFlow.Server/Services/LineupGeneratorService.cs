@@ -258,6 +258,33 @@ public class LineupGeneratorService
                 continue;
             }
 
+            if (picked.SeriesId is null && picked.JellyfinItemId is Guid pickedId)
+            {
+                picked.SeriesId = await _db.Episodes.AsNoTracking()
+                    .Where(e => e.Id == pickedId)
+                    .Select(e => e.SeriesId)
+                    .FirstOrDefaultAsync(cancellationToken);
+            }
+
+            if (channel.ContentType != ChannelContentType.Music
+                && ShortEpisodeBlocks.IsShortRuntime(picked.Duration)
+                && picked.SeriesId is Guid shortSeriesId
+                && shortSeriesId != Guid.Empty)
+            {
+                cursor = await PackShortEpisodeBlockAsync(
+                    channel,
+                    picked,
+                    shortSeriesId,
+                    date,
+                    anchor,
+                    slotStart,
+                    blockEnd,
+                    tz,
+                    builtPrograms,
+                    cancellationToken);
+                continue;
+            }
+
             var contentStart = slotStart;
             var contentEnd = picked.Duration > TimeSpan.Zero
                 ? contentStart.Add(picked.Duration)
@@ -545,6 +572,76 @@ public class LineupGeneratorService
         }
 
         await _commercialService.PadToSlotAsync(channel, fillStart, blockEnd, cancellationToken);
+    }
+
+    private async Task<DateTime> PackShortEpisodeBlockAsync(
+        Channel channel,
+        ResolvedCandidate first,
+        Guid seriesId,
+        DateOnly date,
+        PlayoutAnchorState anchor,
+        DateTime slotStart,
+        DateTime blockEnd,
+        TimeZoneInfo tz,
+        List<PlayoutItem> builtPrograms,
+        CancellationToken cancellationToken)
+    {
+        var fillStart = slotStart;
+        var packed = 0;
+        var usedIds = new HashSet<Guid>();
+        var current = first;
+        while (current is not null && fillStart < blockEnd - TimeSpan.FromSeconds(8) && packed < 8)
+        {
+            var duration = current.Duration > TimeSpan.Zero ? current.Duration : TimeSpan.FromMinutes(7);
+            if (packed > 0 && fillStart + duration > blockEnd)
+            {
+                break;
+            }
+
+            var clipEnd = fillStart + duration;
+            if (clipEnd > blockEnd)
+            {
+                clipEnd = blockEnd;
+            }
+
+            var scheduled = await _commercialService.ScheduleProgramWithBreaksAsync(
+                channel,
+                current,
+                fillStart,
+                clipEnd,
+                cancellationToken);
+            builtPrograms.AddRange(scheduled.ProgramItems);
+            _db.PlayoutHistory.Add(new PlayoutHistoryEntry
+            {
+                ChannelId = channel.Id,
+                JellyfinItemId = current.JellyfinItemId,
+                AiredAt = fillStart,
+                Title = current.Title
+            });
+            if (current.JellyfinItemId is Guid usedId)
+            {
+                usedIds.Add(usedId);
+            }
+
+            fillStart = scheduled.TimelineEnd;
+            packed++;
+            current = await _smartSelection.PickNextSeriesEpisodeAsync(
+                channel,
+                seriesId,
+                date,
+                anchor,
+                usedIds,
+                cancellationToken);
+        }
+
+        var padUntil = ResolveSlotPadEnd(fillStart, blockEnd, tz);
+        if (padUntil > fillStart)
+        {
+            await _commercialService.PadToSlotAsync(channel, fillStart, padUntil, cancellationToken);
+            fillStart = padUntil;
+        }
+
+        return fillStart;
     }
 
     private async Task PackMusicVideoBlockAsync(

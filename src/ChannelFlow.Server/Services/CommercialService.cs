@@ -147,15 +147,20 @@ public class CommercialService
             return;
         }
 
-        preset ??= await ResolvePresetAsync(channel, cancellationToken);
-        if (preset is null)
-        {
-            return;
-        }
-
+        _ = preset;
         var pool = await PickCommercialsAsync(channel, 32, cancellationToken);
         if (pool.Count == 0)
         {
+            _db.PlayoutItems.Add(new PlayoutItem
+            {
+                ChannelId = channel.Id,
+                Start = from,
+                Finish = until,
+                Title = "Filler",
+                FillerKind = FillerKind.PostRoll,
+                GuideGroup = "commercial",
+                IsVirtual = true
+            });
             return;
         }
 

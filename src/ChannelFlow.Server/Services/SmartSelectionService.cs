@@ -78,6 +78,52 @@ public class SmartSelectionService
         return pick;
     }
 
+    /// <summary>
+    /// Next short episode of the same series, skipping items already used in this timeslot.
+    /// </summary>
+    public async Task<ResolvedCandidate?> PickNextSeriesEpisodeAsync(
+        Channel channel,
+        Guid seriesId,
+        DateOnly scheduleDate,
+        PlayoutAnchorState anchor,
+        ISet<Guid> excludeItemIds,
+        CancellationToken cancellationToken = default)
+    {
+        for (var attempt = 0; attempt < 12; attempt++)
+        {
+            var resolved = await _catalog.ResolveItemAsync(
+                seriesId,
+                channel,
+                anchor,
+                scheduleDate,
+                cancellationToken);
+            var pick = resolved.FirstOrDefault();
+            if (pick is null)
+            {
+                return null;
+            }
+
+            if (pick.JellyfinItemId is Guid id && excludeItemIds.Contains(id))
+            {
+                continue;
+            }
+
+            if (!ShortEpisodeBlocks.IsShortRuntime(pick.Duration))
+            {
+                return null;
+            }
+
+            if (pick.JellyfinItemId.HasValue)
+            {
+                anchor.LastAired[pick.JellyfinItemId.Value] = scheduleDate.ToDateTime(TimeOnly.MinValue);
+            }
+
+            return pick;
+        }
+
+        return null;
+    }
+
     private static double ComputeScore(ResolvedCandidate item, int weight, List<Guid?> recentIds, PlayoutAnchorState anchor)
     {
         var score = weight * 10.0;
@@ -127,6 +173,8 @@ public class SmartSelectionService
 public class ResolvedCandidate
 {
     public Guid? JellyfinItemId { get; set; }
+
+    public Guid? SeriesId { get; set; }
 
     public string Title { get; set; } = string.Empty;
 

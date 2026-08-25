@@ -9,6 +9,8 @@ namespace FinTv.Services;
 
 public class CommercialBrainzSyncService
 {
+    private static readonly SemaphoreSlim PullLock = new(1, 1);
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly CommercialBrainzClient _client;
     private readonly CommercialBrainzFilterService _filter;
@@ -193,6 +195,7 @@ public class CommercialBrainzSyncService
         var matchLimit = Math.Clamp(playlist.MaxResults, 1, 500);
         pullSettings.MaxSyncResults = Math.Clamp(Math.Max(matchLimit * 4, 200), 1, 2000);
 
+        await PullLock.WaitAsync(cancellationToken);
         try
         {
             var videos = !playlist.HasStructuredFilters && !string.IsNullOrWhiteSpace(playlist.Query)
@@ -249,6 +252,10 @@ public class CommercialBrainzSyncService
             playlist.LastError = ex.Message;
             runtime.SaveConfiguration();
             throw;
+        }
+        finally
+        {
+            PullLock.Release();
         }
     }
 
@@ -345,6 +352,30 @@ public class CommercialBrainzSyncService
         var seen = new HashSet<Guid>();
         var videos = new List<CommercialBrainzVideoSummary>();
 
+        var advertisers = await _client.SearchAdvertisersAsync(connection, query, 0, 25, cancellationToken);
+        foreach (var advertiser in advertisers.Items)
+        {
+            await foreach (var video in BrowseAllAsync(
+                pullSettings,
+                limit,
+                seen,
+                enrichDetails: true,
+                advertiserSbid: advertiser.Sbid.ToString("D"),
+                cancellationToken: cancellationToken))
+            {
+                if (!_filter.Matches(pullSettings, video, requireEnabled: false))
+                {
+                    continue;
+                }
+
+                videos.Add(video);
+                if (videos.Count >= limit)
+                {
+                    return videos;
+                }
+            }
+        }
+
         foreach (var hit in await _client.SearchAsync(connection, query, "video", limit, cancellationToken))
         {
             if (hit.Sbid == Guid.Empty || !seen.Add(hit.Sbid))
@@ -353,63 +384,15 @@ public class CommercialBrainzSyncService
             }
 
             var detail = await _client.GetVideoAsync(connection, hit.Sbid, cancellationToken);
-            await _client.ThrottleAsync(cancellationToken);
-            if (detail is not null)
+            if (detail is null || !_filter.Matches(pullSettings, detail, requireEnabled: false))
             {
-                videos.Add(detail);
+                continue;
             }
-        }
 
-        if (videos.Count < limit)
-        {
-            foreach (var hit in await _client.SearchAsync(connection, query, "advertiser", 25, cancellationToken))
+            videos.Add(detail);
+            if (videos.Count >= limit)
             {
-                await foreach (var video in BrowseAllAsync(
-                    pullSettings,
-                    limit,
-                    seen,
-                    enrichDetails: true,
-                    advertiserSbid: hit.Sbid.ToString("D"),
-                    cancellationToken: cancellationToken))
-                {
-                    videos.Add(video);
-                    if (videos.Count >= limit)
-                    {
-                        break;
-                    }
-                }
-
-                if (videos.Count >= limit)
-                {
-                    break;
-                }
-            }
-        }
-
-        if (videos.Count < limit)
-        {
-            var advertisers = await _client.SearchAdvertisersAsync(connection, query, 0, 25, cancellationToken);
-            foreach (var advertiser in advertisers.Items)
-            {
-                await foreach (var video in BrowseAllAsync(
-                    pullSettings,
-                    limit,
-                    seen,
-                    enrichDetails: true,
-                    advertiserSbid: advertiser.Sbid.ToString("D"),
-                    cancellationToken: cancellationToken))
-                {
-                    videos.Add(video);
-                    if (videos.Count >= limit)
-                    {
-                        break;
-                    }
-                }
-
-                if (videos.Count >= limit)
-                {
-                    break;
-                }
+                break;
             }
         }
 

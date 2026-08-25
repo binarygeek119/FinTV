@@ -49,6 +49,7 @@
     let lineupOverrides = [];
     let lineupIsWeather = false;
     let itemTitleCache = {};
+    let itemMetaCache = {};
     let channelFilter = '';
     let channelOnAir = {};
     let onAirRefreshTimer = null;
@@ -67,8 +68,13 @@
     let specialChannelId = null;
     let commercialSearchPlaylists = [];
     let selectedSearchPlaylistId = null;
+    const searchPlaylistPullsInFlight = new Set();
+    let searchPlaylistSaveBusy = false;
     let deepEditingChannelId = null;
     let deepChannelPlaylistIds = [];
+    let commercialsPage = 'library';
+    let mapChannelId = null;
+    let mapChannelPlaylistIds = [];
     let guideData = null;
     let guideFromIso = null;
     let guideDateFilter = null;
@@ -716,7 +722,14 @@
         const missing = ids.filter((id) => id && !itemTitleCache[id]);
         if (missing.length === 0) return;
         const results = await api('/catalog/lookup', { method: 'POST', body: JSON.stringify({ ids: missing }) });
-        (results || []).forEach((item) => { itemTitleCache[item.id] = item.name; });
+        (results || []).forEach((item) => {
+            itemTitleCache[item.id] = item.name;
+            itemMetaCache[item.id] = {
+                name: item.name,
+                type: item.type,
+                runtimeMinutes: item.runtimeMinutes
+            };
+        });
     }
 
     function itemLabel(id) {
@@ -726,6 +739,62 @@
 
     function isRerunSlot(slot) {
         return !!(slot && (slot.isRerunSlot || slot.IsRerunSlot));
+    }
+
+    function applyLineupSlotKinds(slots, kinds) {
+        if (!kinds || typeof kinds !== 'object') {
+            return;
+        }
+        (slots || []).forEach((slot) => {
+            const kind = kinds[slot.slotIndex] ?? kinds[String(slot.slotIndex)];
+            if (kind) {
+                slot.slotKind = kind;
+                slot.isShortEpisodeBlock = kind === 'short-block';
+            }
+        });
+    }
+
+    function lineupSlotColorClass(slot) {
+        if (!slot || lineupIsWeather || isRerunSlot(slot)) {
+            return '';
+        }
+        const kind = String(slot.slotKind || '').toLowerCase().replace(/_/g, '-');
+        if (slot.isShortEpisodeBlock || kind === 'short-block' || kind === 'shortblock') {
+            return 'type-short-block';
+        }
+        if (kind === 'movie') {
+            return 'type-movie';
+        }
+        if (kind === 'tvshow' || kind === 'tv-show') {
+            return 'type-tvshow';
+        }
+        return typeClassFromCandidate((slot.candidates || slot.Candidates || [])[0]);
+    }
+
+    function typeClassFromCandidate(candidate) {
+        if (!candidate) {
+            return '';
+        }
+        const itemId = candidate.jellyfinItemId || candidate.JellyfinItemId;
+        const meta = itemId ? itemMetaCache[itemId] : null;
+        if (!meta || !meta.type) {
+            return '';
+        }
+        const type = String(meta.type).toLowerCase();
+        if (type === 'movie') {
+            return 'type-movie';
+        }
+        if (type === 'musicvideo' || type === 'audio' || type === 'music') {
+            return '';
+        }
+        const runtime = Number(meta.runtimeMinutes);
+        if ((type === 'episode' || type === 'series') && runtime > 0 && runtime < 18) {
+            return 'type-short-block';
+        }
+        if (type === 'episode' || type === 'series' || type === 'season') {
+            return 'type-tvshow';
+        }
+        return '';
     }
 
     function candidateKind(candidate) {
@@ -939,7 +1008,7 @@
         });
         wrap.querySelectorAll('[data-edit]').forEach((btn) => btn.onclick = (e) => {
             e.stopPropagation();
-            openChannelEditorWindow(btn.dataset.edit);
+            openDeepChannelEditor(btn.dataset.edit).catch((err) => reportApiError(err, 'Could not open channel editor.'));
         });
         wrap.querySelectorAll('[data-lineup]').forEach((btn) => btn.onclick = (e) => {
             e.stopPropagation();
@@ -965,6 +1034,7 @@
             select.value = selectedChannelId || '';
 
             populateSpecialChannelSelect();
+            populateMapChannelSelect();
 
             await refreshDashboardStats();
         } catch (err) {
@@ -1236,14 +1306,18 @@
         }
     }
 
-    function fillDeepChannelPlaylistPicker() {
-        const picker = $('deep-ch-playlist-picker');
-        const addBtn = $('btn-deep-ch-add-playlist');
+    function findSearchPlaylist(id) {
+        return commercialSearchPlaylists.find((p) => String(p.id) === String(id));
+    }
+
+    function fillPlaylistPicker(pickerId, addBtnId, assignedIds) {
+        const picker = $(pickerId);
+        const addBtn = $(addBtnId);
         if (!picker) {
             return;
         }
 
-        const assigned = new Set(deepChannelPlaylistIds.map(String));
+        const assigned = new Set((assignedIds || []).map(String));
         const available = commercialSearchPlaylists.filter((p) => !assigned.has(String(p.id)));
         picker.innerHTML = available.length
             ? available.map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join('')
@@ -1254,27 +1328,13 @@
         }
     }
 
-    function renderDeepChannelPlaylists() {
-        const wrap = $('deep-ch-playlists');
-        if (!wrap) {
-            return;
-        }
-
-        if (!deepChannelPlaylistIds.length) {
-            wrap.innerHTML = commercialSearchPlaylists.length
-                ? '<div class="playlist-empty">No playlists assigned. Commercial breaks use the default pool until you add one.</div>'
-                : '<div class="playlist-empty">No saved playlists yet.</div>';
-            fillDeepChannelPlaylistPicker();
-            return;
-        }
-
-        wrap.innerHTML = deepChannelPlaylistIds.map((id) => {
-            const playlist = commercialSearchPlaylists.find((p) => String(p.id) === String(id));
-            const name = playlist ? playlist.name : 'Missing playlist';
-            const summary = playlist ? (playlist.filterSummary || playlist.query || '') : '';
-            const count = playlistSpotCount(playlist);
-            const missing = playlist ? '' : ' is-missing';
-            return `<div class="playlist-chip${missing}" data-id="${escapeHtml(id)}">
+    function playlistChipHtml(id) {
+        const playlist = findSearchPlaylist(id);
+        const name = playlist ? playlist.name : 'Missing playlist';
+        const summary = playlist ? (playlist.filterSummary || playlist.query || '') : '';
+        const count = playlistSpotCount(playlist);
+        const missing = playlist ? '' : ' is-missing';
+        return `<div class="playlist-chip${missing}" data-id="${escapeHtml(id)}">
                 <div class="playlist-chip-main">
                     <strong>${escapeHtml(name)}</strong>
                     ${summary ? `<span>${escapeHtml(summary)}</span>` : ''}
@@ -1282,12 +1342,36 @@
                 <span class="playlist-chip-count">${count} spot${count === 1 ? '' : 's'}</span>
                 <button type="button" class="btn-ghost" data-remove-playlist="${escapeHtml(id)}" title="Remove">&times;</button>
             </div>`;
-        }).join('');
+    }
 
-        wrap.querySelectorAll('[data-remove-playlist]').forEach((btn) => {
-            btn.onclick = () => removeDeepChannelPlaylist(btn.dataset.removePlaylist);
-        });
-        fillDeepChannelPlaylistPicker();
+    function renderPlaylistChips(wrapId, assignedIds, pickerId, addBtnId, onRemove) {
+        const wrap = $(wrapId);
+        if (!wrap) {
+            return;
+        }
+
+        if (!assignedIds.length) {
+            wrap.innerHTML = commercialSearchPlaylists.length
+                ? '<div class="playlist-empty">No playlists assigned. Commercial breaks use the default pool until you add one.</div>'
+                : '<div class="playlist-empty">No saved playlists yet. Save filters from the CommercialBrainz tab.</div>';
+        } else {
+            wrap.innerHTML = assignedIds.map(playlistChipHtml).join('');
+            wrap.querySelectorAll('[data-remove-playlist]').forEach((btn) => {
+                btn.onclick = () => onRemove(btn.dataset.removePlaylist);
+            });
+        }
+
+        fillPlaylistPicker(pickerId, addBtnId, assignedIds);
+    }
+
+    function renderDeepChannelPlaylists() {
+        renderPlaylistChips(
+            'deep-ch-playlists',
+            deepChannelPlaylistIds,
+            'deep-ch-playlist-picker',
+            'btn-deep-ch-add-playlist',
+            removeDeepChannelPlaylist
+        );
     }
 
     function addDeepChannelPlaylist() {
@@ -1304,6 +1388,237 @@
     function removeDeepChannelPlaylist(id) {
         deepChannelPlaylistIds = deepChannelPlaylistIds.filter((item) => String(item) !== String(id));
         renderDeepChannelPlaylists();
+    }
+
+    function commercialsSubtitle() {
+        return commercialsPage === 'map'
+            ? 'Assign commercial playlists to channels'
+            : TAB_SUBTITLES.commercials;
+    }
+
+    function applyCommercialsPage() {
+        const isMap = commercialsPage === 'map';
+        const library = $('commercials-page-library');
+        const map = $('commercials-page-map');
+        if (library) {
+            library.classList.toggle('hidden', isMap);
+            library.hidden = isMap;
+        }
+        if (map) {
+            map.classList.toggle('hidden', !isMap);
+            map.hidden = !isMap;
+        }
+        qa('[data-commercials-page]').forEach((btn) => {
+            const on = btn.dataset.commercialsPage === commercialsPage;
+            btn.classList.toggle('active', on);
+            btn.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+    }
+
+    function switchCommercialsPage(page) {
+        commercialsPage = page === 'map' ? 'map' : 'library';
+        applyCommercialsPage();
+        window.dispatchEvent(new CustomEvent('channelflow-tabchange', {
+            detail: { tab: 'commercials', title: TAB_TITLES.commercials, subtitle: commercialsSubtitle() }
+        }));
+        if (commercialsPage === 'map') {
+            loadChannelPlaylistMap().catch((err) => reportApiError(err, 'Could not load channel mapping.'));
+        }
+    }
+
+    function openMapChannelsForChannel(channelId) {
+        if (channelId) {
+            mapChannelId = channelId;
+        }
+        commercialsPage = 'map';
+        closeDeepChannelEditor({ skipHistory: true, stay: true });
+        switchTab('commercials');
+    }
+
+    function populateMapChannelSelect() {
+        const select = $('map-ch-select');
+        if (!select) {
+            return;
+        }
+
+        const previous = mapChannelId || select.value;
+        select.innerHTML = channels.length
+            ? channels.map((c) =>
+                `<option value="${escapeHtml(c.id)}">${escapeHtml(formatChannelNumber(c.number) + ' · ' + c.name)}</option>`).join('')
+            : '<option value="">No channels</option>';
+        select.disabled = channels.length === 0;
+
+        if (previous && channels.some((c) => String(c.id) === String(previous))) {
+            mapChannelId = previous;
+            select.value = previous;
+        } else if (channels[0]) {
+            mapChannelId = channels[0].id;
+            select.value = mapChannelId;
+        } else {
+            mapChannelId = null;
+            select.value = '';
+        }
+    }
+
+    function loadMapChannelAssignment() {
+        const select = $('map-ch-select');
+        mapChannelId = (select && select.value) || mapChannelId;
+        const channel = channels.find((c) => String(c.id) === String(mapChannelId));
+        mapChannelPlaylistIds = channel && Array.isArray(channel.commercialSearchPlaylistIds)
+            ? channel.commercialSearchPlaylistIds.slice()
+            : [];
+        renderMapChannelPlaylists();
+        renderChannelPlaylistOverview();
+    }
+
+    function renderMapChannelPlaylists() {
+        renderPlaylistChips(
+            'map-ch-playlists',
+            mapChannelPlaylistIds,
+            'map-ch-playlist-picker',
+            'btn-map-ch-add-playlist',
+            removeMapChannelPlaylist
+        );
+    }
+
+    function addMapChannelPlaylist() {
+        const picker = $('map-ch-playlist-picker');
+        const id = picker && picker.value;
+        if (!id || mapChannelPlaylistIds.some((item) => String(item) === String(id))) {
+            return;
+        }
+
+        mapChannelPlaylistIds.push(id);
+        renderMapChannelPlaylists();
+    }
+
+    function removeMapChannelPlaylist(id) {
+        mapChannelPlaylistIds = mapChannelPlaylistIds.filter((item) => String(item) !== String(id));
+        renderMapChannelPlaylists();
+    }
+
+    function mappedPlaylistLabel(ids) {
+        if (!ids || !ids.length) {
+            return 'Default pool';
+        }
+
+        return ids.map((id) => {
+            const playlist = findSearchPlaylist(id);
+            return playlist ? playlist.name : 'Missing playlist';
+        }).join(', ');
+    }
+
+    function renderChannelPlaylistOverview() {
+        const el = $('map-ch-overview');
+        if (!el) {
+            return;
+        }
+
+        if (!channels.length) {
+            el.innerHTML = '<div class="empty-state">No channels yet. Create a channel first.</div>';
+            return;
+        }
+
+        el.innerHTML = `<table class="data-table">
+            <thead><tr><th>Channel</th><th>Playlists</th></tr></thead>
+            <tbody>${channels.map((c) => {
+                const selected = String(c.id) === String(mapChannelId) ? ' class="selected"' : '';
+                const names = mappedPlaylistLabel(c.commercialSearchPlaylistIds);
+                return `<tr data-channel-id="${escapeHtml(c.id)}"${selected}>
+                    <td><strong>${escapeHtml(formatChannelNumber(c.number))}</strong> ${escapeHtml(c.name)}</td>
+                    <td>${escapeHtml(names)}</td>
+                </tr>`;
+            }).join('')}</tbody></table>`;
+
+        el.querySelectorAll('tbody tr').forEach((row) => {
+            row.onclick = () => {
+                mapChannelId = row.dataset.channelId;
+                populateMapChannelSelect();
+                loadMapChannelAssignment();
+            };
+        });
+    }
+
+    function refreshMappedPlaylistViews() {
+        if (document.body.classList.contains('channel-editor-open')) {
+            renderDeepChannelPlaylists();
+        }
+        if (commercialsPage === 'map') {
+            renderMapChannelPlaylists();
+            renderChannelPlaylistOverview();
+        }
+    }
+
+    function channelPlaylistPayload(channel, playlistIds) {
+        return buildChannelPayload({
+            channel,
+            number: channel.number,
+            name: channel.name,
+            contentType: channel.contentType,
+            aspectRatio: channel.aspectRatio,
+            scanlinesEnabled: !!channel.scanlinesEnabled,
+            bugPlacement: channel.bugPlacement,
+            audioLanguage: channel.audioLanguage || 'eng',
+            logoSetId: channel.logoSetId || null,
+            logoFileName: channel.logoFileName || null,
+            weatherLocationQuery: channel.weatherLocationQuery || null,
+            enabled: channel.enabled !== false,
+            deep: {
+                CommercialSearchPlaylistIds: playlistIds.slice()
+            }
+        });
+    }
+
+    async function loadChannelPlaylistMap() {
+        applyCommercialsPage();
+        if (!channels.length) {
+            await loadChannels();
+        } else {
+            populateMapChannelSelect();
+        }
+
+        if (!commercialSearchPlaylists.length) {
+            try {
+                commercialSearchPlaylists = await api('/commercials/search-playlists') || [];
+            } catch (err) {
+                commercialSearchPlaylists = commercialSearchPlaylists || [];
+            }
+        }
+
+        loadMapChannelAssignment();
+    }
+
+    async function saveChannelPlaylistMap() {
+        const channel = channels.find((c) => String(c.id) === String(mapChannelId));
+        if (!channel) {
+            toast('Pick a channel first.', 'error');
+            return;
+        }
+
+        const saveBtn = $('btn-map-ch-save');
+        const originalLabel = saveBtn ? saveBtn.textContent : '';
+        try {
+            if (saveBtn) {
+                saveBtn.disabled = true;
+                saveBtn.textContent = 'Saving…';
+            }
+
+            await api('/channels/' + channel.id, {
+                method: 'PUT',
+                body: JSON.stringify(channelPlaylistPayload(channel, mapChannelPlaylistIds))
+            });
+            toast('Channel mapping saved.', 'success');
+            await loadChannels();
+            populateMapChannelSelect();
+            loadMapChannelAssignment();
+        } catch (err) {
+            reportApiError(err, 'Could not save channel mapping.');
+        } finally {
+            if (saveBtn) {
+                saveBtn.disabled = false;
+                saveBtn.textContent = originalLabel || 'Save';
+            }
+        }
     }
 
     function fillDeepChannelForm(channel) {
@@ -1375,22 +1690,8 @@
             return;
         }
 
-        if (window.opener && !window.opener.closed && !options.stay) {
-            window.close();
-            return;
-        }
-
         if (!options.skipHistory && channelEditorIdFromPath(location.pathname)) {
             history.pushState({ tab: 'channels' }, '', withAppBase('/channels'));
-        }
-    }
-
-    function openChannelEditorWindow(id) {
-        const url = withAppBase(channelEditorPath(id));
-        const win = window.open(url, 'channelflow-edit-' + id, 'width=1120,height=900');
-        if (!win) {
-            history.pushState({ tab: 'channel-editor', id }, '', url);
-            openDeepChannelEditor(id, { fromRoute: true });
         }
     }
 
@@ -1514,7 +1815,8 @@
         if (!selectedChannelId) return;
 
         try {
-            const data = await api('/lineups/' + selectedChannelId);
+            const dateVal = $('lineup-preview-date')?.value || todayIsoDate();
+            const data = await api('/lineups/' + selectedChannelId + '?date=' + encodeURIComponent(dateVal));
             lineupIsWeather = !!(data.isWeather || getLineupChannel()?.contentType === CONTENT_TYPE_VALUES.Weather);
             lineupSlots = (data.lineup && data.lineup.slots) || [];
             lineupOverrides = data.overrides || [];
@@ -1523,6 +1825,7 @@
             } else if (lineupSlots.length === 0) {
                 lineupSlots = Array.from({ length: 48 }, (_, i) => ({ slotIndex: i, candidates: [] }));
             }
+            applyLineupSlotKinds(lineupSlots, data.slotKinds);
 
             updateLineupToolbarState();
 
@@ -1662,7 +1965,10 @@
                 : (count ? candidateSummary(s.candidates[0]) : 'Empty slot');
             const span = Math.max(1, s.spanSlots || 1);
             const spanLabel = span > 1 ? ` · ${span * 30}m` : '';
-            const classes = ['slot-card', rerun ? 'rerun-slot' : (count ? 'has-items' : 'empty')].join(' ');
+            const typeClass = lineupSlotColorClass(s);
+            const classes = ['slot-card', rerun ? 'rerun-slot' : (count ? 'has-items' : 'empty'), typeClass]
+                .filter(Boolean)
+                .join(' ');
             return `<div class="${classes}" data-slot="${s.slotIndex}" style="${span > 1 ? '--slot-span:' + span + ';grid-column:span ' + span : ''}">
                 <div class="time">${slotTime(s.slotIndex)}${spanLabel}</div>
                 <div class="summary">${escapeHtml(first)}</div>
@@ -1801,7 +2107,7 @@
             if (ch) params.set('contentType', ch.contentType);
             const results = await api('/catalog/search?' + params.toString());
             resultsEl.innerHTML = (results || []).map((item) =>
-                `<div class="search-result" data-id="${item.id}">
+                `<div class="search-result" data-id="${item.id}" data-type="${escapeHtml(item.type || '')}" data-runtime="${item.runtimeMinutes || ''}">
                     <strong>${escapeHtml(item.name)}</strong>
                     <div class="sub">${escapeHtml(item.type)}${item.runtimeMinutes ? ' · ' + item.runtimeMinutes + 'm' : ''}</div>
                 </div>`).join('') || '<div class="search-result">No matches</div>';
@@ -1809,6 +2115,11 @@
             resultsEl.querySelectorAll('.search-result[data-id]').forEach((row) => {
                 row.onclick = () => {
                     itemTitleCache[row.dataset.id] = row.querySelector('strong').textContent;
+                    itemMetaCache[row.dataset.id] = {
+                        name: itemTitleCache[row.dataset.id],
+                        type: row.dataset.type,
+                        runtimeMinutes: row.dataset.runtime ? parseInt(row.dataset.runtime, 10) : null
+                    };
                     slot.candidates.push({
                         kind: 0,
                         jellyfinItemId: row.dataset.id,
@@ -1825,6 +2136,8 @@
         document.getElementById('slot-save').onclick = () => {
             slot.spanSlots = Math.max(1, Math.min(8, parseInt(document.getElementById('slot-span-slots').value, 10) || 1));
             slot.isRerunSlot = !!document.getElementById('slot-rerun')?.checked;
+            delete slot.slotKind;
+            delete slot.isShortEpisodeBlock;
             const idx = lineupSlots.findIndex((s) => s.slotIndex === index);
             if (idx >= 0) lineupSlots[idx] = slot;
             else lineupSlots.push(slot);
@@ -1913,6 +2226,21 @@
                 $('lineup-preview-banner').textContent = `Preview for ${data.date}: 24/24 hourly blocks — ${data.title || 'Local Weather'} (live).`;
                 return;
             }
+
+            (data.slots || []).forEach((s) => {
+                const local = lineupSlots.find((x) => x.slotIndex === s.slotIndex);
+                if (!local) {
+                    return;
+                }
+                if (s.slotKind) {
+                    local.slotKind = s.slotKind;
+                    local.isShortEpisodeBlock = !!(s.isShortEpisodeBlock || s.slotKind === 'short-block');
+                } else {
+                    delete local.slotKind;
+                    delete local.isShortEpisodeBlock;
+                }
+            });
+            renderLineupGrid();
 
             const filled = (data.slots || []).filter((s) => s.candidateCount > 0).length;
             $('lineup-preview-banner').classList.remove('hidden');
@@ -2281,11 +2609,30 @@
             $('btn-cancel-playlist-save').onclick = closeModal;
         }
         if ($('btn-confirm-playlist-save')) {
-            $('btn-confirm-playlist-save').onclick = () => confirmSavePlaylist().catch((e) => toast(e.message, 'error'));
+            $('btn-confirm-playlist-save').onclick = () => confirmSavePlaylist();
         }
     }
 
-    async function confirmSavePlaylist() {
+    function searchPlaylistPullKey(id) {
+        return id == null ? '' : String(id);
+    }
+
+    function isSearchPlaylistPullInFlight(id) {
+        const key = searchPlaylistPullKey(id);
+        return !!key && searchPlaylistPullsInFlight.has(key);
+    }
+
+    function updateSearchPlaylistPullButtons() {
+        document.querySelectorAll('.btn-pull-cb-playlist').forEach((btn) => {
+            btn.disabled = isSearchPlaylistPullInFlight(btn.dataset.id);
+        });
+    }
+
+    function confirmSavePlaylist() {
+        if (searchPlaylistSaveBusy) {
+            return;
+        }
+
         const mode = $('brainz-save-mode-existing')?.checked ? 'existing' : 'new';
         const existingId = $('brainz-existing-playlist')?.value || '';
         const name = $('brainz-new-playlist-name')?.value?.trim() || '';
@@ -2297,22 +2644,47 @@
             toast('Pick an existing playlist.', 'error');
             return;
         }
+        if (mode === 'existing' && isSearchPlaylistPullInFlight(existingId)) {
+            toast('That playlist is already pulling matching spots.');
+            return;
+        }
 
         const existing = commercialSearchPlaylists.find((p) => String(p.id) === String(existingId));
         const payload = readBrainzPlaylistPayload(mode === 'new' ? name : (existing?.name || name));
-        await saveBrainzSettings({ silent: true });
-        toast('Saving playlist and copying matching spots into the Commercials table…');
-
-        const saved = mode === 'existing'
-            ? await api('/commercials/search-playlists/' + existingId, { method: 'PUT', body: JSON.stringify(payload) })
-            : await api('/commercials/search-playlists', { method: 'POST', body: JSON.stringify(payload) });
-
-        selectedSearchPlaylistId = saved.id;
+        const saveBtn = $('btn-confirm-playlist-save');
+        if (saveBtn) {
+            saveBtn.disabled = true;
+        }
+        searchPlaylistSaveBusy = true;
         closeModal();
-        toast(mode === 'existing'
-            ? `Saved “${saved.name}” and stored ${saved.itemCount ?? saved.lastMatchedCount ?? 0} spots in the Commercials table.`
-            : `Created “${saved.name}” and stored ${saved.itemCount ?? saved.lastMatchedCount ?? 0} spots in the Commercials table.`, 'success');
-        await loadCommercials();
+        toast('Saving playlist and copying matching spots into the Commercials table…');
+        void savePlaylistAndPullInBackground(mode, existingId, payload);
+    }
+
+    async function savePlaylistAndPullInBackground(mode, existingId, payload) {
+        try {
+            await saveBrainzSettings({ silent: true });
+            const saved = mode === 'existing'
+                ? await api('/commercials/search-playlists/' + existingId, { method: 'PUT', body: JSON.stringify(payload) })
+                : await api('/commercials/search-playlists', { method: 'POST', body: JSON.stringify(payload) });
+            selectedSearchPlaylistId = saved.id;
+            searchPlaylistSaveBusy = false;
+            try {
+                await loadSearchPlaylists();
+            } catch (refreshErr) {
+                reportApiError(refreshErr, 'Could not refresh saved playlists.');
+            }
+            await pullSearchPlaylist(saved.id, {
+                startedToast: false,
+                successToast: mode === 'existing'
+                    ? `Saved “${saved.name}” and stored {count} spots in the Commercials table.`
+                    : `Created “${saved.name}” and stored {count} spots in the Commercials table.`
+            });
+        } catch (err) {
+            toast(err.message, 'error');
+        } finally {
+            searchPlaylistSaveBusy = false;
+        }
     }
 
     async function previewBrainz(options = {}) {
@@ -2384,6 +2756,9 @@
             const jellyfin = (list || []).filter((c) => !isBrainzCommercial(c));
             renderCommercialTable('commercial-list', jellyfin, 'No Jellyfin commercials synced yet. Tag items with channelflow-commercial and click Sync Jellyfin Library.');
             await loadSearchPlaylists();
+            if (commercialsPage === 'map') {
+                await loadChannelPlaylistMap();
+            }
         } catch (err) {
             reportApiError(err, 'Could not load commercials.');
         }
@@ -2401,6 +2776,7 @@
                 selectedSearchPlaylistId = null;
                 listEl.innerHTML = '<div class="empty-state">No saved playlists yet. Save filters from the CommercialBrainz tab.</div>';
                 if ($('cb-playlist-items')) $('cb-playlist-items').innerHTML = '';
+                refreshMappedPlaylistViews();
                 return;
             }
 
@@ -2420,7 +2796,7 @@
                         <td>${p.itemCount ?? p.itemCount ?? p.lastMatchedCount ?? p.lastMatchedCount ?? 0}</td>
                         <td>${escapeHtml((p.lastError || p.lastError) ? 'error' : synced)}</td>
                         <td>
-                            <button type="button" class="emby-button btn-pull-cb-playlist" data-id="${escapeHtml(p.id)}">Pull</button>
+                            <button type="button" class="emby-button btn-pull-cb-playlist" data-id="${escapeHtml(p.id)}"${isSearchPlaylistPullInFlight(p.id) ? ' disabled' : ''}>Pull</button>
                             <button type="button" class="emby-button btn-delete-cb-playlist" data-id="${escapeHtml(p.id)}">Delete</button>
                         </td>
                     </tr>`;
@@ -2439,7 +2815,7 @@
             listEl.querySelectorAll('.btn-pull-cb-playlist').forEach((btn) => {
                 btn.onclick = (event) => {
                     event.stopPropagation();
-                    pullSearchPlaylist(btn.dataset.id);
+                    void pullSearchPlaylist(btn.dataset.id);
                 };
             });
             listEl.querySelectorAll('.btn-delete-cb-playlist').forEach((btn) => {
@@ -2449,6 +2825,7 @@
                 };
             });
             renderSearchPlaylistItems();
+            refreshMappedPlaylistViews();
         } catch (err) {
             reportApiError(err, 'Could not load saved playlists.');
         }
@@ -2486,15 +2863,43 @@
             }).join('')}</tbody></table>`;
     }
 
-    async function pullSearchPlaylist(id) {
-        try {
+    async function pullSearchPlaylist(id, options = {}) {
+        if (!id) {
+            return;
+        }
+        const key = searchPlaylistPullKey(id);
+        if (searchPlaylistPullsInFlight.has(key)) {
+            return;
+        }
+
+        searchPlaylistPullsInFlight.add(key);
+        updateSearchPlaylistPullButtons();
+        if (options.startedToast !== false) {
             toast('Refreshing matching spots from CommercialBrainz…');
+        }
+
+        try {
             const playlist = await api('/commercials/search-playlists/' + id + '/pull', { method: 'POST' });
             selectedSearchPlaylistId = playlist.id;
-            toast(`Stored ${playlist.itemCount ?? playlist.lastMatchedCount ?? 0} spots for “${playlist.name}”.`, 'success');
+            const count = playlist.itemCount ?? playlist.lastMatchedCount ?? 0;
+            const successTemplate = options.successToast;
+            toast(
+                successTemplate
+                    ? successTemplate.replace('{count}', String(count))
+                    : `Stored ${count} spots for “${playlist.name}”.`,
+                'success'
+            );
             await loadCommercials();
         } catch (err) {
             toast(err.message, 'error');
+            try {
+                await loadSearchPlaylists();
+            } catch (refreshErr) {
+                reportApiError(refreshErr, 'Could not refresh saved playlists.');
+            }
+        } finally {
+            searchPlaylistPullsInFlight.delete(key);
+            updateSearchPlaylistPullButtons();
         }
     }
 
@@ -5902,6 +6307,16 @@
         positionGuideNowLine();
     }
 
+    function guidePosterSrc(url) {
+        if (!url) {
+            return '';
+        }
+        if (/^https?:\/\//i.test(url)) {
+            return url;
+        }
+        return resolveUrl(url);
+    }
+
     function openGuideProgram(id) {
         const program = (guideData && guideData.programs || []).find((p) => p.id === id);
         if (!program) {
@@ -5912,16 +6327,19 @@
         const meta = [program.episode, program.year, program.rating, (program.categories || []).join(', ')]
             .filter(Boolean)
             .join(' · ');
-        const poster = program.posterUrl
-            ? '<img class="tv-guide-poster" src="' + escapeHtml(program.posterUrl) + '" alt="">'
+        const posterSrc = guidePosterSrc(program.posterUrl);
+        const poster = posterSrc
+            ? '<img class="tv-guide-poster" src="' + escapeHtml(posterSrc) + '" alt="" onerror="this.remove()">'
             : '';
         openModal(
             program.title || 'Programme',
-            poster
+            '<div class="tv-guide-program">'
+                + poster
+                + '<div class="tv-guide-program-meta">'
                 + '<p class="hint">' + escapeHtml((channel ? channel.number + ' · ' + channel.name + ' · ' : '') + when) + '</p>'
                 + (meta ? '<p class="hint">' + escapeHtml(meta) + '</p>' : '')
-                + (program.subTitle ? '<h4>' + escapeHtml(program.subTitle) + '</h4>' : '')
-                + (program.description ? '<p>' + escapeHtml(program.description) + '</p>' : '<p class="hint">No description.</p>'),
+                + renderGuideProgramDetails(program)
+                + '</div></div>',
             '<button type="button" class="emby-button" id="btn-guide-to-lineup">Open lineup</button>'
                 + '<button type="button" class="raised button-submit emby-button" id="btn-guide-close-modal">Close</button>'
         );
@@ -5937,6 +6355,25 @@
                 switchTab('lineups');
             };
         }
+    }
+
+    function renderGuideProgramDetails(program) {
+        const episodes = Array.isArray(program.episodes) ? program.episodes : [];
+        if (episodes.length) {
+            return '<div class="tv-guide-episodes">'
+                + episodes.map((ep) => {
+                    const title = escapeHtml(ep.title || 'Episode');
+                    const epNum = ep.episode ? '<p class="hint">' + escapeHtml(ep.episode) + '</p>' : '';
+                    const desc = ep.description
+                        ? '<p>' + escapeHtml(ep.description) + '</p>'
+                        : '';
+                    return '<div class="tv-guide-episode"><h4>' + title + '</h4>' + epNum + desc + '</div>';
+                }).join('')
+                + '</div>';
+        }
+
+        return (program.subTitle ? '<h4>' + escapeHtml(program.subTitle) + '</h4>' : '')
+            + (program.description ? '<p>' + escapeHtml(program.description) + '</p>' : '<p class="hint">No description.</p>');
     }
 
     const TAB_PATHS = {
@@ -5993,7 +6430,7 @@
         list: 'Register Jellyfin playlists as ChannelFlow lists',
         jellyfin: 'Choose which Jellyfin libraries to sync from',
         special: 'Recurring blocks that override the normal lineup',
-        commercials: 'Jellyfin commercial library and saved playlists',
+        commercials: 'Jellyfin commercials, saved playlists, and channel mapping',
         commercialbrainz: 'YouTube commercial pool from CommercialBrainz',
         youtube: 'YouTube cookies, Premium playback, and SponsorBlock',
         ebs: 'Playback when a channel has nothing scheduled',
@@ -6141,7 +6578,10 @@
             api('/news/settings').then((settings) => renderNewsBulletinStatus(settings.bulletin)).catch(() => {});
         }
         if (name === 'special') loadSpecialPresentations();
-        if (name === 'commercials') loadCommercials();
+        if (name === 'commercials') {
+            applyCommercialsPage();
+            loadCommercials();
+        }
         if (name === 'commercialbrainz') loadCommercialBrainz();
         if (name === 'youtube') loadYouTube();
 
@@ -6152,7 +6592,11 @@
 
         document.title = (TAB_TITLES[name] || name) + ' · ChannelFlow-Server';
         window.dispatchEvent(new CustomEvent('channelflow-tabchange', {
-            detail: { tab: name, title: TAB_TITLES[name], subtitle: TAB_SUBTITLES[name] }
+            detail: {
+                tab: name,
+                title: TAB_TITLES[name],
+                subtitle: name === 'commercials' ? commercialsSubtitle() : TAB_SUBTITLES[name]
+            }
         }));
     }
 
@@ -6233,14 +6677,18 @@
         click('btn-cancel-channel', () => showChannelForm(false));
         click('btn-delete-channel', () => deleteChannel(editingChannelId));
         click('btn-deep-ch-back', () => {
-            const openedAsWindow = !!(window.opener && !window.opener.closed);
             closeDeepChannelEditor();
-            if (!openedAsWindow) {
-                switchTab('channels');
-            }
+            switchTab('channels');
         });
         click('btn-deep-ch-save', () => saveDeepChannel().catch((err) => reportApiError(err, 'Could not save channel.')));
         click('btn-deep-ch-add-playlist', addDeepChannelPlaylist);
+        click('btn-deep-ch-open-map', () => openMapChannelsForChannel(deepEditingChannelId));
+        qa('[data-commercials-page]').forEach((btn) => {
+            btn.onclick = () => switchCommercialsPage(btn.dataset.commercialsPage);
+        });
+        change('map-ch-select', loadMapChannelAssignment);
+        click('btn-map-ch-add-playlist', addMapChannelPlaylist);
+        click('btn-map-ch-save', () => saveChannelPlaylistMap().catch((err) => reportApiError(err, 'Could not save channel mapping.')));
         const channelForm = $('channel-form');
         if (channelForm) {
             channelForm.onsubmit = saveChannel;

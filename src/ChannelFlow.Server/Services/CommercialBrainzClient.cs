@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -16,6 +17,11 @@ public class CommercialBrainzClient
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
+
+    private static readonly ConcurrentDictionary<Guid, CommercialBrainzVideoDetail> VideoCache = new();
+    private static readonly ConcurrentDictionary<string, CacheEntry> ResponseCache = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, Task<object?>> Inflight = new(StringComparer.Ordinal);
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(15);
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<CommercialBrainzClient> _logger;
@@ -61,9 +67,20 @@ public class CommercialBrainzClient
         Guid sbid,
         CancellationToken cancellationToken = default)
     {
+        if (sbid != Guid.Empty && VideoCache.TryGetValue(sbid, out var cached))
+        {
+            return cached;
+        }
+
         var baseUrl = NormalizeBaseUrl(settings.BaseUrl);
         var url = $"{baseUrl}/api/v1/videos/{sbid:D}";
-        return await GetAsync<CommercialBrainzVideoDetail>(settings, url, cancellationToken);
+        var detail = await GetAsync<CommercialBrainzVideoDetail>(settings, url, cancellationToken);
+        if (detail is not null && sbid != Guid.Empty)
+        {
+            VideoCache[sbid] = detail;
+        }
+
+        return detail;
     }
 
     public async Task<byte[]?> GetYouTubeThumbnailAsync(string? youtubeId, CancellationToken cancellationToken = default)
@@ -118,69 +135,84 @@ public class CommercialBrainzClient
     }
 
     public Task ThrottleAsync(CancellationToken cancellationToken)
-        => Task.Delay(TimeSpan.FromMilliseconds(350), cancellationToken);
+        => Task.CompletedTask;
 
     private async Task<T?> GetAsync<T>(CommercialBrainzSettings settings, string url, CancellationToken cancellationToken)
     {
-        var client = _httpClientFactory.CreateClient(nameof(CommercialBrainzClient));
-        for (var attempt = 0; attempt < 4; attempt++)
+        if (ResponseCache.TryGetValue(url, out var cached) && cached.Expires > DateTimeOffset.UtcNow)
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, url);
-            ApplyAuth(request, settings);
+            return cached.Value is T typed ? typed : default;
+        }
+
+        while (true)
+        {
+            if (ResponseCache.TryGetValue(url, out cached) && cached.Expires > DateTimeOffset.UtcNow)
+            {
+                return cached.Value is T typedWait ? typedWait : default;
+            }
+
+            if (Inflight.TryGetValue(url, out var existing))
+            {
+                var shared = await existing.WaitAsync(cancellationToken);
+                return shared is T fromShared ? fromShared : default;
+            }
+
+            var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (!Inflight.TryAdd(url, tcs.Task))
+            {
+                continue;
+            }
 
             try
             {
-                using var response = await client.SendAsync(request, cancellationToken);
-                if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests && attempt < 3)
+                var fetched = await FetchAsync<T>(settings, url, cancellationToken);
+                if (fetched is not null)
                 {
-                    var wait = ParseRetryAfter(response) ?? TimeSpan.FromSeconds(Math.Pow(2, attempt + 1));
-                    _logger.LogWarning("CommercialBrainz rate-limited {Url}; waiting {Delay}s", url, wait.TotalSeconds);
-                    await Task.Delay(wait, cancellationToken);
-                    continue;
+                    ResponseCache[url] = new CacheEntry(DateTimeOffset.UtcNow + CacheTtl, fetched);
                 }
 
-                if (!response.IsSuccessStatusCode)
-                {
-                    _logger.LogWarning(
-                        "CommercialBrainz request failed ({Status}) for {Url}",
-                        (int)response.StatusCode,
-                        url);
-                    return default;
-                }
-
-                return await response.Content.ReadFromJsonAsync<T>(JsonOptions, cancellationToken);
+                tcs.TrySetResult(fetched);
+                return fetched;
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex)
             {
-                _logger.LogError(ex, "CommercialBrainz request failed for {Url}", url);
+                tcs.TrySetException(ex);
+                throw;
+            }
+            finally
+            {
+                Inflight.TryRemove(url, out _);
+            }
+        }
+    }
+
+    private async Task<T?> FetchAsync<T>(CommercialBrainzSettings settings, string url, CancellationToken cancellationToken)
+    {
+        var client = _httpClientFactory.CreateClient(nameof(CommercialBrainzClient));
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        ApplyAuth(request, settings);
+        try
+        {
+            using var response = await client.SendAsync(request, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "CommercialBrainz request failed ({Status}) for {Url}",
+                    (int)response.StatusCode,
+                    url);
                 return default;
             }
-        }
 
-        return default;
+            return await response.Content.ReadFromJsonAsync<T>(JsonOptions, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "CommercialBrainz request failed for {Url}", url);
+            return default;
+        }
     }
 
-    private static TimeSpan? ParseRetryAfter(HttpResponseMessage response)
-    {
-        var retry = response.Headers.RetryAfter;
-        if (retry is null)
-        {
-            return null;
-        }
-
-        if (retry.Delta is TimeSpan delta)
-        {
-            return delta < TimeSpan.FromSeconds(1) ? TimeSpan.FromSeconds(1) : delta;
-        }
-
-        if (retry.Date is DateTimeOffset when)
-        {
-            var wait = when - DateTimeOffset.UtcNow;
-            return wait > TimeSpan.Zero ? wait : TimeSpan.FromSeconds(1);
-        }
-
-        return null;
-    }
+    private readonly record struct CacheEntry(DateTimeOffset Expires, object? Value);
 
     private async Task<byte[]?> TryGetBytesAsync(string url, CancellationToken cancellationToken)
     {

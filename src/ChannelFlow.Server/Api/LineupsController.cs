@@ -19,6 +19,7 @@ public class LineupsController : ControllerBase
     private readonly ChannelService _channels;
     private readonly FinTvDbContext _db;
     private readonly PlayoutBuilderService _playoutBuilder;
+    private readonly LineupSlotKindService _slotKinds;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="LineupsController"/> class.
@@ -27,26 +28,33 @@ public class LineupsController : ControllerBase
     /// <param name="channels">Channel service.</param>
     /// <param name="db">Database context.</param>
     /// <param name="playoutBuilder">Background playout builder.</param>
+    /// <param name="slotKinds">Lineup timeslot coloring classifier.</param>
     public LineupsController(
         LineupService lineups,
         ChannelService channels,
         FinTvDbContext db,
-        PlayoutBuilderService playoutBuilder)
+        PlayoutBuilderService playoutBuilder,
+        LineupSlotKindService slotKinds)
     {
         _lineups = lineups;
         _channels = channels;
         _db = db;
         _playoutBuilder = playoutBuilder;
+        _slotKinds = slotKinds;
     }
 
     /// <summary>
     /// Gets the default lineup and overrides for a channel.
     /// </summary>
     /// <param name="channelId">Channel identifier.</param>
+    /// <param name="date">Optional calendar date used to color slots from that day's playout.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Default lineup and override definitions.</returns>
     [HttpGet("{channelId:guid}")]
-    public async Task<ActionResult<object>> GetDefault(Guid channelId, CancellationToken cancellationToken)
+    public async Task<ActionResult<object>> GetDefault(
+        Guid channelId,
+        [FromQuery] string? date,
+        CancellationToken cancellationToken)
     {
         var channel = await _channels.GetByIdAsync(channelId, cancellationToken);
         if (channel is null)
@@ -72,16 +80,25 @@ public class LineupsController : ControllerBase
                 },
                 overrides = Array.Empty<object>(),
                 contentType = channel.ContentType,
-                isWeather = true
+                isWeather = true,
+                slotKinds = new Dictionary<int, string>()
             });
         }
+
+        var slotKinds = await _slotKinds.ClassifyAsync(
+            channel.Id,
+            channel.ContentType,
+            lineup?.Slots,
+            ParseLineupDate(date),
+            cancellationToken);
 
         return Ok(new
         {
             lineup,
             overrides,
             contentType = channel.ContentType,
-            isWeather = false
+            isWeather = false,
+            slotKinds
         });
     }
 
@@ -202,14 +219,26 @@ public class LineupsController : ControllerBase
         }
 
         var slots = await _lineups.ResolveSlotsForDateAsync(channelId, date, cancellationToken);
+        var slotKinds = await _slotKinds.ClassifyAsync(
+            channel.Id,
+            channel.ContentType,
+            slots,
+            date,
+            cancellationToken);
         return Ok(new
         {
             date,
-            slots = slots.Select(s => new
+            slots = slots.Select(s =>
             {
-                s.SlotIndex,
-                candidateCount = s.Candidates.Count,
-                candidates = s.Candidates
+                slotKinds.TryGetValue(s.SlotIndex, out var kind);
+                return new
+                {
+                    s.SlotIndex,
+                    candidateCount = s.Candidates.Count,
+                    candidates = s.Candidates,
+                    slotKind = kind,
+                    isShortEpisodeBlock = kind == LineupSlotKinds.ShortBlock
+                };
             })
         });
     }
@@ -276,6 +305,18 @@ public class LineupsController : ControllerBase
                     rebuild.Error
                 }
         });
+    }
+
+    private static DateOnly ParseLineupDate(string? date)
+    {
+        if (DateOnly.TryParse(date, out var parsed))
+        {
+            return parsed;
+        }
+
+        var tz = ScheduleTimeZoneHelper.ResolveScheduleTimeZone();
+        var local = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz);
+        return DateOnly.FromDateTime(local);
     }
 }
 

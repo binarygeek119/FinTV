@@ -119,6 +119,19 @@ public class GuideMetadataService
     }
 
     /// <summary>
+    /// Builds a same-origin poster URL for the ChannelFlow Web UI (cookie auth).
+    /// </summary>
+    public static string? GetUiPosterUrl(Guid? posterItemId)
+    {
+        if (!posterItemId.HasValue || posterItemId.Value == Guid.Empty)
+        {
+            return null;
+        }
+
+        return $"/api/guide/poster/{posterItemId.Value:N}";
+    }
+
+    /// <summary>
     /// Builds an absolute poster URL for XMLTV programme icons.
     /// </summary>
     public static string? GetPosterUrl(string baseUrl, Guid? posterItemId)
@@ -292,18 +305,14 @@ public class GuideMetadataService
             return null;
         }
 
-        if (item is Episode episode)
-        {
-            return FindPosterFile(ResolveSeries(episode), episode);
-        }
-
-        var found = FindPosterFile(item);
+        var series = item is Episode episode ? ResolveSeries(episode) : item as Series;
+        var found = FindPosterFile(series, item);
         if (!string.IsNullOrWhiteSpace(found))
         {
             return found;
         }
 
-        return item is Series series ? FindPosterFromSeriesEpisode(series.Id) : null;
+        return series is not null ? FindPosterFromSeriesEpisode(series.Id) : null;
     }
 
     private string? FindPosterFromSeriesEpisode(Guid seriesId)
@@ -343,7 +352,7 @@ public class GuideMetadataService
                 return item.PrimaryImagePath;
             }
 
-            var sidecar = FindSidecarPoster(item.Path, walkParents: item is Episode);
+            var sidecar = FindSidecarPoster(item.Path, walkParents: item is Episode or Series);
             if (!string.IsNullOrWhiteSpace(sidecar))
             {
                 return sidecar;
@@ -390,25 +399,32 @@ public class GuideMetadataService
 
     private static string? FindNamedPoster(string folder, string? mediaStem)
     {
+        var wanted = new List<string>();
         if (!string.IsNullOrWhiteSpace(mediaStem))
         {
-            foreach (var name in new[] { mediaStem + "-poster.jpg", mediaStem + "-poster.png", mediaStem + ".jpg", mediaStem + ".png" })
+            wanted.AddRange([mediaStem + "-poster.jpg", mediaStem + "-poster.png", mediaStem + ".jpg", mediaStem + ".png"]);
+        }
+
+        wanted.AddRange(PosterFileNames);
+
+        try
+        {
+            foreach (var file in Directory.EnumerateFiles(folder))
             {
-                var candidate = Path.Combine(folder, name);
-                if (IsExistingFile(candidate))
+                var name = Path.GetFileName(file);
+                if (wanted.Any(candidate => name.Equals(candidate, StringComparison.OrdinalIgnoreCase)))
                 {
-                    return candidate;
+                    return file;
                 }
             }
         }
-
-        foreach (var name in PosterFileNames)
+        catch (IOException)
         {
-            var candidate = Path.Combine(folder, name);
-            if (IsExistingFile(candidate))
-            {
-                return candidate;
-            }
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
         }
 
         return null;

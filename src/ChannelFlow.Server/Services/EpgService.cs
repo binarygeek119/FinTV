@@ -72,8 +72,9 @@ public class EpgService
             .AsNoTracking()
             .ToListAsync(cancellationToken);
         var channelsById = channels.ToDictionary(c => c.Id);
-        items = MergeSplitPrograms(items);
-        items = CollapseMusicVideoHours(items, channelsById, tz);
+        var prepared = await PrepareGuideItemsAsync(items, channelsById, tz, cancellationToken);
+        items = prepared.Items;
+        var shortBlocks = prepared.ShortBlocks;
 
         var metadataByItemId = _guideMetadata.ResolveBatch(items.Select(i => i.JellyfinItemId));
         var weatherItems = items
@@ -118,7 +119,21 @@ public class EpgService
 
             var posterUrl = !string.IsNullOrWhiteSpace(metadata?.IconUrl)
                 ? metadata.IconUrl
-                : _guideMetadata.GetPosterUrlIfAvailable(baseUrl, metadata?.PosterItemId);
+                : GuideMetadataService.GetUiPosterUrl(metadata?.PosterItemId ?? item.JellyfinItemId);
+
+            var title = string.IsNullOrWhiteSpace(metadata?.Title) ? item.Title : metadata.Title;
+            var subTitle = metadata?.SubTitle;
+            var description = metadata?.Description;
+            var episode = metadata?.EpisodeOnScreen;
+            IReadOnlyList<TvGuideBlockEpisode>? blockEpisodes = null;
+            if (shortBlocks.TryGetValue(item.Id, out var shortBlock) && shortBlock.Parts.Count > 0)
+            {
+                title = shortBlock.SeriesName;
+                subTitle = null;
+                description = CombineShortEpisodeDescription(shortBlock);
+                episode = shortBlock.Parts.Count == 1 ? shortBlock.Parts[0].Episode : null;
+                blockEpisodes = shortBlock.Parts;
+            }
 
             programs.Add(new TvGuideProgram
             {
@@ -126,16 +141,17 @@ public class EpgService
                 ChannelId = item.ChannelId,
                 Start = start,
                 Finish = finish,
-                Title = string.IsNullOrWhiteSpace(metadata?.Title) ? item.Title : metadata.Title,
-                SubTitle = metadata?.SubTitle,
-                Description = metadata?.Description,
-                Episode = metadata?.EpisodeOnScreen,
+                Title = title,
+                SubTitle = subTitle,
+                Description = description,
+                Episode = episode,
                 Categories = metadata?.Categories ?? Array.Empty<string>(),
                 Year = metadata?.ProductionYear,
                 Rating = metadata?.OfficialRating,
                 PosterUrl = posterUrl,
                 IsNow = start <= nowUtc && finish > nowUtc,
-                IsVirtual = item.IsVirtual
+                IsVirtual = item.IsVirtual,
+                Episodes = blockEpisodes
             });
         }
 
@@ -190,6 +206,206 @@ public class EpgService
         }
 
         return merged;
+    }
+
+    private async Task<PreparedGuideItems> PrepareGuideItemsAsync(
+        List<PlayoutItem> items,
+        IReadOnlyDictionary<Guid, Channel> channelsById,
+        TimeZoneInfo tz,
+        CancellationToken cancellationToken)
+    {
+        items = MergeSplitPrograms(items);
+        var episodes = await LoadEpisodeGuideRowsAsync(items.Select(i => i.JellyfinItemId), cancellationToken);
+        var shortBlocks = new Dictionary<Guid, ShortEpisodeBlock>();
+        items = CollapseShortEpisodeBlocks(items, episodes, shortBlocks);
+        items = CollapseMusicVideoHours(items, channelsById, tz);
+        PadProgramsToHalfHour(items, tz);
+        return new PreparedGuideItems(items, shortBlocks);
+    }
+
+    private async Task<Dictionary<Guid, EpisodeGuideRow>> LoadEpisodeGuideRowsAsync(
+        IEnumerable<Guid?> ids,
+        CancellationToken cancellationToken)
+    {
+        var list = ids.Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToList();
+        if (list.Count == 0)
+        {
+            return new Dictionary<Guid, EpisodeGuideRow>();
+        }
+
+        var rows = await _db.Episodes.AsNoTracking()
+            .Where(e => list.Contains(e.Id))
+            .Select(e => new
+            {
+                e.Id,
+                e.SeriesId,
+                e.SeriesName,
+                e.Name,
+                e.Plot,
+                e.SeasonNumber,
+                e.EpisodeNumber,
+                e.RuntimeTicks
+            })
+            .ToListAsync(cancellationToken);
+
+        return rows.ToDictionary(
+            row => row.Id,
+            row => new EpisodeGuideRow
+            {
+                Id = row.Id,
+                SeriesId = row.SeriesId,
+                SeriesName = row.SeriesName,
+                Name = row.Name,
+                Plot = row.Plot,
+                SeasonNumber = row.SeasonNumber,
+                EpisodeNumber = row.EpisodeNumber,
+                Runtime = row.RuntimeTicks is long ticks && ticks > 0 ? TimeSpan.FromTicks(ticks) : null
+            });
+    }
+
+    /// <summary>
+    /// Consecutive shorts of the same series (Looney Tunes, Rugrats) become one named block.
+    /// </summary>
+    private static List<PlayoutItem> CollapseShortEpisodeBlocks(
+        List<PlayoutItem> items,
+        IReadOnlyDictionary<Guid, EpisodeGuideRow> episodes,
+        Dictionary<Guid, ShortEpisodeBlock> blocks)
+    {
+        var merged = new List<PlayoutItem>();
+        foreach (var item in items.OrderBy(i => i.ChannelId).ThenBy(i => i.Start))
+        {
+            if (merged.Count > 0
+                && TryGetShortEpisode(merged[^1], episodes, out var lastEpisode)
+                && TryGetShortEpisode(item, episodes, out var thisEpisode)
+                && merged[^1].ChannelId == item.ChannelId
+                && lastEpisode.SeriesId == thisEpisode.SeriesId
+                && item.Start <= merged[^1].Finish.Add(ShortEpisodeBlocks.MaxGuideMergeGap))
+            {
+                var last = merged[^1];
+                if (item.Finish > last.Finish)
+                {
+                    last.Finish = item.Finish;
+                }
+
+                if (blocks.TryGetValue(last.Id, out var block))
+                {
+                    block.Parts.Add(ToBlockEpisode(thisEpisode));
+                }
+
+                continue;
+            }
+
+            merged.Add(item);
+            if (TryGetShortEpisode(item, episodes, out var episode))
+            {
+                blocks[item.Id] = new ShortEpisodeBlock
+                {
+                    SeriesName = string.IsNullOrWhiteSpace(episode.SeriesName) ? episode.Name : episode.SeriesName,
+                    Parts = [ToBlockEpisode(episode)]
+                };
+            }
+        }
+
+        return merged;
+    }
+
+    private static bool TryGetShortEpisode(
+        PlayoutItem item,
+        IReadOnlyDictionary<Guid, EpisodeGuideRow> episodes,
+        out EpisodeGuideRow episode)
+    {
+        episode = null!;
+        if (!item.JellyfinItemId.HasValue || !episodes.TryGetValue(item.JellyfinItemId.Value, out episode!))
+        {
+            return false;
+        }
+
+        if (episode.SeriesId is null || episode.SeriesId == Guid.Empty)
+        {
+            return false;
+        }
+
+        var played = item.Finish - item.Start;
+        var duration = played > TimeSpan.Zero ? played : episode.Runtime ?? TimeSpan.Zero;
+        if (episode.Runtime is TimeSpan catalog && catalog > TimeSpan.Zero && catalog < duration)
+        {
+            duration = catalog;
+        }
+
+        return ShortEpisodeBlocks.IsShortRuntime(duration);
+    }
+
+    private static TvGuideBlockEpisode ToBlockEpisode(EpisodeGuideRow episode)
+    {
+        var onScreen = GuideMetadataService.FormatOnScreen(episode.SeasonNumber, episode.EpisodeNumber);
+        return new TvGuideBlockEpisode
+        {
+            Title = string.IsNullOrWhiteSpace(episode.Name) ? "Episode" : episode.Name,
+            Episode = string.IsNullOrWhiteSpace(onScreen) ? null : onScreen,
+            Description = string.IsNullOrWhiteSpace(episode.Plot) ? null : episode.Plot.Trim()
+        };
+    }
+
+    private static string CombineShortEpisodeDescription(ShortEpisodeBlock block)
+    {
+        var sb = new StringBuilder();
+        foreach (var part in block.Parts)
+        {
+            if (sb.Length > 0)
+            {
+                sb.Append("\n\n");
+            }
+
+            sb.Append(part.Title);
+            if (!string.IsNullOrWhiteSpace(part.Episode))
+            {
+                sb.Append(" (").Append(part.Episode).Append(')');
+            }
+
+            if (!string.IsNullOrWhiteSpace(part.Description))
+            {
+                sb.Append('\n').Append(part.Description);
+            }
+        }
+
+        var text = sb.ToString();
+        return text.Length <= 1500 ? text : text[..1497] + "...";
+    }
+
+    /// <summary>
+    /// Extends each programme to the next :00/:30 so commercial filler does not leave a hole
+    /// in the in-app guide or Jellyfin XMLTV.
+    /// </summary>
+    private static void PadProgramsToHalfHour(List<PlayoutItem> items, TimeZoneInfo tz)
+    {
+        foreach (var group in items.GroupBy(item => item.ChannelId))
+        {
+            var ordered = group.OrderBy(item => item.Start).ToList();
+            for (var i = 0; i < ordered.Count; i++)
+            {
+                var item = ordered[i];
+                if (IsMusicVideoHourBlock(item))
+                {
+                    continue;
+                }
+
+                var padded = ScheduleTimeZoneHelper.CeilToHalfHourUtc(item.Finish, tz);
+                if (padded <= item.Finish)
+                {
+                    continue;
+                }
+
+                var nextStart = i + 1 < ordered.Count ? ordered[i + 1].Start : (DateTime?)null;
+                if (nextStart is DateTime next && next > item.Finish)
+                {
+                    item.Finish = next < padded ? next : padded;
+                }
+                else if (nextStart is null)
+                {
+                    item.Finish = padded;
+                }
+            }
+        }
     }
 
     /// <summary>
@@ -311,8 +527,10 @@ public class EpgService
             .AsNoTracking()
             .ToListAsync(cancellationToken);
         var channelsById = channels.ToDictionary(c => c.Id);
-        items = MergeSplitPrograms(items);
-        items = CollapseMusicVideoHours(items, channelsById, ScheduleTimeZoneHelper.ResolveScheduleTimeZone());
+        var tz = ScheduleTimeZoneHelper.ResolveScheduleTimeZone();
+        var prepared = await PrepareGuideItemsAsync(items, channelsById, tz, cancellationToken);
+        items = prepared.Items;
+        var shortBlocks = prepared.ShortBlocks;
 
         var metadataByItemId = _guideMetadata.ResolveBatch(items.Select(i => i.JellyfinItemId));
         var weatherItems = items
@@ -342,13 +560,18 @@ public class EpgService
                 metadataByItemId.TryGetValue(item.JellyfinItemId.Value, out metadata);
             }
 
-            root.Add(BuildProgrammeElement(item, metadata, baseUrl));
+            shortBlocks.TryGetValue(item.Id, out var shortBlock);
+            root.Add(BuildProgrammeElement(item, metadata, shortBlock, baseUrl));
         }
 
         return new XDocument(new XDeclaration("1.0", "UTF-8", null), root);
     }
 
-    private XElement BuildProgrammeElement(PlayoutItem item, GuideProgramMetadata? metadata, string baseUrl)
+    private XElement BuildProgrammeElement(
+        PlayoutItem item,
+        GuideProgramMetadata? metadata,
+        ShortEpisodeBlock? shortBlock,
+        string baseUrl)
     {
         var programme = new XElement(
             "programme",
@@ -357,19 +580,32 @@ public class EpgService
             new XAttribute("channel", item.ChannelId.ToString("N")));
 
         var title = metadata?.Title ?? item.Title;
+        var subTitle = metadata?.SubTitle;
+        var description = metadata?.Description;
+        var episodeXmlTvNs = metadata?.EpisodeXmlTvNs;
+        var episodeOnScreen = metadata?.EpisodeOnScreen;
+        if (shortBlock is not null && shortBlock.Parts.Count > 0)
+        {
+            title = shortBlock.SeriesName;
+            subTitle = null;
+            description = CombineShortEpisodeDescription(shortBlock);
+            episodeXmlTvNs = shortBlock.Parts.Count == 1 ? episodeXmlTvNs : null;
+            episodeOnScreen = shortBlock.Parts.Count == 1 ? shortBlock.Parts[0].Episode : null;
+        }
+
         if (!string.IsNullOrWhiteSpace(title))
         {
             programme.Add(CreateLangElement("title", title, metadata?.Language));
         }
 
-        if (!string.IsNullOrWhiteSpace(metadata?.SubTitle))
+        if (!string.IsNullOrWhiteSpace(subTitle))
         {
-            programme.Add(CreateLangElement("sub-title", metadata.SubTitle, metadata.Language));
+            programme.Add(CreateLangElement("sub-title", subTitle, metadata?.Language));
         }
 
-        if (!string.IsNullOrWhiteSpace(metadata?.Description))
+        if (!string.IsNullOrWhiteSpace(description))
         {
-            programme.Add(CreateLangElement("desc", metadata.Description, metadata.Language));
+            programme.Add(CreateLangElement("desc", description, metadata?.Language));
         }
 
         if (metadata?.Categories is not null)
@@ -380,20 +616,20 @@ public class EpgService
             }
         }
 
-        if (!string.IsNullOrWhiteSpace(metadata?.EpisodeXmlTvNs))
+        if (!string.IsNullOrWhiteSpace(episodeXmlTvNs))
         {
             programme.Add(new XElement(
                 "episode-num",
                 new XAttribute("system", "xmltv_ns"),
-                metadata.EpisodeXmlTvNs));
+                episodeXmlTvNs));
         }
 
-        if (!string.IsNullOrWhiteSpace(metadata?.EpisodeOnScreen))
+        if (!string.IsNullOrWhiteSpace(episodeOnScreen))
         {
             programme.Add(new XElement(
                 "episode-num",
                 new XAttribute("system", "onscreen"),
-                metadata.EpisodeOnScreen));
+                episodeOnScreen));
         }
 
         if (metadata?.ProductionYear is int year && year > 0)
@@ -529,4 +765,43 @@ public class EpgService
     }
 
     private static string EscapeM3u(string value) => value.Replace(',', ' ');
+}
+
+internal sealed class PreparedGuideItems
+{
+    public PreparedGuideItems(List<PlayoutItem> items, Dictionary<Guid, ShortEpisodeBlock> shortBlocks)
+    {
+        Items = items;
+        ShortBlocks = shortBlocks;
+    }
+
+    public List<PlayoutItem> Items { get; }
+
+    public Dictionary<Guid, ShortEpisodeBlock> ShortBlocks { get; }
+}
+
+internal sealed class ShortEpisodeBlock
+{
+    public string SeriesName { get; set; } = string.Empty;
+
+    public List<TvGuideBlockEpisode> Parts { get; set; } = [];
+}
+
+internal sealed class EpisodeGuideRow
+{
+    public Guid Id { get; init; }
+
+    public Guid? SeriesId { get; init; }
+
+    public string? SeriesName { get; init; }
+
+    public string Name { get; init; } = string.Empty;
+
+    public string? Plot { get; init; }
+
+    public int? SeasonNumber { get; init; }
+
+    public int? EpisodeNumber { get; init; }
+
+    public TimeSpan? Runtime { get; init; }
 }

@@ -13,7 +13,7 @@
   <link rel="manifest" href="site.webmanifest?v=3d08b8f1">
   <meta name="theme-color" content="#101010">
   <link rel="stylesheet" href="css/legacy-admin.css">
-  <link rel="stylesheet" href="css/app.css">
+  <link rel="stylesheet" href="css/app.css?v=inappedit1-mapch2-slotcolor1">
 </head>
 <body>
   <div id="login-screen" class="auth-screen hidden">
@@ -132,11 +132,12 @@
                 </section>
                 <section class="card section-card commercial-playlist-card">
                     <h3>Commercial playlists</h3>
-                    <p class="hint">When this channel goes to commercial break, it pulls spots from these playlists. Add as many as you want. Create playlists on the Commercials tab.</p>
+                    <p class="hint">When this channel goes to commercial break, it pulls spots from these playlists. This is the same mapping as <strong>Commercials → Map channels</strong>. Add as many as you want.</p>
                     <div id="deep-ch-playlists" class="playlist-stack"></div>
                     <div class="playlist-add">
                         <select id="deep-ch-playlist-picker" class="emby-select"></select>
                         <button type="button" id="btn-deep-ch-add-playlist" class="emby-button">Add playlist</button>
+                        <button type="button" id="btn-deep-ch-open-map" class="emby-button">Map channels</button>
                     </div>
                 </section>
             </div>
@@ -421,21 +422,51 @@
             </section>
 
             <section id="tab-commercials" class="tab-panel hidden" hidden>
-                <div class="card section-card">
-                    <h2>Commercials</h2>
-                    <p class="hint">Local commercial files from Jellyfin. Tag items with <code>channelflow-commercial</code>, then sync. Blackframe scan writes chapter markers used for ad breaks. YouTube spots are managed on the <strong>CommercialBrainz</strong> tab.</p>
-                    <div class="toolbar">
-                        <button id="btn-sync-commercials" class="emby-button">Sync Jellyfin Library</button>
-                        <button id="btn-scan-blackframes" class="raised button-submit emby-button">Run Blackframe Scan</button>
+                <nav class="inner-tabs" role="tablist" aria-label="Commercials pages">
+                    <button type="button" class="inner-tab active" data-commercials-page="library" role="tab" aria-selected="true">Library</button>
+                    <button type="button" class="inner-tab" data-commercials-page="map" role="tab" aria-selected="false">Map channels</button>
+                </nav>
+                <div id="commercials-page-library" class="commercials-page">
+                    <div class="card section-card">
+                        <h2>Commercials</h2>
+                        <p class="hint">Local commercial files from Jellyfin. Tag items with <code>channelflow-commercial</code>, then sync. Blackframe scan writes chapter markers used for ad breaks. YouTube spots are managed on the <strong>CommercialBrainz</strong> tab.</p>
+                        <div class="toolbar">
+                            <button id="btn-sync-commercials" class="emby-button">Sync Jellyfin Library</button>
+                            <button id="btn-scan-blackframes" class="raised button-submit emby-button">Run Blackframe Scan</button>
+                        </div>
+                        <div id="commercial-status" class="status-card"></div>
+                        <div id="commercial-list" class="data-table-wrap"></div>
                     </div>
-                    <div id="commercial-status" class="status-card"></div>
-                    <div id="commercial-list" class="data-table-wrap"></div>
+                    <div class="card section-card">
+                        <h3>Saved playlists</h3>
+                        <p class="hint">Playlists saved from the CommercialBrainz tab write matching spots (title, YouTube link, duration) into the Commercials table so breaks do not call CommercialBrainz. At midnight ChannelFlow refreshes those stored links. Click <strong>Pull</strong> to refresh a playlist now. Assign them to channels on <strong>Map channels</strong>.</p>
+                        <div id="cb-playlist-list" class="data-table-wrap"></div>
+                        <div id="cb-playlist-items" class="data-table-wrap"></div>
+                    </div>
                 </div>
-                <div class="card section-card">
-                    <h3>Saved playlists</h3>
-                    <p class="hint">Playlists saved from the CommercialBrainz tab write matching spots (title, YouTube link, duration) into the Commercials table so breaks do not call CommercialBrainz. At midnight ChannelFlow refreshes those stored links. Click <strong>Pull</strong> to refresh a playlist now.</p>
-                    <div id="cb-playlist-list" class="data-table-wrap"></div>
-                    <div id="cb-playlist-items" class="data-table-wrap"></div>
+                <div id="commercials-page-map" class="commercials-page hidden" hidden>
+                    <div class="card section-card">
+                        <h2>Map channels</h2>
+                        <p class="hint">Pick a channel and assign the saved search playlists it uses for commercial breaks. The same list is stored on the channel (<code>CommercialSearchPlaylistIds</code>) and can also be edited in the channel editor. Channels with no playlists use the default commercial pool.</p>
+                        <div class="toolbar map-ch-toolbar">
+                            <label class="inline-field">
+                                <span>Channel</span>
+                                <select id="map-ch-select" class="emby-select"></select>
+                            </label>
+                            <button type="button" id="btn-map-ch-save" class="raised button-submit emby-button">Save</button>
+                        </div>
+                        <h3>Assigned playlists</h3>
+                        <div id="map-ch-playlists" class="playlist-stack"></div>
+                        <div class="playlist-add">
+                            <select id="map-ch-playlist-picker" class="emby-select"></select>
+                            <button type="button" id="btn-map-ch-add-playlist" class="emby-button">Add playlist</button>
+                        </div>
+                    </div>
+                    <div class="card section-card">
+                        <h3>Current mapping</h3>
+                        <p class="hint">Every channel and the playlists it uses for breaks. Click a row to edit it above.</p>
+                        <div id="map-ch-overview" class="data-table-wrap"></div>
+                    </div>
                 </div>
             </section>
 
@@ -443,7 +474,7 @@
                 <p>Sync YouTube commercials from <a href="https://commercialbrainz.org/" target="_blank" rel="noopener">CommercialBrainz</a>.</p>
                 <div class="card section-card">
                     <h3>CommercialBrainz YouTube Pool</h3>
-                    <p class="hint">Fill in the filters, then Save to playlist. ChannelFlow copies matching CommercialBrainz metadata and YouTube links into the Commercials table (one pull per save, not during live breaks). At midnight those stored links are refreshed. Assign playlists to a channel on the Commercials tab. Paste a YouTube cookies.txt on the <strong>YouTube</strong> tab to use your account (including Premium when the cookie is from a Premium login). SponsorBlock skips in-video sponsors during playback.</p>
+                    <p class="hint">Fill in the filters, then Save to playlist. ChannelFlow copies matching CommercialBrainz metadata and YouTube links into the Commercials table (one pull per save, not during live breaks). At midnight those stored links are refreshed. Assign playlists to a channel on <strong>Commercials → Map channels</strong>. Paste a YouTube cookies.txt on the <strong>YouTube</strong> tab to use your account (including Premium when the cookie is from a Premium login). SponsorBlock skips in-video sponsors during playback.</p>
                     <div class="form-grid">
                         <label class="field checkbox-field">
                             <input id="cb-enabled" type="checkbox" checked>
@@ -1242,7 +1273,7 @@
       </div>
     </div>
   </div>
-  <script src="js/app.js"></script>
+  <script src="js/app.js?v=inappedit1-mapch2-slotcolor1"></script>
   <script src="js/shell.js"></script>
 </body>
 </html>

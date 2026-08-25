@@ -66,4 +66,21 @@ public sealed class TvGuideProgram
     public bool IsNow { get; set; }
 
     public bool IsVirtual { get; set; }
+
+    /// <summary>
+    /// Shorts packed into this block (Looney Tunes, Rugrats, …). The grid shows only the series name.
+    /// </summary>
+    public IReadOnlyList<TvGuideBlockEpisode>? Episodes { get; set; }
+}
+
+/// <summary>
+/// One short episode inside a combined series guide block.
+/// </summary>
+public sealed class TvGuideBlockEpisode
+{
+    public string Title { get; set; } = string.Empty;
+
+    public string? Episode { get; set; }
+
+    public string? Description { get; set; }
 }

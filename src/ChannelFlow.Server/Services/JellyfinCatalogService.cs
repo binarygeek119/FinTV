@@ -1132,6 +1132,7 @@ public class JellyfinCatalogService
         return new ResolvedCandidate
         {
             JellyfinItemId = item.Id,
+            SeriesId = item is Episode episode && episode.SeriesId != Guid.Empty ? episode.SeriesId : null,
             Title = BuildPlayoutTitle(item),
             Duration = duration
         };

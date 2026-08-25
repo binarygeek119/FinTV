@@ -74,10 +74,12 @@ builder.Services.AddHttpClient(nameof(LlmClientService))
         UseProxy = false,
         AutomaticDecompression = DecompressionMethods.All
     });
+builder.Services.AddTransient<CommercialBrainzRateLimitHandler>();
 builder.Services.AddHttpClient(nameof(CommercialBrainzClient))
+    .AddHttpMessageHandler<CommercialBrainzRateLimitHandler>()
     .ConfigureHttpClient(client =>
     {
-        client.Timeout = TimeSpan.FromMinutes(5);
+        client.Timeout = TimeSpan.FromMinutes(15);
         client.DefaultRequestHeaders.UserAgent.ParseAdd("ChannelFlow-Server/0.0.3 (CommercialBrainz)");
     });
 builder.Services.AddHttpClient("Weather", client =>
@@ -147,12 +149,13 @@ builder.Services.AddScoped<IChapterManager>(sp => sp.GetRequiredService<CatalogL
 builder.Services.AddScoped<ChannelService>();
 builder.Services.AddScoped<ChannelPresetService>();
 builder.Services.AddScoped<LineupService>();
+builder.Services.AddScoped<LineupSlotKindService>();
 builder.Services.AddScoped<SpecialPresentationService>();
 builder.Services.AddScoped<FinTvListService>();
 builder.Services.AddScoped<SmartSelectionService>();
 builder.Services.AddScoped<LineupGeneratorService>();
 builder.Services.AddScoped<CommercialService>();
-builder.Services.AddScoped<CommercialBrainzClient>();
+builder.Services.AddSingleton<CommercialBrainzClient>();
 builder.Services.AddScoped<CommercialBrainzFilterService>();
 builder.Services.AddScoped<CommercialBrainzSyncService>();
 builder.Services.AddScoped<SponsorBlockClient>();
@@ -187,6 +190,7 @@ builder.Services.AddHostedService<WeatherGuideRefreshHostedService>();
 builder.Services.AddHostedService<AiPlayoutHorizonHostedService>();
 builder.Services.AddHostedService<CommercialBrainzRefreshHostedService>();
 builder.Services.AddHostedService<MusicPackStartupHostedService>();
+builder.Services.AddHostedService<LogRetentionHostedService>();
 
 var app = builder.Build();
 

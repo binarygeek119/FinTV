@@ -43,7 +43,7 @@
         list: 'Register Jellyfin playlists as ChannelFlow lists',
         jellyfin: 'Choose which Jellyfin libraries to sync from',
         special: 'Recurring blocks that override the normal lineup',
-        commercials: 'Jellyfin commercial library and saved playlists',
+        commercials: 'Jellyfin commercials, saved playlists, and channel mapping',
         commercialbrainz: 'YouTube commercial pool from CommercialBrainz',
         youtube: 'YouTube cookies, Premium playback, and SponsorBlock',
         ebs: 'Playback when a channel has nothing scheduled',
