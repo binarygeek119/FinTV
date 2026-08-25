@@ -28,7 +28,9 @@ RUN dotnet publish src/ChannelFlow.Server/ChannelFlow.Server.csproj -c Release -
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 ARG CHANNELFLOW_VERSION=1.0.0
 ARG CHANNELFLOW_REVISION=dev
-RUN apt-get update && apt-get install -y --no-install-recommends \
+ENV TZ=America/Chicago
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        tzdata \
         ffmpeg \
         ca-certificates \
         python3 \
@@ -41,6 +43,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libva2 \
         vainfo \
         libfontconfig1 \
+    && ln -snf "/usr/share/zoneinfo/${TZ}" /etc/localtime \
+    && echo "${TZ}" > /etc/timezone \
     && rm -rf /var/lib/apt/lists/* \
     && wget -qO /usr/local/bin/yt-dlp https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
     && chmod +x /usr/local/bin/yt-dlp
@@ -58,7 +62,8 @@ ENV CHANNELFLOW_CONFIG=/config \
     CHANNELFLOW_VERSION=${CHANNELFLOW_VERSION} \
     CHANNELFLOW_REVISION=${CHANNELFLOW_REVISION} \
     CHANNELFLOW_PACKAGING=docker \
-    PORT=8097
+    PORT=8097 \
+    TZ=America/Chicago
 
 EXPOSE 8097
 VOLUME ["/config"]
