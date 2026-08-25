@@ -21,6 +21,7 @@ public class AiChannelAutoApplyService
     private readonly FinTvDbContext _db;
     private readonly AiLineupGeneratorService _generator;
     private readonly LineupGeneratorService _playoutGenerator;
+    private readonly PlayoutBuilderService _playoutBuilder;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<AiChannelAutoApplyService> _logger;
 
@@ -28,12 +29,14 @@ public class AiChannelAutoApplyService
         FinTvDbContext db,
         AiLineupGeneratorService generator,
         LineupGeneratorService playoutGenerator,
+        PlayoutBuilderService playoutBuilder,
         IServiceScopeFactory scopeFactory,
         ILogger<AiChannelAutoApplyService> logger)
     {
         _db = db;
         _generator = generator;
         _playoutGenerator = playoutGenerator;
+        _playoutBuilder = playoutBuilder;
         _scopeFactory = scopeFactory;
         _logger = logger;
     }
@@ -106,56 +109,216 @@ public class AiChannelAutoApplyService
         bool rebuildPlayout = true,
         CancellationToken cancellationToken = default)
     {
-        using var gate = await ChannelApplyLocks.AcquireAsync(channelId, cancellationToken);
-        var channel = await _db.Channels.AsNoTracking()
-            .FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
-        if (channel is null)
+        Channel? channel;
+        using (await ChannelApplyLocks.AcquireAsync(channelId, cancellationToken))
         {
-            return AiAutoApplyChannelResult.Failed("Channel not found.", channelId);
+            channel = await _db.Channels.AsNoTracking()
+                .FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
+            if (channel is null)
+            {
+                return AiAutoApplyChannelResult.Failed("Channel not found.", channelId);
+            }
+
+            if (!IsEligible(channel))
+            {
+                FinTvDebugLog.Ai(_logger, "Channel {ChannelName} ({ChannelId}) is not eligible for AI lineups", channel.Name, channelId);
+                return AiAutoApplyChannelResult.Skipped($"{channel.Name} is not eligible for AI lineups.");
+            }
+
+            FinTvDebugLog.Ai(
+                _logger,
+                "Applying AI lineup to {ChannelName} ({ChannelId}), rebuildPlayout={Rebuild}",
+                channel.Name,
+                channelId,
+                rebuildPlayout);
+
+            try
+            {
+                await ApplyDefaultSettingsAsync(channelId, cancellationToken);
+                _db.ChangeTracker.Clear();
+
+                var preview = await _generator.GenerateAsync(channelId, null, cancellationToken);
+                _db.ChangeTracker.Clear();
+                FinTvDebugLog.Ai(
+                    _logger,
+                    "Generated preview for {ChannelName}: {SlotCount} slots",
+                    channel.Name,
+                    preview.LineupSlots.Count);
+
+                await _generator.ApplyAsync(
+                    channelId,
+                    preview.LineupSlots,
+                    rebuildPlayout: false,
+                    _playoutGenerator,
+                    cancellationToken,
+                    preview.WeeklyLineups);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "AI lineup apply failed for channel {ChannelId}", channelId);
+                return AiAutoApplyChannelResult.Failed(ex.Message, channelId, channel.Name);
+            }
         }
 
-        if (!IsEligible(channel))
+        if (!rebuildPlayout)
         {
-            FinTvDebugLog.Ai(_logger, "Channel {ChannelName} ({ChannelId}) is not eligible for AI lineups", channel.Name, channelId);
-            return AiAutoApplyChannelResult.Skipped($"{channel.Name} is not eligible for AI lineups.");
+            return AiAutoApplyChannelResult.Succeeded(channelId, channel.Name);
         }
-
-        FinTvDebugLog.Ai(
-            _logger,
-            "Applying AI lineup to {ChannelName} ({ChannelId}), rebuildPlayout={Rebuild}",
-            channel.Name,
-            channelId,
-            rebuildPlayout);
 
         try
         {
-            await ApplyDefaultSettingsAsync(channelId, cancellationToken);
-            _db.ChangeTracker.Clear();
-
-            var preview = await _generator.GenerateAsync(channelId, null, cancellationToken);
-            _db.ChangeTracker.Clear();
-            FinTvDebugLog.Ai(
-                _logger,
-                "Generated preview for {ChannelName}: {SlotCount} slots",
-                channel.Name,
-                preview.LineupSlots.Count);
-
-            await _generator.ApplyAsync(
-                channelId,
-                preview.LineupSlots,
-                rebuildPlayout: rebuildPlayout,
-                _playoutGenerator,
-                cancellationToken,
-                preview.WeeklyLineups);
-
+            await _playoutBuilder.RebuildChannelAndTrackAsync(channelId, cancellationToken)
+                .ConfigureAwait(false);
             return AiAutoApplyChannelResult.Succeeded(channelId, channel.Name);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "AI lineup apply failed for channel {ChannelId}", channelId);
+            _logger.LogWarning(ex, "AI lineup saved for channel {ChannelId} but the Live TV guide was not rebuilt", channelId);
             return AiAutoApplyChannelResult.Failed(ex.Message, channelId, channel.Name);
         }
     }
+
+    /// <summary>
+    /// Generates the weekly AI lineup once, then fills missing playout days through the horizon.
+    /// When 14 days already exist, playout is left alone; the next day is appended at local midnight.
+    /// </summary>
+    public async Task<AiAutoApplyChannelResult> GenerateAndBuildHorizonDaysAsync(
+        Guid channelId,
+        AiProvider? providerOverride,
+        Action<AiChannelBuildProgress>? onProgress,
+        CancellationToken cancellationToken = default,
+        bool skipIfAtHorizon = false)
+    {
+        var daysToBuild = PlayoutScheduleHelper.GetPlayoutDaysToBuild();
+        Channel? channel;
+        AiLineupPreviewResult? preview = null;
+
+        using (await ChannelApplyLocks.AcquireAsync(channelId, cancellationToken))
+        {
+            channel = await _db.Channels.AsNoTracking()
+                .FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
+            if (channel is null)
+            {
+                return AiAutoApplyChannelResult.Failed("Channel not found.", channelId);
+            }
+
+            if (!IsEligible(channel))
+            {
+                return AiAutoApplyChannelResult.Skipped($"{channel.Name} is not eligible for AI lineups.");
+            }
+
+            var coverage = await GetHorizonDayCoverageAsync(channelId, daysToBuild, cancellationToken)
+                .ConfigureAwait(false);
+            if (skipIfAtHorizon && ShouldLeaveHorizonForMidnight(coverage))
+            {
+                ReportProgress(onProgress, new AiChannelBuildProgress
+                {
+                    CurrentDay = daysToBuild,
+                    TotalDays = daysToBuild,
+                    Phase = "horizon-full",
+                    ChannelName = channel.Name
+                });
+                return AiAutoApplyChannelResult.Skipped(
+                    $"{channel.Name} already has a {daysToBuild}-day guide. The next day is built at midnight.");
+            }
+
+            ReportProgress(onProgress, new AiChannelBuildProgress
+            {
+                CurrentDay = 1,
+                TotalDays = daysToBuild,
+                Phase = "generating",
+                ChannelName = channel.Name
+            });
+
+            try
+            {
+                await ApplyDefaultSettingsAsync(channelId, cancellationToken);
+                _db.ChangeTracker.Clear();
+
+                preview = await _generator.GenerateAsync(channelId, providerOverride, cancellationToken);
+                _db.ChangeTracker.Clear();
+                await _generator.ApplyAsync(
+                    channelId,
+                    preview.LineupSlots,
+                    rebuildPlayout: false,
+                    _playoutGenerator,
+                    cancellationToken,
+                    preview.WeeklyLineups);
+                _db.ChangeTracker.Clear();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "AI lineup generate failed for channel {ChannelId}", channelId);
+                return AiAutoApplyChannelResult.Failed(ex.Message, channelId, channel.Name);
+            }
+
+            coverage = await GetHorizonDayCoverageAsync(channelId, daysToBuild, cancellationToken)
+                .ConfigureAwait(false);
+            if (ShouldLeaveHorizonForMidnight(coverage))
+            {
+                ReportProgress(onProgress, new AiChannelBuildProgress
+                {
+                    CurrentDay = daysToBuild,
+                    TotalDays = daysToBuild,
+                    Phase = "horizon-full",
+                    ChannelName = channel.Name,
+                    Preview = preview
+                });
+                _logger.LogInformation(
+                    "{Channel} already has a {Days}-day guide; skipping playout rebuild. Next day will be built at midnight.",
+                    channel.Name,
+                    daysToBuild);
+                return AiAutoApplyChannelResult.Succeeded(channelId, channel.Name, preview, playoutAlreadyAtHorizon: true);
+            }
+
+            for (var day = 0; day < daysToBuild; day++)
+            {
+                if (coverage[day])
+                {
+                    continue;
+                }
+
+                cancellationToken.ThrowIfCancellationRequested();
+                ReportProgress(onProgress, new AiChannelBuildProgress
+                {
+                    CurrentDay = day + 1,
+                    TotalDays = daysToBuild,
+                    Phase = "playout",
+                    ChannelName = channel.Name,
+                    Preview = preview
+                });
+
+                try
+                {
+                    _db.ChangeTracker.Clear();
+                    await BuildChannelPlayoutDayAsync(
+                        channelId,
+                        day,
+                        cancellationToken,
+                        interruptStream: day == 0).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "AI lineup saved for {Channel} but playout day {Day}/{Days} failed",
+                        channel.Name,
+                        day + 1,
+                        daysToBuild);
+                    return AiAutoApplyChannelResult.Failed(
+                        $"Playout day {day + 1} failed: {ex.Message}",
+                        channelId,
+                        channel.Name,
+                        preview);
+                }
+            }
+        }
+
+        return AiAutoApplyChannelResult.Succeeded(channelId, channel.Name, preview);
+    }
+
+    private static void ReportProgress(Action<AiChannelBuildProgress>? onProgress, AiChannelBuildProgress progress)
+        => onProgress?.Invoke(progress);
 
     public bool IsGenerateAllJobRunning
     {
@@ -222,6 +385,7 @@ public class AiChannelAutoApplyService
             totalSteps = job.TotalSteps,
             completedSteps = job.CompletedSteps,
             currentDay = job.CurrentDay,
+            currentPhase = job.CurrentPhase,
             currentChannelName = job.CurrentChannelName,
             lineupsGenerated = job.LineupsGenerated,
             lineupsFailed = job.LineupsFailed,
@@ -307,8 +471,8 @@ public class AiChannelAutoApplyService
     }
 
     /// <summary>
-    /// Generates AI lineups and full 14-day playout one channel at a time:
-    /// finish channel A completely, then channel B, and so on.
+    /// Generates AI lineups and playout one channel at a time:
+    /// generate the weekly lineup, build day 1, then day 2, through 14 days, then the next channel.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task RunStaggeredGenerateAllAsync(CancellationToken cancellationToken = default)
@@ -351,11 +515,11 @@ public class AiChannelAutoApplyService
                 eligibleChannels.Count,
                 channelRows.Count,
                 daysToBuild,
-                eligibleChannels.Count);
+                eligibleChannels.Count * daysToBuild);
 
             state.TotalDays = daysToBuild;
             state.TotalChannels = eligibleChannels.Count;
-            state.TotalSteps = eligibleChannels.Count;
+            state.TotalSteps = eligibleChannels.Count * daysToBuild;
             SaveGenerateAllState(state);
 
             if (eligibleChannels.Count == 0)
@@ -364,30 +528,50 @@ public class AiChannelAutoApplyService
                 return;
             }
 
+            var channelIndex = 0;
             foreach (var (channelId, channelName) in eligibleChannels)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-
-                state.CurrentDay = daysToBuild;
                 state.CurrentChannelName = channelName;
+                state.CurrentDay = 1;
+                state.CurrentPhase = "generating";
                 SaveGenerateAllState(state);
 
                 try
                 {
                     using var lineupScope = _scopeFactory.CreateScope();
                     var lineupService = lineupScope.ServiceProvider.GetRequiredService<AiChannelAutoApplyService>();
-                    var lineupResult = await lineupService.ApplyChannelLineupAsync(
+                    var lineupResult = await lineupService.GenerateAndBuildHorizonDaysAsync(
                         channelId,
-                        rebuildPlayout: true,
-                        cancellationToken).ConfigureAwait(false);
+                        providerOverride: null,
+                        onProgress: progress =>
+                        {
+                            state.CurrentChannelName = progress.ChannelName;
+                            state.CurrentDay = progress.CurrentDay;
+                            state.CurrentPhase = progress.Phase;
+                            state.CompletedSteps = (channelIndex * daysToBuild)
+                                + (progress.Phase == "generating" || progress.Phase == "horizon-full"
+                                    ? 0
+                                    : Math.Max(0, progress.CurrentDay - 1));
+                            SaveGenerateAllState(state);
+                        },
+                        cancellationToken,
+                        skipIfAtHorizon: true).ConfigureAwait(false);
 
                     if (lineupResult.Ok)
                     {
                         state.LineupsGenerated++;
-                        state.PlayoutDaysBuilt += daysToBuild;
+                        if (!lineupResult.PlayoutAlreadyAtHorizon)
+                        {
+                            state.PlayoutDaysBuilt += daysToBuild;
+                        }
+
                         _logger.LogInformation(
-                            "AI generate-all finished channel {ChannelName} with a full playout rebuild.",
-                            channelName);
+                            "AI generate-all finished channel {ChannelName}: lineup{Playout}.",
+                            channelName,
+                            lineupResult.PlayoutAlreadyAtHorizon
+                                ? "; 14-day guide already filled (next day at midnight)"
+                                : $" plus {daysToBuild} playout days");
                     }
                     else if (!lineupResult.WasSkipped)
                     {
@@ -415,13 +599,13 @@ public class AiChannelAutoApplyService
                     _logger.LogWarning(ex, "AI generate-all failed for {ChannelName}", channelName);
                 }
 
-                state.CompletedSteps++;
+                channelIndex++;
+                state.CompletedSteps = channelIndex * daysToBuild;
                 SaveGenerateAllState(state);
             }
 
             _logger.LogInformation(
                 "AI generate-all finished: {Lineups} lineups, {PlayoutDays} playout days built across {Channels} channels and {Days} days.",
-
                 state.LineupsGenerated,
                 state.PlayoutDaysBuilt,
                 eligibleChannels.Count,
@@ -437,6 +621,7 @@ public class AiChannelAutoApplyService
         {
             state.IsRunning = false;
             state.CurrentChannelName = null;
+            state.CurrentPhase = null;
             state.CompletedAt = DateTime.UtcNow;
             SaveGenerateAllState(state);
             BulkApplyLock.Release();
@@ -466,7 +651,8 @@ public class AiChannelAutoApplyService
     public async Task BuildChannelPlayoutDayAsync(
         Guid channelId,
         int dayOffset,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool interruptStream = true)
     {
         var channel = await _db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken)
             ?? throw new InvalidOperationException("Channel not found.");
@@ -486,7 +672,8 @@ public class AiChannelAutoApplyService
             dayStart,
             dayEnd,
             PlayoutBuildMode.ReplaceWindow,
-            cancellationToken);
+            cancellationToken,
+            interruptStream);
 
         var itemCount = await _db.PlayoutItems.CountAsync(
             p => p.ChannelId == channelId && p.Start >= dayStart && p.Start < dayEnd,
@@ -500,12 +687,13 @@ public class AiChannelAutoApplyService
     }
 
     /// <summary>
-    /// Extends playout by up to one day when the schedule has rolled forward to a 13-day horizon.
+    /// Extends playout by one calendar day when yesterday rolled off the 14-day horizon.
     /// </summary>
     public async Task<PlayoutHorizonMaintainResult> MaintainPlayoutHorizonAsync(
         Guid channelId,
         CancellationToken cancellationToken = default)
     {
+        using var gate = await ChannelApplyLocks.AcquireAsync(channelId, cancellationToken);
         var channel = await _db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
         if (channel is null || channel.ContentType is ChannelContentType.Weather or ChannelContentType.News || !IsEligible(channel))
         {
@@ -518,34 +706,34 @@ public class AiChannelAutoApplyService
         }
 
         var now = DateTime.UtcNow;
+        var daysToBuild = PlayoutScheduleHelper.GetPlayoutDaysToBuild();
+        var horizonEnd = PlayoutScheduleHelper.GetHorizonEndUtc(now);
         var latestFinish = await GetLatestPlayoutFinishUtcAsync(channelId, now, cancellationToken)
             .ConfigureAwait(false);
-        var status = PlayoutScheduleHelper.AnalyzeHorizon(now, latestFinish);
         FinTvDebugLog.Ai(
             _logger,
-            "Horizon check for {ChannelName}: latestFinish={LatestFinish}, needsExtension={NeedsExtension}, atHorizon={AtHorizon}",
+            "Horizon check for {ChannelName}: latestFinish={LatestFinish}, horizonEnd={HorizonEnd:u}",
             channel.Name,
             latestFinish?.ToString("u") ?? "none",
-            status.NeedsOneDayExtension,
-            status.IsAtHorizon);
+            horizonEnd);
 
-        if (status.IsAtHorizon)
-        {
-            return PlayoutHorizonMaintainResult.AlreadyAtHorizon;
-        }
-
-        if (!status.NeedsOneDayExtension || !status.LatestFinishUtc.HasValue)
+        if (latestFinish is null || latestFinish.Value <= now)
         {
             return PlayoutHorizonMaintainResult.NeedsFullBuild;
         }
 
-        await _playoutGenerator.BuildPlayoutAsync(
-            channel,
-            status.LatestFinishUtc.Value,
-            status.HorizonEndUtc,
-            PlayoutBuildMode.ExtendHorizon,
-            cancellationToken).ConfigureAwait(false);
+        if (latestFinish.Value >= horizonEnd)
+        {
+            return PlayoutHorizonMaintainResult.AlreadyAtHorizon;
+        }
 
+        var nextDayOffset = daysToBuild - 1;
+        _db.ChangeTracker.Clear();
+        await BuildChannelPlayoutDayAsync(
+            channelId,
+            nextDayOffset,
+            cancellationToken,
+            interruptStream: false).ConfigureAwait(false);
         return PlayoutHorizonMaintainResult.ExtendedOneDay;
     }
 
@@ -599,6 +787,51 @@ public class AiChannelAutoApplyService
         }
 
         return extended;
+    }
+
+    private async Task<bool[]> GetHorizonDayCoverageAsync(
+        Guid channelId,
+        int daysToBuild,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        var coverage = new bool[daysToBuild];
+        for (var day = 0; day < daysToBuild; day++)
+        {
+            var start = PlayoutScheduleHelper.GetScheduleDayStartUtc(now, day);
+            var end = PlayoutScheduleHelper.GetScheduleDayStartUtc(now, day + 1);
+            coverage[day] = await _db.PlayoutItems
+                .AsNoTracking()
+                .AnyAsync(
+                    p => p.ChannelId == channelId && p.Finish > start && p.Start < end,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        return coverage;
+    }
+
+    private static bool ShouldLeaveHorizonForMidnight(IReadOnlyList<bool> coverage)
+    {
+        if (coverage.Count == 0)
+        {
+            return false;
+        }
+
+        var missing = 0;
+        var lastMissing = false;
+        for (var i = 0; i < coverage.Count; i++)
+        {
+            if (coverage[i])
+            {
+                continue;
+            }
+
+            missing++;
+            lastMissing = i == coverage.Count - 1;
+        }
+
+        return missing == 0 || (missing == 1 && lastMissing);
     }
 
     private async Task<DateTime?> GetLatestPlayoutFinishUtcAsync(
@@ -901,12 +1134,44 @@ public class AiAutoApplyChannelResult
 
     public string? Error { get; set; }
 
-    public static AiAutoApplyChannelResult Succeeded(Guid channelId, string channelName)
-        => new() { Ok = true, ChannelId = channelId, ChannelName = channelName };
+    public AiLineupPreviewResult? Preview { get; set; }
+
+    public bool PlayoutAlreadyAtHorizon { get; set; }
+
+    public static AiAutoApplyChannelResult Succeeded(
+        Guid channelId,
+        string channelName,
+        AiLineupPreviewResult? preview = null,
+        bool playoutAlreadyAtHorizon = false)
+        => new()
+        {
+            Ok = true,
+            ChannelId = channelId,
+            ChannelName = channelName,
+            Preview = preview,
+            PlayoutAlreadyAtHorizon = playoutAlreadyAtHorizon
+        };
 
     public static AiAutoApplyChannelResult Skipped(string reason)
         => new() { WasSkipped = true, Error = reason };
 
-    public static AiAutoApplyChannelResult Failed(string error, Guid? channelId = null, string? channelName = null)
-        => new() { Ok = false, Error = error, ChannelId = channelId, ChannelName = channelName };
+    public static AiAutoApplyChannelResult Failed(
+        string error,
+        Guid? channelId = null,
+        string? channelName = null,
+        AiLineupPreviewResult? preview = null)
+        => new() { Ok = false, Error = error, ChannelId = channelId, ChannelName = channelName, Preview = preview };
+}
+
+public sealed class AiChannelBuildProgress
+{
+    public int CurrentDay { get; init; }
+
+    public int TotalDays { get; init; }
+
+    public string Phase { get; init; } = string.Empty;
+
+    public string ChannelName { get; init; } = string.Empty;
+
+    public AiLineupPreviewResult? Preview { get; init; }
 }

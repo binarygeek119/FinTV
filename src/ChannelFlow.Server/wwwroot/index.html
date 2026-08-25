@@ -433,7 +433,7 @@
                 </div>
                 <div class="card section-card">
                     <h3>Saved playlists</h3>
-                    <p class="hint">Playlists saved from the CommercialBrainz tab. Assign them to a channel for commercial breaks. Click <strong>Pull</strong> to load a sample of spots this playlist will use.</p>
+                    <p class="hint">Playlists saved from the CommercialBrainz tab write matching spots (title, YouTube link, duration) into the Commercials table so breaks do not call CommercialBrainz. At midnight ChannelFlow refreshes those stored links. Click <strong>Pull</strong> to refresh a playlist now.</p>
                     <div id="cb-playlist-list" class="data-table-wrap"></div>
                     <div id="cb-playlist-items" class="data-table-wrap"></div>
                 </div>
@@ -443,7 +443,7 @@
                 <p>Sync YouTube commercials from <a href="https://commercialbrainz.org/" target="_blank" rel="noopener">CommercialBrainz</a>.</p>
                 <div class="card section-card">
                     <h3>CommercialBrainz YouTube Pool</h3>
-                    <p class="hint">Fill in the filters, then Save to playlist. Those playlists appear on the Commercials tab and can be assigned to channels. Channel commercial breaks pull from that playlist’s filters. CommercialBrainz stores YouTube metadata only and streams each spot at break time (no local download). Paste a YouTube cookies.txt on the <strong>YouTube</strong> tab to use your account (including Premium when the cookie is from a Premium login). SponsorBlock skips in-video sponsors during playback.</p>
+                    <p class="hint">Fill in the filters, then Save to playlist. ChannelFlow copies matching CommercialBrainz metadata and YouTube links into the Commercials table (one pull per save, not during live breaks). At midnight those stored links are refreshed. Assign playlists to a channel on the Commercials tab. Paste a YouTube cookies.txt on the <strong>YouTube</strong> tab to use your account (including Premium when the cookie is from a Premium login). SponsorBlock skips in-video sponsors during playback.</p>
                     <div class="form-grid">
                         <label class="field checkbox-field">
                             <input id="cb-enabled" type="checkbox" checked>
@@ -724,7 +724,7 @@
                         <span class="channelflow-check-box" aria-hidden="true"></span>
                         <span>Simulate original broadcasting</span>
                     </label>
-                    <p class="hint">Saved for a later update. Does not change playout yet.</p>
+                    <p class="hint">When on, primetime that night plays catalog episodes and movies whose original air month and day match (any year). Leftover primetime stays the usual lineup. Sequential episode order is unchanged. Takes effect on the next playout rebuild.</p>
                     <div class="actions" style="margin-bottom:1rem">
                         <button type="button" id="btn-save-ai-settings" class="raised button-submit emby-button">Save AI Settings</button>
                         <button type="button" id="btn-test-ai" class="emby-button">Test Connection</button>
@@ -784,7 +784,7 @@
                         </div>
                     </div>
                     <p id="ai-generate-all-status" class="hint hidden"></p>
-                    <p class="hint">Pick a <strong>playout template</strong> to structure dayparts (morning cartoons, primetime, etc.). Channel rules define content scope; fine-tune adds extra instructions. <strong>Generate</strong> on a channel (and <strong>Generate All</strong>) writes the lineup and rebuilds Live TV guide playout. Generate All runs in the background, one channel and one day at a time, until each channel has 14 days of playout.</p>
+                    <p class="hint">Pick a <strong>playout template</strong> to structure dayparts (morning cartoons, primetime, etc.). Channel rules define content scope; fine-tune adds extra instructions. <strong>Generate</strong> writes the weekly lineup and fills the Live TV guide up to 14 days, one day at a time. If a channel already has 14 days, Generate leaves that playout in place. At local midnight, when today ends, only the next day (day 15 of the rolling window) is built. <strong>Generate All</strong> skips channels that already have 14 days and moves on.</p>
                     <div id="ai-channels-list" class="ai-channels-list"></div>
                 </div>
                 <div id="ai-preview-panel" class="card section-card hidden">

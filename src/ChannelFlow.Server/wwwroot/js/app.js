@@ -73,6 +73,7 @@
     let guideFromIso = null;
     let guideDateFilter = null;
     let guideTimer = null;
+    let guideScrollToken = 0;
     let scheduleTimeZone = null;
     let appClockTimer = null;
     const GUIDE_PX_PER_MIN = 4;
@@ -1889,30 +1890,7 @@
             await api('/lineups/' + selectedChannelId + '/rebuild', { method: 'POST' });
             toast('Playout rebuild started in background. Guide status will refresh automatically.', 'success');
 
-            for (let attempt = 0; attempt < 24; attempt++) {
-                await new Promise((resolve) => setTimeout(resolve, 5000));
-                await loadLineupPlayoutStatus();
-                const h = await api('/lineups/' + selectedChannelId + '/playout-horizon');
-                const rebuild = h.rebuild || {};
-
-                if (rebuild.state === 'failed') {
-                    toast(rebuild.error || 'Playout rebuild failed. Check the Jellyfin server log.', 'error');
-                    return;
-                }
-
-                if (rebuild.state === 'completed') {
-                    if (rebuild.hasCoverageNow) {
-                        toast('Playout rebuild finished. Live TV guide is active for this channel.', 'success');
-                    } else if (Number(rebuild.playoutItemCount || 0) > 0) {
-                        toast('Playout rebuilt, but nothing is on air right now. Check the guide banner for the next start time.', 'success');
-                    } else {
-                        toast('Rebuild finished but the guide is empty. Fill lineup slots (Preview shows 0/48), then rebuild again.', 'error');
-                    }
-                    return;
-                }
-            }
-
-            toast('Playout rebuild is still running. Check the guide banner again in a minute.', 'success');
+            await waitForPlayoutRebuild(selectedChannelId);
         } catch (err) {
             toast(err.message, 'error');
         } finally {
@@ -2323,6 +2301,7 @@
         const existing = commercialSearchPlaylists.find((p) => String(p.id) === String(existingId));
         const payload = readBrainzPlaylistPayload(mode === 'new' ? name : (existing?.name || name));
         await saveBrainzSettings({ silent: true });
+        toast('Saving playlist and copying matching spots into the Commercials table…');
 
         const saved = mode === 'existing'
             ? await api('/commercials/search-playlists/' + existingId, { method: 'PUT', body: JSON.stringify(payload) })
@@ -2331,9 +2310,9 @@
         selectedSearchPlaylistId = saved.id;
         closeModal();
         toast(mode === 'existing'
-            ? `Filters saved to “${saved.name}”.`
-            : `Created playlist “${saved.name}”.`, 'success');
-        await loadSearchPlaylists();
+            ? `Saved “${saved.name}” and stored ${saved.itemCount ?? saved.lastMatchedCount ?? 0} spots in the Commercials table.`
+            : `Created “${saved.name}” and stored ${saved.itemCount ?? saved.lastMatchedCount ?? 0} spots in the Commercials table.`, 'success');
+        await loadCommercials();
     }
 
     async function previewBrainz(options = {}) {
@@ -2509,10 +2488,10 @@
 
     async function pullSearchPlaylist(id) {
         try {
-            toast('Loading a sample of matching spots…');
+            toast('Refreshing matching spots from CommercialBrainz…');
             const playlist = await api('/commercials/search-playlists/' + id + '/pull', { method: 'POST' });
             selectedSearchPlaylistId = playlist.id;
-            toast(`Loaded ${playlist.itemCount ?? playlist.itemCount ?? 0} matching spots for “${playlist.name}”.`, 'success');
+            toast(`Stored ${playlist.itemCount ?? playlist.lastMatchedCount ?? 0} spots for “${playlist.name}”.`, 'success');
             await loadCommercials();
         } catch (err) {
             toast(err.message, 'error');
@@ -3302,9 +3281,20 @@
         if (job.isRunning) {
             const totalSteps = job.totalSteps || 0;
             const pct = totalSteps ? Math.round((job.completedSteps / totalSteps) * 100) : 0;
-            let statusLine =
-                `Generate all: day ${job.currentDay}/${job.totalDays || 14} · ${job.currentChannelName || '…'} (all channels per day, then next day) · ` +
-                `${job.completedSteps}/${totalSteps || '?'} steps (${pct}%)`;
+            let statusLine;
+            if (job.currentPhase === 'generating') {
+                statusLine =
+                    `Generate all: ${job.currentChannelName || '…'} · generating lineup, then playout day 1/${job.totalDays || 14} · ` +
+                    `next day, then next channel · ${job.completedSteps}/${totalSteps || '?'} steps (${pct}%)`;
+            } else if (job.currentPhase === 'horizon-full') {
+                statusLine =
+                    `Generate all: ${job.currentChannelName || '…'} · 14-day guide already filled (next day at midnight) · ` +
+                    `${job.completedSteps}/${totalSteps || '?'} steps (${pct}%)`;
+            } else {
+                statusLine =
+                    `Generate all: ${job.currentChannelName || '…'} · day ${job.currentDay || 1}/${job.totalDays || 14} playout · ` +
+                    `then next day, then next channel · ${job.completedSteps}/${totalSteps || '?'} steps (${pct}%)`;
+            }
             if (job.workerActive === false) {
                 statusLine += ' · no background worker (stale — click Cancel to reset)';
             } else if (aiGenerateAllIdlePolls >= 6) {
@@ -3476,6 +3466,7 @@
                     </div>
                 </div>
                 ${ch.aiRuleBrief ? `<p class="hint">${escapeHtml(ch.aiRuleBrief)}</p>` : ''}
+                <p class="hint ai-channel-generate-status hidden"></p>
                 <label class="field">
                     <span>Fine-tune prompt</span>
                     <textarea class="emby-input ai-fine-tune" data-channel="${ch.id}" placeholder="Optional extra instructions for this channel">${escapeHtml(ch.aiFineTunePrompt || '')}</textarea>
@@ -3614,11 +3605,63 @@
         }
     }
 
+    function renderChannelGenerateStatus(channelId, status) {
+        const row = q(`[data-ai-channel="${channelId}"]`);
+        const el = row?.querySelector('.ai-channel-generate-status');
+        const btn = row?.querySelector('.ai-generate-channel');
+        if (!el) {
+            return;
+        }
+
+        if (!status || !status.isRunning) {
+            el.classList.add('hidden');
+            el.textContent = '';
+            if (btn && aiSettings && aiSettings.enabled) {
+                btn.textContent = 'Generate';
+            }
+            return;
+        }
+
+        el.classList.remove('hidden');
+        const totalDays = status.totalDays || 14;
+        if (status.phase === 'generating') {
+            el.textContent = 'Generating lineup… then building playout day 1 of ' + totalDays + '.';
+            if (btn) {
+                btn.textContent = 'Generating…';
+            }
+            return;
+        }
+
+        if (status.phase === 'horizon-full') {
+            el.textContent = 'Lineup saved. Guide already has ' + totalDays + ' days. The next day is built at midnight.';
+            if (btn) {
+                btn.textContent = 'Up to date';
+            }
+            return;
+        }
+
+        el.textContent = 'Lineup saved. Building guide day ' + (status.currentDay || 1) + ' of ' + totalDays + '…';
+        if (btn) {
+            btn.textContent = 'Day ' + (status.currentDay || 1) + '/' + totalDays;
+        }
+    }
+
     async function waitForChannelGenerate(channelId, maxWaitMs) {
         const started = Date.now();
-        const timeoutMs = maxWaitMs || 900000;
+        const timeoutMs = maxWaitMs || 1800000;
+        let lineupSavedToast = false;
         while (Date.now() - started < timeoutMs) {
             const status = await api('/ai/channels/' + channelId + '/generate/status');
+            renderChannelGenerateStatus(channelId, status);
+            if (status.applied && status.isRunning && !lineupSavedToast) {
+                lineupSavedToast = true;
+                toast('AI lineup saved. Building the TV guide one day at a time…', 'info');
+            }
+
+            if (isGuideTabVisible()) {
+                loadGuide({ quiet: true }).catch(() => {});
+            }
+
             if (!status.isRunning) {
                 if (status.error) {
                     throw new Error(status.error);
@@ -3634,7 +3677,7 @@
             await new Promise((resolve) => setTimeout(resolve, 3000));
         }
 
-        throw new Error('AI lineup generation is taking longer than expected. Check the Jellyfin log and try again.');
+        throw new Error('AI lineup generation is taking longer than expected. Check the ChannelFlow log and try again.');
     }
 
     async function generateAiLineup(channelId) {
@@ -3662,14 +3705,20 @@
             renderAiPreview();
             if (status.applyError) {
                 toast('AI lineup generated, but the Live TV guide was not rebuilt: ' + status.applyError, 'error');
+            } else if (status.phase === 'horizon-full') {
+                toast('AI lineup saved. Guide already has 14 days. The next day will be built at midnight.', 'success');
             } else {
                 toast('AI lineup generated and Live TV guide rebuilt.', 'success');
-                await refreshGuide();
             }
+            await loadGuide({ quiet: true });
         } catch (err) {
             toast(err.message, 'error');
         } finally {
-            if (btn) btn.disabled = !(aiSettings && aiSettings.enabled);
+            renderChannelGenerateStatus(channelId, { isRunning: false });
+            if (btn) {
+                btn.disabled = !(aiSettings && aiSettings.enabled);
+                btn.textContent = 'Generate';
+            }
         }
     }
 
@@ -3716,10 +3765,11 @@
                 method: 'POST',
                 body: JSON.stringify(buildAiApplyPayload())
             });
-            toast('Lineup applied and Live TV guide playout rebuilt.', 'success');
+            toast('Lineup applied. Rebuilding the Live TV guide…', 'info');
+            await waitForPlayoutRebuild(aiPreview.channelId);
             discardAiPreview();
             await loadAi();
-            await refreshGuide();
+            await loadGuide({ quiet: true });
         } catch (err) {
             toast(err.message, 'error');
         }
@@ -3732,7 +3782,7 @@
     }
 
     async function generateAllAiLineups() {
-        if (!confirm('Generate AI lineups for all channels? Each channel gets an AI lineup, then playout is built one day at a time (14 days total). This runs in the background.')) return;
+        if (!confirm('Generate AI lineups for all channels that are short of 14 days? Each of those channels gets a lineup, then playout is built one day at a time. Channels that already have 14 days are skipped; at midnight the next day is added. This runs in the background.')) return;
         const btn = $('btn-ai-generate-all');
         const originalLabel = btn ? btn.textContent : '';
         try {
@@ -3748,7 +3798,7 @@
                 return;
             }
             if (data.queued) {
-                toast('Generate all queued. Building one channel and one day at a time.', 'success');
+                toast('Generate all queued. Channels with a 14-day guide are skipped; the next day is built at midnight.', 'success');
                 renderGenerateAllStatus(data.job);
                 startGenerateAllPolling();
                 return;
@@ -5543,6 +5593,9 @@
         if (guideDateFilter) {
             return guideDateFilter === todayGuideDate();
         }
+        if (guideData && guideData.from) {
+            return formatGuideDate(guideData.from) === todayGuideDate();
+        }
         return !guideFromIso;
     }
 
@@ -5568,11 +5621,43 @@
     }
 
     function refreshGuide() {
-        if (!isGuideTabVisible()) {
-            return Promise.resolve();
+        return loadGuide({ quiet: true });
+    }
+
+    async function waitForPlayoutRebuild(channelId, maxAttempts) {
+        const attempts = maxAttempts || 360;
+        for (let attempt = 0; attempt < attempts; attempt++) {
+            await new Promise((resolve) => setTimeout(resolve, 5000));
+            if (selectedChannelId === channelId) {
+                await loadLineupPlayoutStatus();
+            }
+
+            if (isGuideTabVisible()) {
+                loadGuide({ quiet: true }).catch(() => {});
+            }
+
+            const h = await api('/lineups/' + channelId + '/playout-horizon');
+            const rebuild = h.rebuild || {};
+
+            if (rebuild.state === 'failed') {
+                toast(rebuild.error || 'Playout rebuild failed. Check the ChannelFlow log.', 'error');
+                return false;
+            }
+
+            if (rebuild.state === 'completed') {
+                if (rebuild.hasCoverageNow) {
+                    toast('Playout rebuild finished. Live TV guide is active for this channel.', 'success');
+                } else if (Number(rebuild.playoutItemCount || 0) > 0) {
+                    toast('Playout rebuilt, but nothing is on air right now. Check the guide banner for the next start time.', 'success');
+                } else {
+                    toast('Rebuild finished but the guide is empty. Fill lineup slots, then rebuild again.', 'error');
+                }
+                return true;
+            }
         }
 
-        return loadGuide({ quiet: true });
+        toast('Playout rebuild is still running. Open the Guide tab again in a minute.', 'info');
+        return false;
     }
 
     async function loadGuide(options) {
@@ -5582,6 +5667,9 @@
         }
 
         const quiet = !!(options && options.quiet);
+        const scrollToNow = options && Object.prototype.hasOwnProperty.call(options, 'scrollToNow')
+            ? !!options.scrollToNow
+            : !quiet && isGuideViewingToday();
         const scroller = root.querySelector('.tv-guide-scroll');
         const savedScroll = quiet && scroller
             ? { left: scroller.scrollLeft, top: scroller.scrollTop }
@@ -5609,13 +5697,16 @@
             }
             renderGuide();
             startGuideClock();
-            if (options && options.scrollToNow) {
+            if (scrollToNow) {
                 scrollGuideToNow();
-            } else if (savedScroll) {
-                const next = root.querySelector('.tv-guide-scroll');
-                if (next) {
-                    next.scrollLeft = savedScroll.left;
-                    next.scrollTop = savedScroll.top;
+            } else {
+                guideScrollToken++;
+                if (savedScroll) {
+                    const next = root.querySelector('.tv-guide-scroll');
+                    if (next) {
+                        next.scrollLeft = savedScroll.left;
+                        next.scrollTop = savedScroll.top;
+                    }
                 }
             }
         } catch (err) {
@@ -5643,22 +5734,66 @@
         loadGuide({ scrollToNow: !date || date === todayGuideDate() });
     }
 
-    function scrollGuideToNow() {
-        const root = $('tv-guide');
-        const scroller = root && root.querySelector('.tv-guide-scroll');
-        if (!scroller || !guideData) {
-            return;
+    function guideNowScrollLeft() {
+        if (!guideData) {
+            return null;
         }
         const from = new Date(guideData.from).getTime();
         const to = new Date(guideData.to).getTime();
         const now = Date.now();
         if (now < from || now > to) {
-            return;
+            return null;
         }
         const nowX = ((now - from) / 60000) * GUIDE_PX_PER_MIN;
         const pastPx = 60 * GUIDE_PX_PER_MIN;
-        requestAnimationFrame(() => {
-            scroller.scrollLeft = Math.max(0, nowX - pastPx);
+        return Math.max(0, nowX - pastPx);
+    }
+
+    function scrollGuideToNow() {
+        const token = ++guideScrollToken;
+        const target = guideNowScrollLeft();
+        if (target == null) {
+            return;
+        }
+
+        const tryScroll = () => {
+            if (token !== guideScrollToken) {
+                return false;
+            }
+            const root = $('tv-guide');
+            const scroller = root && root.querySelector('.tv-guide-scroll');
+            if (!scroller || !isGuideTabVisible()) {
+                return false;
+            }
+            if (scroller.clientWidth < 8) {
+                return false;
+            }
+            const maxLeft = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
+            if (target > 32 && maxLeft < 32) {
+                return false;
+            }
+            const left = Math.min(target, maxLeft);
+            scroller.scrollLeft = left;
+            return Math.abs(scroller.scrollLeft - left) <= 8;
+        };
+
+        const retry = (attempt) => {
+            if (token !== guideScrollToken) {
+                return;
+            }
+            if (tryScroll() || attempt >= 24) {
+                return;
+            }
+            requestAnimationFrame(() => retry(attempt + 1));
+        };
+
+        requestAnimationFrame(() => retry(0));
+        [50, 150, 400].forEach((ms) => {
+            setTimeout(() => {
+                if (token === guideScrollToken) {
+                    tryScroll();
+                }
+            }, ms);
         });
     }
 
@@ -5733,8 +5868,8 @@
             }).join('');
 
             const logo = ch.logoUrl
-                ? '<img src="' + escapeHtml(ch.logoUrl) + '" alt="" loading="lazy">'
-                : '<span class="tv-guide-logo-fallback"></span>';
+                ? '<span class="tv-guide-logo"><img src="' + escapeHtml(ch.logoUrl) + '" alt="" loading="lazy"></span>'
+                : '<span class="tv-guide-logo tv-guide-logo-fallback"></span>';
             return '<div class="tv-guide-row">'
                 + '<button type="button" class="tv-guide-channel" data-channel="' + escapeHtml(ch.id) + '">'
                 + logo

@@ -170,6 +170,14 @@ public class PlayoutBuilderService : BackgroundService
                 continue;
             }
 
+            var aiManaged = FinTvRuntime.Current?.Configuration.Ai.Enabled == true
+                && AiChannelAutoApplyService.IsEligible(channel);
+            if (aiManaged && latestFinish.HasValue && latestFinish.Value > now)
+            {
+                await db.SaveChangesAsync(cancellationToken);
+                continue;
+            }
+
             var appendStart = latestFinish ?? now;
             if (appendStart < now)
             {
@@ -233,7 +241,8 @@ public class PlayoutBuilderService : BackgroundService
     }
 
     /// <summary>
-    /// Replaces the playout window for one channel from today through the horizon.
+    /// Replaces the playout window for one channel from today through the horizon,
+    /// saving one schedule day at a time so the TV guide can refresh before the full horizon finishes.
     /// </summary>
     public async Task RebuildChannelAsync(Guid channelId, CancellationToken cancellationToken = default)
     {
@@ -245,12 +254,45 @@ public class PlayoutBuilderService : BackgroundService
         var channel = await db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken)
             ?? throw new InvalidOperationException("Channel not found.");
 
-        var start = PlayoutScheduleHelper.GetScheduleDayStartUtc(DateTime.UtcNow);
-        var end = PlayoutScheduleHelper.GetHorizonEndUtc(start);
-        await generator.BuildPlayoutAsync(channel, start, end, PlayoutBuildMode.ReplaceWindow, cancellationToken);
-        await db.SaveChangesAsync(cancellationToken);
-
         var now = DateTime.UtcNow;
+        var start = PlayoutScheduleHelper.GetScheduleDayStartUtc(now);
+        var end = PlayoutScheduleHelper.GetHorizonEndUtc(start);
+
+        if (channel.IsContinuousLive)
+        {
+            await generator.BuildPlayoutAsync(channel, start, end, PlayoutBuildMode.ReplaceWindow, cancellationToken);
+        }
+        else
+        {
+            var days = PlayoutScheduleHelper.GetPlayoutDaysToBuild();
+            for (var day = 0; day < days; day++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                db.ChangeTracker.Clear();
+                channel = await db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken)
+                    ?? throw new InvalidOperationException("Channel not found.");
+
+                var dayStart = PlayoutScheduleHelper.GetScheduleDayStartUtc(now, day);
+                var dayEnd = PlayoutScheduleHelper.GetScheduleDayStartUtc(now, day + 1);
+                await generator.BuildPlayoutAsync(
+                    channel,
+                    dayStart,
+                    dayEnd,
+                    PlayoutBuildMode.ReplaceWindow,
+                    cancellationToken,
+                    interruptStream: day == 0);
+
+                _logger.LogInformation(
+                    "Rebuilt playout day {Day}/{Days} for channel {Channel} ({Start:u} to {End:u})",
+                    day + 1,
+                    days,
+                    channel.Name,
+                    dayStart,
+                    dayEnd);
+            }
+        }
+
+        db.ChangeTracker.Clear();
         var itemCount = await db.PlayoutItems.CountAsync(
             p => p.ChannelId == channelId && p.Finish > now,
             cancellationToken);
@@ -280,6 +322,31 @@ public class PlayoutBuilderService : BackgroundService
     /// </summary>
     public void QueueRebuildChannel(Guid channelId)
     {
+        var startedAt = MarkRebuildQueued(channelId);
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await RebuildChannelAndTrackAsync(channelId, startedAt).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Failure is recorded on RebuildStates.
+            }
+        });
+    }
+
+    /// <summary>
+    /// Rebuilds one channel and waits until the guide window is persisted.
+    /// </summary>
+    public Task RebuildChannelAndTrackAsync(Guid channelId, CancellationToken cancellationToken = default)
+    {
+        var startedAt = MarkRebuildQueued(channelId);
+        return RebuildChannelAndTrackAsync(channelId, startedAt, cancellationToken);
+    }
+
+    private DateTime MarkRebuildQueued(Guid channelId)
+    {
         _logger.LogInformation("Queueing background playout rebuild for channel {ChannelId}", channelId);
         var startedAt = DateTime.UtcNow;
         RebuildStates[channelId] = new ChannelPlayoutRebuildState
@@ -287,32 +354,34 @@ public class PlayoutBuilderService : BackgroundService
             State = "queued",
             StartedAtUtc = startedAt
         };
+        return startedAt;
+    }
 
-        _ = Task.Run(async () =>
+    private async Task RebuildChannelAndTrackAsync(Guid channelId, DateTime startedAt, CancellationToken cancellationToken = default)
+    {
+        RebuildStates[channelId] = new ChannelPlayoutRebuildState
         {
+            State = "running",
+            StartedAtUtc = startedAt
+        };
+
+        try
+        {
+            await RebuildChannelAsync(channelId, cancellationToken).ConfigureAwait(false);
+            await UpdateRebuildStateAfterSuccessAsync(channelId).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Background playout rebuild failed for channel {ChannelId}", channelId);
             RebuildStates[channelId] = new ChannelPlayoutRebuildState
             {
-                State = "running",
-                StartedAtUtc = startedAt
+                State = "failed",
+                StartedAtUtc = startedAt,
+                FinishedAtUtc = DateTime.UtcNow,
+                Error = ex.Message
             };
-
-            try
-            {
-                await RebuildChannelAsync(channelId, CancellationToken.None).ConfigureAwait(false);
-                await UpdateRebuildStateAfterSuccessAsync(channelId).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Background playout rebuild failed for channel {ChannelId}", channelId);
-                RebuildStates[channelId] = new ChannelPlayoutRebuildState
-                {
-                    State = "failed",
-                    StartedAtUtc = startedAt,
-                    FinishedAtUtc = DateTime.UtcNow,
-                    Error = ex.Message
-                };
-            }
-        });
+            throw;
+        }
     }
 
     private async Task UpdateRebuildStateAfterSuccessAsync(Guid channelId)

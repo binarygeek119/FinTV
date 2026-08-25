@@ -24,7 +24,7 @@ public class AiLineupAutoApplyTask : IScheduledTask
     public string Key => "ChannelFlowAiLineupAutoApply";
 
     public string Description =>
-        "Processes queued new-channel AI lineups and extends eligible channels by one day when the playout horizon drops to 13 days.";
+        "Processes queued new-channel AI lineups. The next 14-day guide day is appended at local midnight.";
 
     public string Category => "ChannelFlow-Server";
 
@@ -57,13 +57,9 @@ public class AiLineupAutoApplyTask : IScheduledTask
                 .ConfigureAwait(false);
         }
 
-        var extended = await autoApply.MaintainEligiblePlayoutHorizonsAsync(cancellationToken)
-            .ConfigureAwait(false);
-
         progress.Report(100);
         _logger.LogInformation(
-            "ChannelFlow-Server AI lineup task finished: {Processed} queued channel(s), {Extended} horizon extension(s).",
-            processed,
-            extended);
+            "ChannelFlow-Server AI lineup task finished: {Processed} queued channel(s).",
+            processed);
     }
 }

@@ -16,6 +16,7 @@ public class LineupGeneratorService
     private readonly GuideUpdateTracker _guideUpdates;
     private readonly StreamService _stream;
     private readonly LogoBumperService _bumpers;
+    private readonly OriginalBroadcastSimulator _originalBroadcast;
 
     public LineupGeneratorService(
         FinTvDbContext db,
@@ -26,7 +27,8 @@ public class LineupGeneratorService
         HolidayChannelService holidays,
         GuideUpdateTracker guideUpdates,
         StreamService stream,
-        LogoBumperService bumpers)
+        LogoBumperService bumpers,
+        OriginalBroadcastSimulator originalBroadcast)
     {
         _db = db;
         _lineupService = lineupService;
@@ -37,6 +39,7 @@ public class LineupGeneratorService
         _guideUpdates = guideUpdates;
         _stream = stream;
         _bumpers = bumpers;
+        _originalBroadcast = originalBroadcast;
     }
 
     public async Task BuildPlayoutAsync(
@@ -44,12 +47,13 @@ public class LineupGeneratorService
         DateTime startUtc,
         DateTime endUtc,
         PlayoutBuildMode mode = PlayoutBuildMode.ReplaceWindow,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool interruptStream = true)
     {
         if (channel.ContentType is ChannelContentType.Weather or ChannelContentType.News)
         {
             await BuildContinuousPlayoutAsync(channel, startUtc, endUtc, mode, cancellationToken);
-            NotifyPlayoutChanged(channel, mode);
+            NotifyPlayoutChanged(channel, mode, interruptStream);
             return;
         }
 
@@ -72,6 +76,11 @@ public class LineupGeneratorService
 
         var snapshot = await _lineupService.LoadResolutionSnapshotAsync(channel.Id, cancellationToken);
         var slotsByDate = new Dictionary<DateOnly, IReadOnlyList<LineupSlot>>();
+        var anniversaryByDate = new Dictionary<DateOnly, Queue<AnniversaryPick>>();
+        var stealEnabled = OriginalBroadcastSimulator.IsEnabled(channel);
+        var (primeStart, primeEnd) = stealEnabled
+            ? AiPlayoutTemplates.GetPrimetimeSlotRange(channel)
+            : (38, 41);
         var cursor = startUtc;
         while (cursor < endUtc)
         {
@@ -85,7 +94,8 @@ public class LineupGeneratorService
 
             var slotIndex = (local.Hour * 60 + local.Minute) / 30;
 
-            if (IsSlotConsumedByEarlierSpan(slots, slotIndex))
+            if (IsSlotConsumedByEarlierSpan(slots, slotIndex)
+                && !(stealEnabled && AiPlayoutTemplates.IsPrimetimeSlot(slotIndex, primeStart, primeEnd)))
             {
                 cursor = cursor.AddMinutes(30);
                 continue;
@@ -119,6 +129,29 @@ public class LineupGeneratorService
                 }
             }
 
+            var stolePrimetime = false;
+            if (stealEnabled
+                && !IsRerunTimeslot(slot, channel, slotIndex)
+                && AiPlayoutTemplates.IsPrimetimeSlot(slotIndex, primeStart, primeEnd))
+            {
+                if (!anniversaryByDate.TryGetValue(date, out var anniversaryQueue))
+                {
+                    anniversaryQueue = await _originalBroadcast.BuildQueueAsync(
+                        channel,
+                        date,
+                        slots,
+                        cancellationToken).ConfigureAwait(false);
+                    anniversaryByDate[date] = anniversaryQueue;
+                }
+
+                var steal = OriginalBroadcastSimulator.TryTakeFitting(anniversaryQueue, slotIndex, primeEnd);
+                if (steal is AnniversaryPick stolen)
+                {
+                    slot = OriginalBroadcastSimulator.CreateSlot(slotIndex, stolen);
+                    stolePrimetime = true;
+                }
+            }
+
             if (slot is null || slot.Candidates.Count == 0)
             {
                 if (PastTenseNewsCatalog.IsPastTenseNewsChannel(channel))
@@ -136,6 +169,17 @@ public class LineupGeneratorService
             var blockEndLocal = slotStartLocal.AddMinutes(30 * spanSlots);
             var slotStart = TimeZoneInfo.ConvertTimeToUtc(slotStartLocal, tz);
             var blockEnd = TimeZoneInfo.ConvertTimeToUtc(blockEndLocal, tz);
+            if (stolePrimetime)
+            {
+                var primeEndLocal = DateTime.SpecifyKind(
+                    local.Date.AddMinutes((primeEnd + 1) * 30),
+                    DateTimeKind.Unspecified);
+                var primeEndUtc = TimeZoneInfo.ConvertTimeToUtc(primeEndLocal, tz);
+                if (blockEnd > primeEndUtc)
+                {
+                    blockEnd = primeEndUtc;
+                }
+            }
 
             if (blockEnd <= cursor)
             {
@@ -259,13 +303,13 @@ public class LineupGeneratorService
                 setters => setters.SetProperty(c => c.LastPlayoutBuiltAt, DateTime.UtcNow),
                 cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
-        NotifyPlayoutChanged(channel, mode);
+        NotifyPlayoutChanged(channel, mode, interruptStream);
     }
 
-    private void NotifyPlayoutChanged(Channel channel, PlayoutBuildMode mode)
+    private void NotifyPlayoutChanged(Channel channel, PlayoutBuildMode mode, bool interruptStream = true)
     {
         _guideUpdates.MarkUpdated();
-        if (mode != PlayoutBuildMode.ReplaceWindow)
+        if (mode != PlayoutBuildMode.ReplaceWindow || !interruptStream)
         {
             return;
         }

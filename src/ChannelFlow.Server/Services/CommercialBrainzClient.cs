@@ -117,31 +117,69 @@ public class CommercialBrainzClient
             ?? new CommercialBrainzAdvertiserPage();
     }
 
+    public Task ThrottleAsync(CancellationToken cancellationToken)
+        => Task.Delay(TimeSpan.FromMilliseconds(350), cancellationToken);
+
     private async Task<T?> GetAsync<T>(CommercialBrainzSettings settings, string url, CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        ApplyAuth(request, settings);
-
-        try
+        var client = _httpClientFactory.CreateClient(nameof(CommercialBrainzClient));
+        for (var attempt = 0; attempt < 4; attempt++)
         {
-            var client = _httpClientFactory.CreateClient(nameof(CommercialBrainzClient));
-            using var response = await client.SendAsync(request, cancellationToken);
-            if (!response.IsSuccessStatusCode)
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            ApplyAuth(request, settings);
+
+            try
             {
-                _logger.LogWarning(
-                    "CommercialBrainz request failed ({Status}) for {Url}",
-                    (int)response.StatusCode,
-                    url);
+                using var response = await client.SendAsync(request, cancellationToken);
+                if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests && attempt < 3)
+                {
+                    var wait = ParseRetryAfter(response) ?? TimeSpan.FromSeconds(Math.Pow(2, attempt + 1));
+                    _logger.LogWarning("CommercialBrainz rate-limited {Url}; waiting {Delay}s", url, wait.TotalSeconds);
+                    await Task.Delay(wait, cancellationToken);
+                    continue;
+                }
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning(
+                        "CommercialBrainz request failed ({Status}) for {Url}",
+                        (int)response.StatusCode,
+                        url);
+                    return default;
+                }
+
+                return await response.Content.ReadFromJsonAsync<T>(JsonOptions, cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex, "CommercialBrainz request failed for {Url}", url);
                 return default;
             }
+        }
 
-            return await response.Content.ReadFromJsonAsync<T>(JsonOptions, cancellationToken);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        return default;
+    }
+
+    private static TimeSpan? ParseRetryAfter(HttpResponseMessage response)
+    {
+        var retry = response.Headers.RetryAfter;
+        if (retry is null)
         {
-            _logger.LogError(ex, "CommercialBrainz request failed for {Url}", url);
-            return default;
+            return null;
         }
+
+        if (retry.Delta is TimeSpan delta)
+        {
+            return delta < TimeSpan.FromSeconds(1) ? TimeSpan.FromSeconds(1) : delta;
+        }
+
+        if (retry.Date is DateTimeOffset when)
+        {
+            var wait = when - DateTimeOffset.UtcNow;
+            return wait > TimeSpan.Zero ? wait : TimeSpan.FromSeconds(1);
+        }
+
+        return null;
     }
 
     private async Task<byte[]?> TryGetBytesAsync(string url, CancellationToken cancellationToken)

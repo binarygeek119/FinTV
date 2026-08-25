@@ -353,6 +353,7 @@ public class CommercialBrainzSyncService
             }
 
             var detail = await _client.GetVideoAsync(connection, hit.Sbid, cancellationToken);
+            await _client.ThrottleAsync(cancellationToken);
             if (detail is not null)
             {
                 videos.Add(detail);
@@ -535,6 +536,7 @@ public class CommercialBrainzSyncService
                 if (enrichDetails && NeedsDetail(settings, item))
                 {
                     var detail = await _client.GetVideoAsync(settings, item.Sbid, cancellationToken);
+                    await _client.ThrottleAsync(cancellationToken);
                     if (detail is not null)
                     {
                         enriched = detail;
@@ -607,6 +609,59 @@ public class CommercialBrainzSyncService
         existing.IsFake = mapped.IsFake;
         existing.IsReal = mapped.IsReal;
         existing.IsAiEnhanced = mapped.IsAiEnhanced;
+        existing.LastScannedAt = DateTime.UtcNow;
+    }
+
+    /// <summary>
+    /// Refreshes CommercialBrainz rows already in the Commercials table from their stored video ids.
+    /// Does not browse or search CommercialBrainz.
+    /// </summary>
+    public async Task RefreshStoredVideosAsync(CancellationToken cancellationToken = default)
+    {
+        var settings = GetSettings();
+        if (!settings.Enabled)
+        {
+            return;
+        }
+
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
+        var stored = await db.Commercials
+            .Where(c => c.Source == CommercialSource.CommercialBrainz && c.CommercialBrainzVideoSbid != null)
+            .ToListAsync(cancellationToken);
+        if (stored.Count == 0)
+        {
+            return;
+        }
+
+        var updated = 0;
+        var failed = 0;
+        foreach (var commercial in stored)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!Guid.TryParse(commercial.CommercialBrainzVideoSbid, out var sbid))
+            {
+                continue;
+            }
+
+            var detail = await _client.GetVideoAsync(settings, sbid, cancellationToken);
+            await _client.ThrottleAsync(cancellationToken);
+            if (detail is null)
+            {
+                failed++;
+                continue;
+            }
+
+            UpdateExisting(commercial, _filter.MapToCommercial(detail));
+            updated++;
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation(
+            "CommercialBrainz midnight refresh updated {Updated} of {Total} stored spots ({Failed} unchanged after a failed lookup)",
+            updated,
+            stored.Count,
+            failed);
     }
 
     private static CommercialBrainzSettings GetSettings()

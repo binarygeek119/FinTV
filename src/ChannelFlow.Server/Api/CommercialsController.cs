@@ -228,7 +228,7 @@ public class CommercialsController : ControllerBase
         runtime.Configuration.CommercialSearchPlaylists.Add(playlist);
         runtime.SaveConfiguration();
 
-        return Ok(await _commercialBrainz.MapSearchPlaylistAsync(playlist, cancellationToken));
+        return Ok(await PullPlaylistIntoLibraryAsync(playlist.Id, cancellationToken));
     }
 
     [HttpPut("search-playlists/{id:guid}")]
@@ -257,7 +257,7 @@ public class CommercialsController : ControllerBase
 
         ApplyPlaylistFilters(playlist, request);
         runtime.SaveConfiguration();
-        return Ok(await _commercialBrainz.MapSearchPlaylistAsync(playlist, cancellationToken));
+        return Ok(await PullPlaylistIntoLibraryAsync(playlist.Id, cancellationToken));
     }
 
     [HttpPost("search-playlists/{id:guid}/pull")]
@@ -291,6 +291,26 @@ public class CommercialsController : ControllerBase
 
         runtime.SaveConfiguration();
         return NoContent();
+    }
+
+    private async Task<object> PullPlaylistIntoLibraryAsync(Guid playlistId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var pulled = await _commercialBrainz.PullSearchPlaylistAsync(playlistId, cancellationToken);
+            return await _commercialBrainz.MapSearchPlaylistAsync(pulled, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            var playlist = FinTvRuntime.Current?.Configuration.CommercialSearchPlaylists
+                .FirstOrDefault(p => p.Id == playlistId);
+            if (playlist is null)
+            {
+                throw;
+            }
+
+            return await _commercialBrainz.MapSearchPlaylistAsync(playlist, cancellationToken);
+        }
     }
 
     private static object MapBrainzSettings(CommercialBrainzSettings settings)

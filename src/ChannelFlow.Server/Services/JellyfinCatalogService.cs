@@ -126,6 +126,19 @@ public class JellyfinCatalogService
         return new[] { MapItem(randomItem) };
     }
 
+    public bool IsPlayableOnChannel(BaseItem item, Channel channel, DateOnly scheduleDate)
+    {
+        var kinds = GetQueryItemTypes(channel);
+        if (!kinds.Contains(item.Kind))
+        {
+            return false;
+        }
+
+        return ApplyChannelFilterMetadata(
+            ApplyCatalogConstraints([item], channel, scheduleDate),
+            channel).Count > 0;
+    }
+
     public IReadOnlyList<BaseItem> QueryItems(
         Channel channel,
         FilterDefinition? filter = null,

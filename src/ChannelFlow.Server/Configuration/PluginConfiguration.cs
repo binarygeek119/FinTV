@@ -207,8 +207,9 @@ public class AiSettings
     public bool AutoApplyToAllChannelsOnSave { get; set; }
 
     /// <summary>
-    /// When true, lineups and playout should mimic original broadcast patterns.
-    /// Stored now; behavior will be wired later.
+    /// When true, primetime playout steals catalog items whose original air month and day
+    /// match that schedule date (any year). Leftover primetime stays the sticky lineup.
+    /// Sequential episode order is not advanced for stolen airings.
     /// </summary>
     public bool SimulateOriginalBroadcasting { get; set; }
 }
@@ -295,6 +296,8 @@ public class AiGenerateAllJobState
     public int CompletedSteps { get; set; }
 
     public int CurrentDay { get; set; }
+
+    public string? CurrentPhase { get; set; }
 
     public string? CurrentChannelName { get; set; }
 

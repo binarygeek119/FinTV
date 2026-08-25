@@ -236,6 +236,27 @@ public static class AiPlayoutTemplates
     public static bool IsToonTakeoverSlot(Channel channel, int slotIndex)
         => GetToonTakeoverDaypart(channel)?.ContainsSlot(slotIndex) == true;
 
+    /// <summary>
+    /// Primetime wall-clock slots for original-broadcast simulation.
+    /// Names containing "prime" win; otherwise 7:00–9:00pm (slots 38–41).
+    /// </summary>
+    public static (int StartSlotIndex, int EndSlotIndex) GetPrimetimeSlotRange(Channel channel)
+    {
+        var template = Resolve(channel);
+        var prime = template.Dayparts.FirstOrDefault(d =>
+            d.Name.Contains("prime", StringComparison.OrdinalIgnoreCase)
+            && !d.Name.Contains("rerun", StringComparison.OrdinalIgnoreCase));
+        if (prime is not null && prime.StartSlotIndex <= prime.EndSlotIndex)
+        {
+            return (prime.StartSlotIndex, prime.EndSlotIndex);
+        }
+
+        return (38, 41);
+    }
+
+    public static bool IsPrimetimeSlot(int slotIndex, int startSlotIndex, int endSlotIndex)
+        => slotIndex >= startSlotIndex && slotIndex <= endSlotIndex;
+
     public static string? GetDaypartNameForSlot(AiPlayoutTemplate? template, int slotIndex)
     {
         if (template is null || template.Dayparts.Count == 0)

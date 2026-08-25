@@ -14,7 +14,7 @@ public static class ChannelBugLayout
     /// <summary>
     /// Overlay opacity for the channel bug (1 = opaque). PNG alpha is multiplied by this.
     /// </summary>
-    public const double Opacity = 0.82;
+    public const double Opacity = 0.55;
 
     /// <summary>
     /// Fade duration when the bug appears after a commercial or disappears before one.

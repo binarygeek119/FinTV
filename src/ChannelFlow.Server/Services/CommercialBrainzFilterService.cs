@@ -157,7 +157,8 @@ public class CommercialBrainzFilterService
             IsSpoof = classification.IsSpoof,
             IsFake = classification.IsFake,
             IsReal = classification.IsReal,
-            IsAiEnhanced = classification.IsAiEnhanced
+            IsAiEnhanced = classification.IsAiEnhanced,
+            LastScannedAt = DateTime.UtcNow
         };
     }
 

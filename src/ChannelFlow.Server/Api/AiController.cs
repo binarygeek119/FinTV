@@ -21,6 +21,7 @@ public class AiController : ControllerBase
     private readonly LlmClientService _llm;
     private readonly FinTvDbContext _db;
     private readonly LineupGeneratorService _playoutGenerator;
+    private readonly PlayoutBuilderService _playoutBuilder;
     private readonly WeatherGuideMetadataService _weatherGuide;
     private readonly AiChannelGenerateJobService _channelGenerateJobs;
 
@@ -30,6 +31,7 @@ public class AiController : ControllerBase
         LlmClientService llm,
         FinTvDbContext db,
         LineupGeneratorService playoutGenerator,
+        PlayoutBuilderService playoutBuilder,
         WeatherGuideMetadataService weatherGuide,
         AiChannelGenerateJobService channelGenerateJobs)
     {
@@ -38,6 +40,7 @@ public class AiController : ControllerBase
         _llm = llm;
         _db = db;
         _playoutGenerator = playoutGenerator;
+        _playoutBuilder = playoutBuilder;
         _weatherGuide = weatherGuide;
         _channelGenerateJobs = channelGenerateJobs;
     }
@@ -336,14 +339,23 @@ public class AiController : ControllerBase
     {
         try
         {
-            using var gate = await ChannelApplyLocks.AcquireAsync(channelId, cancellationToken);
-            await _generator.ApplyAsync(
-                channelId,
-                request?.Slots ?? new List<LineupSlotDto>(),
-                request?.RebuildPlayout ?? true,
-                _playoutGenerator,
-                cancellationToken);
-            return Ok(new { ok = true });
+            var rebuildPlayout = request?.RebuildPlayout ?? true;
+            using (await ChannelApplyLocks.AcquireAsync(channelId, cancellationToken))
+            {
+                await _generator.ApplyAsync(
+                    channelId,
+                    request?.Slots ?? new List<LineupSlotDto>(),
+                    rebuildPlayout: false,
+                    _playoutGenerator,
+                    cancellationToken);
+            }
+
+            if (rebuildPlayout)
+            {
+                _playoutBuilder.QueueRebuildChannel(channelId);
+            }
+
+            return Ok(new { ok = true, rebuildQueued = rebuildPlayout });
         }
         catch (InvalidOperationException ex)
         {

@@ -164,6 +164,7 @@ builder.Services.AddScoped<LogoSetService>();
 builder.Services.AddScoped<LogoBumperService>();
 builder.Services.AddScoped<HolidayChannelService>();
 builder.Services.AddScoped<JellyfinCatalogService>();
+builder.Services.AddScoped<OriginalBroadcastSimulator>();
 builder.Services.AddScoped<AiCatalogManifestBuilder>();
 builder.Services.AddScoped<LlmClientService>();
 builder.Services.AddScoped<AiLineupGeneratorService>();
@@ -183,6 +184,8 @@ builder.Services.AddHostedService<ScheduledTaskHost>();
 builder.Services.AddHostedService<NewsRefreshHostedService>();
 builder.Services.AddHostedService<NewsBulletinHostedService>();
 builder.Services.AddHostedService<WeatherGuideRefreshHostedService>();
+builder.Services.AddHostedService<AiPlayoutHorizonHostedService>();
+builder.Services.AddHostedService<CommercialBrainzRefreshHostedService>();
 builder.Services.AddHostedService<MusicPackStartupHostedService>();
 
 var app = builder.Build();

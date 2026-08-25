@@ -13,13 +13,16 @@ public sealed class AiChannelGenerateJobService
     private static readonly ConcurrentDictionary<Guid, JobState> Jobs = new();
 
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly PlayoutBuilderService _playoutBuilder;
     private readonly ILogger<AiChannelGenerateJobService> _logger;
 
     public AiChannelGenerateJobService(
         IServiceScopeFactory scopeFactory,
+        PlayoutBuilderService playoutBuilder,
         ILogger<AiChannelGenerateJobService> logger)
     {
         _scopeFactory = scopeFactory;
+        _playoutBuilder = playoutBuilder;
         _logger = logger;
     }
 
@@ -51,6 +54,10 @@ public sealed class AiChannelGenerateJobService
             job.Preview = null;
             job.Applied = false;
             job.ApplyError = null;
+            job.Phase = "generating";
+            job.CurrentDay = 1;
+            job.TotalDays = PlayoutScheduleHelper.GetPlayoutDaysToBuild();
+            job.ChannelName = null;
             job.StartedAtUtc = DateTime.UtcNow;
             job.CompletedAtUtc = null;
         }
@@ -61,50 +68,57 @@ public sealed class AiChannelGenerateJobService
             try
             {
                 using var scope = _scopeFactory.CreateScope();
-                var generator = scope.ServiceProvider.GetRequiredService<AiLineupGeneratorService>();
-                var playout = scope.ServiceProvider.GetRequiredService<LineupGeneratorService>();
-                var preview = await generator.GenerateAsync(channelId, providerOverride, CancellationToken.None)
+                var autoApply = scope.ServiceProvider.GetRequiredService<AiChannelAutoApplyService>();
+                var result = await autoApply.GenerateAndBuildHorizonDaysAsync(
+                        channelId,
+                        providerOverride,
+                        onProgress: progress =>
+                        {
+                            lock (job)
+                            {
+                                job.Phase = progress.Phase;
+                                job.CurrentDay = progress.CurrentDay;
+                                job.TotalDays = progress.TotalDays;
+                                job.ChannelName = progress.ChannelName;
+                                if (progress.Preview is not null)
+                                {
+                                    job.Preview = progress.Preview;
+                                    job.Applied = true;
+                                }
+                            }
+                        },
+                        CancellationToken.None)
                     .ConfigureAwait(false);
-
-                var applied = false;
-                string? applyError = null;
-                try
-                {
-                    using var gate = await ChannelApplyLocks.AcquireAsync(channelId, CancellationToken.None)
-                        .ConfigureAwait(false);
-                    await generator.ApplyAsync(
-                            channelId,
-                            preview.LineupSlots,
-                            rebuildPlayout: true,
-                            playout,
-                            CancellationToken.None,
-                            preview.WeeklyLineups)
-                        .ConfigureAwait(false);
-                    applied = true;
-                }
-                catch (Exception applyEx)
-                {
-                    applyError = applyEx is InvalidOperationException invalid
-                        ? invalid.Message
-                        : $"Playout rebuild failed: {applyEx.Message}";
-                    _logger.LogWarning(
-                        applyEx,
-                        "AI lineup generated for {Channel} but the Live TV guide was not rebuilt",
-                        preview.ChannelName);
-                }
 
                 lock (job)
                 {
-                    job.Preview = preview;
-                    job.Applied = applied;
-                    job.ApplyError = applyError;
+                    if (result.Preview is not null)
+                    {
+                        job.Preview = result.Preview;
+                    }
+
+                    if (result.Ok)
+                    {
+                        job.Applied = true;
+                        job.Phase = result.PlayoutAlreadyAtHorizon ? "horizon-full" : "done";
+                    }
+                    else if (result.WasSkipped)
+                    {
+                        job.Error = result.Error;
+                    }
+                    else
+                    {
+                        job.Applied = result.Preview is not null;
+                        job.ApplyError = result.Error;
+                    }
+
                     job.CompletedAtUtc = DateTime.UtcNow;
                 }
 
                 _logger.LogInformation(
-                    "AI lineup generation finished for {Channel} (guide rebuilt={Applied})",
-                    preview.ChannelName,
-                    applied);
+                    "AI lineup generation finished for {Channel} (ok={Ok})",
+                    result.ChannelName ?? channelId.ToString(),
+                    result.Ok);
             }
             catch (Exception ex)
             {
@@ -131,6 +145,7 @@ public sealed class AiChannelGenerateJobService
 
     public object BuildStatus(Guid channelId)
     {
+        var rebuild = _playoutBuilder.GetRebuildState(channelId);
         if (!Jobs.TryGetValue(channelId, out var job))
         {
             return new
@@ -140,7 +155,12 @@ public sealed class AiChannelGenerateJobService
                 preview = (AiLineupPreviewResult?)null,
                 applied = false,
                 applyError = (string?)null,
-                error = (string?)null
+                error = (string?)null,
+                phase = (string?)null,
+                currentDay = 0,
+                totalDays = PlayoutScheduleHelper.GetPlayoutDaysToBuild(),
+                channelName = (string?)null,
+                rebuild
             };
         }
 
@@ -155,7 +175,12 @@ public sealed class AiChannelGenerateJobService
                 preview = job.Preview,
                 applied = job.Applied,
                 applyError = job.ApplyError,
-                error = job.Error
+                error = job.Error,
+                phase = job.Phase,
+                currentDay = job.CurrentDay,
+                totalDays = job.TotalDays,
+                channelName = job.ChannelName,
+                rebuild
             };
         }
     }
@@ -171,6 +196,14 @@ public sealed class AiChannelGenerateJobService
         public string? ApplyError { get; set; }
 
         public string? Error { get; set; }
+
+        public string? Phase { get; set; }
+
+        public int CurrentDay { get; set; }
+
+        public int TotalDays { get; set; }
+
+        public string? ChannelName { get; set; }
 
         public DateTime? StartedAtUtc { get; set; }
 
