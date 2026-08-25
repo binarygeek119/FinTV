@@ -38,6 +38,37 @@ public sealed class YouTubeCookieStore
     public string? GetPathIfPresent()
         => HasCookies() ? FilePath : null;
 
+    /// <summary>
+    /// Path for yt-dlp <c>--cookies</c>, or null when the file is missing or not Netscape format.
+    /// A bad cookies file makes yt-dlp fail even for public videos.
+    /// </summary>
+    public string? GetPathIfUsable()
+    {
+        lock (_gate)
+        {
+            if (!HasCookies())
+            {
+                return null;
+            }
+
+            try
+            {
+                var lines = File.ReadAllLines(FilePath);
+                var text = string.Join('\n', lines).Trim().TrimStart('\uFEFF');
+                if (!LooksLikeNetscape(text) || ParseCookieNames(lines).Count == 0)
+                {
+                    return null;
+                }
+
+                return FilePath;
+            }
+            catch (IOException)
+            {
+                return null;
+            }
+        }
+    }
+
     public YouTubeCookieStatus GetStatus()
     {
         lock (_gate)

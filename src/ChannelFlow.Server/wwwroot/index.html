@@ -597,7 +597,7 @@
                     <label class="field" id="ebs-audio-mode-field">
                         <span>Off-air audio</span>
                         <select id="ebs-audio-mode" class="emby-input">
-                            <option value="0">Background music from Jellyfin library</option>
+                            <option value="0">Background music</option>
                             <option value="1">White noise</option>
                             <option value="2">Silence</option>
                             <option value="3">Beep tone</option>
@@ -606,10 +606,12 @@
                     <label class="field">
                         <span>Background music source</span>
                         <select id="ebs-music-source" class="emby-input">
-                            <option value="0">All music libraries</option>
-                            <option value="1">Specific music library</option>
+                            <option value="2">Local music packs</option>
+                            <option value="0">All Jellyfin music libraries</option>
+                            <option value="1">Specific Jellyfin music library</option>
                         </select>
                     </label>
+                    <p class="hint" id="ebs-music-source-hint">Local packs live on this server (Anytime, Fall, Winter). Fall and Winter only play after you download them. Jellyfin libraries still work when you pick them here.</p>
                     <label class="field" id="ebs-library-field">
                         <span>Background music library</span>
                         <select id="ebs-music-library" class="emby-input"></select>
@@ -617,6 +619,11 @@
                     <div class="actions" style="margin-bottom:1rem">
                         <button type="button" id="btn-save-ebs" class="raised button-submit emby-button">Save Off Air Settings</button>
                     </div>
+                </div>
+                <div class="card section-card" id="ebs-music-packs-card">
+                    <h3>Local music packs</h3>
+                    <p class="hint">Anytime downloads on its own when missing. Download Fall and Winter if you want those seasons. Weather and News that use Off Air music follow the same pack. Zips are named <code>anytime_v0.0.1.zip</code> (and the same pattern for other packs).</p>
+                    <div id="ebs-music-packs" class="ebs-upload-grid"></div>
                 </div>
                 <div class="card section-card">
                     <h3>Custom slate images</h3>
@@ -809,7 +816,7 @@
                 </div>
                 <div class="card section-card">
                     <h3>Background music</h3>
-                    <p class="hint">Jellyfin music if a library is selected and the files are reachable. Otherwise the stream uses the built-in WeatherStar bed tracks.</p>
+                    <p class="hint">Jellyfin music if a library is selected. Otherwise the stream uses Off Air music (including local packs), then the built-in WeatherStar bed tracks.</p>
                     <label class="field">
                         <span>Weather music library</span>
                         <select id="weather-music-library" class="emby-select"></select>
@@ -934,9 +941,9 @@
                     <p class="hint">Auto picks <code>h264_vaapi</code>, <code>h264_nvenc</code>, or <code>libx264</code> from the acceleration setting. If the VAAPI device is missing, ChannelFlow falls back to software encode.</p>
                     <label class="field">
                         <span>Run-ahead buffer (seconds)</span>
-                        <input id="transcode-runahead" type="number" min="0" max="120" step="1" value="15" class="emby-input">
+                        <input id="transcode-runahead" type="number" min="0" max="600" step="1" value="180" class="emby-input">
                     </label>
-                    <p class="hint">Lets ffmpeg encode ahead of the tuner and hold that video so a network hitch does not freeze the picture. New tuners also start from this buffer. 0 stays live (real time). 15–30 is typical. Maximum is 120.</p>
+                    <p class="hint">Lets ffmpeg encode ahead of the tuner and hold that video so a hitch or commercial switch does not freeze the picture. New tuners also start from this buffer. 0 stays live (real time). 180–300 seconds (3–5 minutes) is the right size if the picture pauses. Maximum is 600 (10 minutes).</p>
                     <div class="actions">
                         <button type="button" id="btn-save-transcode" class="raised button-submit emby-button">Save Transcode Settings</button>
                         <button type="button" id="btn-test-transcode" class="emby-button">Test Encode</button>

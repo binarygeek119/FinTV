@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text;
 using CliWrap;
 using FinTv.Configuration;
@@ -18,6 +20,8 @@ public class YouTubeCommercialStreamService
     private readonly YtDlpLocator _ytDlpLocator;
     private readonly YouTubeCookieStore _cookies;
     private readonly SponsorBlockClient _sponsorBlock;
+    private readonly ConcurrentDictionary<Guid, Task<PrefetchedCommercial?>> _prefetches = new();
+    private int _loggedUnusableCookies;
 
     public YouTubeCommercialStreamService(
         ILogger<YouTubeCommercialStreamService> logger,
@@ -51,8 +55,31 @@ public class YouTubeCommercialStreamService
         }
 
         var settings = FinTvRuntime.Current?.Configuration.YouTube ?? new YouTubeSettings();
-        var skipRanges = await ResolveSkipRangesAsync(commercial, settings, durationSeconds, cancellationToken);
         var ytDlp = _ytDlpLocator.Resolve();
+        var prefetched = await TakePrefetchAsync(commercial.Id);
+        var skipRanges = prefetched?.SkipRanges ?? [];
+
+        if (ytDlp is not null && !string.IsNullOrWhiteSpace(prefetched?.StreamUrl))
+        {
+            try
+            {
+                var args = ffmpeg.BuildRemoteMediaCommand(
+                    channel,
+                    prefetched.StreamUrl,
+                    0,
+                    durationSeconds,
+                    null,
+                    skipRanges,
+                    overlayBug: false);
+                await RunFfmpegToStreamAsync(ffmpegPath, args, output, cancellationToken);
+                return;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "Prefetched YouTube URL failed for {Title}; trying live pipe", commercial.Title);
+            }
+        }
+
         if (ytDlp is not null)
         {
             try
@@ -75,7 +102,8 @@ public class YouTubeCommercialStreamService
                 _logger.LogWarning(ex, "yt-dlp pipe stream failed for {Title}; trying direct stream URL", commercial.Title);
             }
 
-            var streamUrl = await ResolveStreamUrlAsync(ytDlp, commercial.YouTubeUrl, settings, cancellationToken);
+            var streamUrl = prefetched?.StreamUrl
+                ?? await ResolveStreamUrlAsync(ytDlp, commercial.YouTubeUrl, settings, cancellationToken);
             if (!string.IsNullOrWhiteSpace(streamUrl))
             {
                 var args = ffmpeg.BuildRemoteMediaCommand(channel, streamUrl, 0, durationSeconds, null, skipRanges, overlayBug: false);
@@ -209,6 +237,7 @@ public class YouTubeCommercialStreamService
 
         var ffmpegArgs = ffmpeg.BuildRemoteMediaCommand(channel, "pipe:0", 0, durationSeconds, null, skipRanges, overlayBug: false);
         var ffmpegError = new StringBuilder();
+        var started = Stopwatch.StartNew();
         var result = await Cli.Wrap(ffmpegPath)
             .WithArguments(ffmpegArgs)
             .WithStandardInputPipe(PipeSource.FromCommand(ytDlp))
@@ -225,12 +254,87 @@ public class YouTubeCommercialStreamService
                 + ": "
                 + TrimProcessOutput(ffmpegError, ytDlpError));
         }
+
+        if (!cancellationToken.IsCancellationRequested
+            && durationSeconds >= 6
+            && started.Elapsed.TotalSeconds < 2.5)
+        {
+            throw new InvalidOperationException(
+                "YouTube pipe ended after "
+                + started.Elapsed.TotalSeconds.ToString("0.0")
+                + "s (wanted "
+                + durationSeconds.ToString("0")
+                + "s): "
+                + TrimProcessOutput(ffmpegError, ytDlpError));
+        }
     }
 
+    /// <summary>
+    /// Resolves the YouTube stream URL in the background so the next spot can start without waiting on yt-dlp.
+    /// </summary>
+    public void BeginPrefetch(Commercial commercial, double durationSeconds, CancellationToken cancellationToken)
+    {
+        if (commercial.Source != CommercialSource.CommercialBrainz
+            || string.IsNullOrWhiteSpace(commercial.YouTubeUrl)
+            || _ytDlpLocator.Resolve() is null)
+        {
+            return;
+        }
+
+        _prefetches.GetOrAdd(
+            commercial.Id,
+            _ => PrefetchAsync(commercial, durationSeconds, cancellationToken));
+    }
+
+    private async Task<PrefetchedCommercial?> TakePrefetchAsync(Guid commercialId)
+    {
+        if (!_prefetches.TryGetValue(commercialId, out var task) || !task.IsCompleted)
+        {
+            return null;
+        }
+
+        _prefetches.TryRemove(commercialId, out _);
+        try
+        {
+            return await task;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "YouTube commercial prefetch was not ready");
+            return null;
+        }
+    }
+
+    private async Task<PrefetchedCommercial?> PrefetchAsync(
+        Commercial commercial,
+        double durationSeconds,
+        CancellationToken cancellationToken)
+    {
+        var settings = FinTvRuntime.Current?.Configuration.YouTube ?? new YouTubeSettings();
+        var skipTask = ResolveSkipRangesAsync(commercial, settings, durationSeconds, cancellationToken);
+        var ytDlp = _ytDlpLocator.Resolve();
+        Task<string?> urlTask = ytDlp is null
+            ? Task.FromResult<string?>(null)
+            : ResolveStreamUrlAsync(ytDlp, commercial.YouTubeUrl!, settings, cancellationToken);
+
+        await Task.WhenAll(skipTask, urlTask);
+        var url = await urlTask;
+        var skipRanges = await skipTask;
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return skipRanges.Count == 0 ? null : new PrefetchedCommercial(null, skipRanges);
+        }
+
+        _logger.LogDebug("Prefetched YouTube stream URL for {Title}", commercial.Title);
+        return new PrefetchedCommercial(url, skipRanges);
+    }
+
+    private sealed record PrefetchedCommercial(string? StreamUrl, IReadOnlyList<SponsorSkipRange> SkipRanges);
+
     private string GetPipeFormat(YouTubeSettings settings)
-        => settings.PreferPremium && _cookies.HasCookies()
-            ? "bv*[height<=1080]+ba/b"
-            : "bv*+ba/b";
+        => settings.PreferPremium && _cookies.GetPathIfUsable() is not null
+            ? "b[ext=mp4]/b/bv*[height<=1080]+ba/b"
+            : "b[ext=mp4]/b/bv*+ba/b";
 
     private async Task<string?> ResolveStreamUrlAsync(
         string ytDlpPath,
@@ -238,7 +342,7 @@ public class YouTubeCommercialStreamService
         YouTubeSettings settings,
         CancellationToken cancellationToken)
     {
-        var formats = settings.PreferPremium && _cookies.HasCookies()
+        var formats = settings.PreferPremium && _cookies.GetPathIfUsable() is not null
             ? PremiumFormats
             : StreamFormats;
 
@@ -285,11 +389,16 @@ public class YouTubeCommercialStreamService
             "--no-progress"
         };
 
-        var cookiePath = _cookies.GetPathIfPresent();
+        var cookiePath = _cookies.GetPathIfUsable();
         if (!string.IsNullOrWhiteSpace(cookiePath))
         {
             args.Add("--cookies");
             args.Add(cookiePath);
+        }
+        else if (_cookies.HasCookies() && Interlocked.Exchange(ref _loggedUnusableCookies, 1) == 0)
+        {
+            _logger.LogWarning(
+                "youtube-cookies.txt is not a Netscape cookies file; YouTube commercials will play without cookies until you paste a fresh export on the YouTube tab");
         }
 
         if (settings.PreferPremium || cookiePath is not null)

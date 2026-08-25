@@ -1,0 +1,25 @@
+{
+  "packs": [
+    {
+      "id": "anytime",
+      "name": "Anytime",
+      "season": "anytime",
+      "version": "0.0.1",
+      "googleDriveFileId": "1uX3rtYW7H9UC8l1ecnUlxAmtH6rlCJ0H"
+    },
+    {
+      "id": "fall",
+      "name": "Fall",
+      "season": "fall",
+      "version": "0.0.1",
+      "googleDriveFileId": "1TClbEJji1gU8ZyfCNOWq9XUpIKijDYpK"
+    },
+    {
+      "id": "winter",
+      "name": "Winter",
+      "season": "winter",
+      "version": "0.0.1",
+      "googleDriveFileId": "1FJPvQ2Q2pANS9VtdDYmsdDGY6hbfxCLU"
+    }
+  ]
+}

@@ -2713,8 +2713,110 @@
 
     function updateEbsLibraryFieldVisibility() {
         const source = Number($('ebs-music-source')?.value || $('setup-ebs-music-source')?.value || '1');
+        const audioMode = Number($('ebs-audio-mode')?.value || '0');
         const field = $('ebs-library-field') || $('setup-ebs-library-field');
-        if (field) field.style.display = source === 1 ? '' : 'none';
+        if (field) field.style.display = audioMode === 0 && source === 1 ? '' : 'none';
+        const hint = $('ebs-music-source-hint');
+        if (hint) hint.style.display = audioMode === 0 ? '' : 'none';
+        const packsCard = $('ebs-music-packs-card');
+        if (packsCard) packsCard.style.display = audioMode === 0 ? '' : 'none';
+    }
+
+    let musicPackPoll = null;
+
+    async function loadMusicPacks() {
+        const el = $('ebs-music-packs');
+        if (!el) {
+            return;
+        }
+
+        try {
+            const data = await api('/music-packs');
+            renderMusicPacks(data.packs || []);
+            const downloading = (data.packs || []).some((pack) => pack.status === 'downloading');
+            if (downloading) {
+                startMusicPackPoll();
+            } else {
+                stopMusicPackPoll();
+            }
+        } catch (err) {
+            el.innerHTML = `<div class="empty-state">${escapeHtml(err.message || 'Could not load music packs.')}</div>`;
+            stopMusicPackPoll();
+        }
+    }
+
+    function startMusicPackPoll() {
+        if (musicPackPoll) {
+            return;
+        }
+        musicPackPoll = setInterval(() => {
+            loadMusicPacks().catch(() => {});
+        }, 1500);
+    }
+
+    function stopMusicPackPoll() {
+        if (musicPackPoll) {
+            clearInterval(musicPackPoll);
+            musicPackPoll = null;
+        }
+    }
+
+    function renderMusicPacks(packs) {
+        const el = $('ebs-music-packs');
+        if (!el) {
+            return;
+        }
+        if (!packs.length) {
+            el.innerHTML = '<div class="empty-state">No music packs in the catalog.</div>';
+            return;
+        }
+        el.innerHTML = packs.map(renderMusicPackCard).join('');
+    }
+
+    function renderMusicPackCard(pack) {
+        const version = pack.installedVersion
+            ? `Installed v${pack.installedVersion}` + (pack.status === 'updateAvailable' ? ` · catalog v${pack.catalogVersion}` : '')
+            : `Catalog v${pack.catalogVersion}`;
+        const tracks = pack.trackCount
+            ? `${pack.trackCount} track${pack.trackCount === 1 ? '' : 's'}`
+            : 'Not downloaded';
+        const active = pack.isActive ? '<span class="stat-pill">Playing now</span>' : '';
+        const error = pack.error ? `<p class="hint">${escapeHtml(pack.error)}</p>` : '';
+        let actions = '';
+        if (pack.status === 'downloading') {
+            actions = '<button type="button" class="emby-button" disabled>Downloading…</button>';
+        } else if (!pack.hasDriveFile) {
+            actions = '<button type="button" class="emby-button" disabled>Coming soon</button>';
+        } else if (pack.status === 'updateAvailable') {
+            actions = `<button type="button" class="raised button-submit emby-button" data-pack-download="${escapeHtml(pack.id)}">Update to v${escapeHtml(pack.catalogVersion)}</button>
+                <button type="button" class="emby-button" data-pack-remove="${escapeHtml(pack.id)}">Remove</button>`;
+        } else if (pack.trackCount > 0) {
+            actions = `<button type="button" class="emby-button" data-pack-remove="${escapeHtml(pack.id)}">Remove</button>`;
+        } else {
+            actions = `<button type="button" class="raised button-submit emby-button" data-pack-download="${escapeHtml(pack.id)}">Download</button>`;
+        }
+        return `<div class="ebs-upload-card">
+            <h4>${escapeHtml(pack.name || pack.id)} ${active}</h4>
+            <p class="hint">${escapeHtml(pack.playsWhen || '')}</p>
+            <p class="hint">${escapeHtml(version)} · ${escapeHtml(tracks)}</p>
+            ${error}
+            <div class="actions">${actions}</div>
+        </div>`;
+    }
+
+    async function downloadMusicPack(id) {
+        await api('/music-packs/' + encodeURIComponent(id) + '/download', { method: 'POST' });
+        toast('Downloading music pack…', 'info');
+        await loadMusicPacks();
+    }
+
+    async function removeMusicPack(id) {
+        if (!confirm('Remove the downloaded files for this music pack? You can download it again later.')) {
+            return;
+        }
+        await api('/music-packs/' + encodeURIComponent(id), { method: 'DELETE' });
+        toast('Music pack removed.', 'success');
+        await loadMusicPacks();
     }
 
     function updateEbsFieldVisibility() {
@@ -2722,7 +2824,6 @@
         const slateVariantField = $('ebs-slate-variant-field');
         const slateVariantHint = $('ebs-slate-variant-hint');
         const musicSourceField = $('ebs-music-source')?.closest('.field');
-        const musicLibraryField = $('ebs-library-field');
         const audioMode = Number($('ebs-audio-mode')?.value || '0');
 
         if (slateVariantField) {
@@ -2733,9 +2834,6 @@
         }
         if (musicSourceField) {
             musicSourceField.style.display = audioMode !== 0 ? 'none' : '';
-        }
-        if (musicLibraryField) {
-            musicLibraryField.style.display = audioMode !== 0 ? 'none' : '';
         }
         updateEbsLibraryFieldVisibility();
         refreshEbsPreviews();
@@ -3619,6 +3717,7 @@
             );
             renderEbsCustomSlateStatus(settings.customSlates);
             updateEbsFieldVisibility();
+            await loadMusicPacks();
         } catch (err) {
             reportApiError(err, 'Could not load Off Air settings.');
         }
@@ -4529,7 +4628,7 @@
         if (settings.environment) {
             lines.push(`Container default: ${settings.environment.hardwareAcceleration || 'none'} / ${settings.environment.videoEncoder || 'libx264'}`);
         }
-        const runAhead = Number(settings.runAheadSeconds ?? 15);
+        const runAhead = Number(settings.runAheadSeconds ?? 180);
         lines.push(runAhead > 0
             ? `Run-ahead buffer: ${runAhead}s`
             : 'Run-ahead buffer: off (real time)');
@@ -4557,7 +4656,7 @@
                 $('transcode-vaapi-device').value = settings.vaapiDevice || '/dev/dri/renderD128';
             }
             if ($('transcode-runahead')) {
-                $('transcode-runahead').value = String(settings.runAheadSeconds ?? 15);
+                $('transcode-runahead').value = String(settings.runAheadSeconds ?? 180);
             }
             renderTranscodeStatus(settings);
             syncTranscodeUi();
@@ -4573,7 +4672,7 @@
                 hardwareAcceleration: $('transcode-hwaccel')?.value || 'none',
                 videoEncoder: $('transcode-encoder')?.value || 'auto',
                 vaapiDevice: ($('transcode-vaapi-device')?.value || '').trim(),
-                runAheadSeconds: Number($('transcode-runahead')?.value || '15')
+                runAheadSeconds: Number($('transcode-runahead')?.value || '180')
             })
         });
         toast('Transcode settings saved. New streams use these settings immediately.', 'success');
@@ -4588,7 +4687,7 @@
             $('transcode-vaapi-device').value = saved.vaapiDevice || '/dev/dri/renderD128';
         }
         if ($('transcode-runahead')) {
-            $('transcode-runahead').value = String(saved.runAheadSeconds ?? 15);
+            $('transcode-runahead').value = String(saved.runAheadSeconds ?? 180);
         }
         syncTranscodeUi();
         const result = $('transcode-test-result');
@@ -5974,6 +6073,20 @@
         click('btn-copy-api-key', copyPluginApiKey);
         click('btn-generate-api-key', () => generatePluginApiKey().catch((e) => toast(e.message, 'error')));
         click('btn-save-ebs', () => saveEbsSettings().catch((e) => toast(e.message, 'error')));
+        const musicPacks = $('ebs-music-packs');
+        if (musicPacks) {
+            musicPacks.addEventListener('click', (event) => {
+                const download = event.target.closest('[data-pack-download]');
+                if (download) {
+                    downloadMusicPack(download.getAttribute('data-pack-download')).catch((e) => toast(e.message, 'error'));
+                    return;
+                }
+                const remove = event.target.closest('[data-pack-remove]');
+                if (remove) {
+                    removeMusicPack(remove.getAttribute('data-pack-remove')).catch((e) => toast(e.message, 'error'));
+                }
+            });
+        }
         click('btn-save-ai-settings', () => saveAiSettings().catch((e) => toast(e.message, 'error')));
         click('btn-test-ai', () => { void testAiConnection(); });
         click('btn-ai-generate-all', () => generateAllAiLineups().catch((e) => toast(e.message, 'error')));

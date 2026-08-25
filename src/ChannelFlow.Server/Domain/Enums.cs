@@ -92,7 +92,12 @@ public enum EbsBackgroundMusicSource
     /// <summary>
     /// Pick random tracks from one selected music library.
     /// </summary>
-    NamedLibrary = 1
+    NamedLibrary = 1,
+
+    /// <summary>
+    /// Local ChannelFlow music packs (Anytime, Fall, Winter, and later holiday packs).
+    /// </summary>
+    LocalPacks = 2
 }
 
 public enum EbsSlateVariant
@@ -130,7 +135,7 @@ public enum EbsDisplayMode
 public enum EbsAudioMode
 {
     /// <summary>
-    /// Random track from the configured Jellyfin music library.
+    /// Random track from local music packs or the configured Jellyfin music library.
     /// </summary>
     BackgroundMusic = 0,
 

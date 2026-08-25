@@ -149,11 +149,13 @@ public class TranscodeSettings
 
     /// <summary>
     /// Seconds ffmpeg may encode ahead of wall clock so tuners have a buffer.
-    /// 0 paces at real time. Maximum is 120.
+    /// 0 paces at real time. Maximum is 600 (10 minutes).
     /// </summary>
-    public int RunAheadSeconds { get; set; } = 15;
+    public int RunAheadSeconds { get; set; } = DefaultRunAheadSeconds;
 
-    public const int MaxRunAheadSeconds = 120;
+    public const int DefaultRunAheadSeconds = 180;
+
+    public const int MaxRunAheadSeconds = 600;
 
     public static int ClampRunAheadSeconds(int value) => Math.Clamp(value, 0, MaxRunAheadSeconds);
 }

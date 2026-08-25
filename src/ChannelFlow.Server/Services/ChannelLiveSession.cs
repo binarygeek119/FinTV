@@ -335,7 +335,7 @@ internal sealed class ChannelLiveSession
 
     private sealed class Viewer
     {
-        private readonly Channel<byte[]> _queue = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(256)
+        private readonly Channel<byte[]> _queue = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(8192)
         {
             SingleReader = true,
             SingleWriter = false,

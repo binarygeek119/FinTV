@@ -37,6 +37,7 @@
     <None Include="..\..\vendor\ws4kp\server\music\default\*" Link="weatherstar\ws4kp\music\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\vendor\ws4kp\server\music\default')" />
     <None Include="..\..\vendor\ws3kp\server\fonts\*.ttf" Link="weatherstar\ws3kp\fonts\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\vendor\ws3kp\server\fonts')" />
     <None Include="..\..\vendor\ws3kp\server\images\backgrounds\*" Link="weatherstar\ws3kp\images\backgrounds\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\..\vendor\ws3kp\server\images\backgrounds')" />
+    <None Include="Music\music-packs.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <Target Name="CopyAppLogo" BeforeTargets="PrepareForBuild">

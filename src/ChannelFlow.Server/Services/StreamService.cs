@@ -46,11 +46,21 @@ public class StreamService : IDisposable
 
     internal static int GetRunAheadSeconds()
     {
-        var configured = FinTvRuntime.Current?.Configuration.Transcode?.RunAheadSeconds ?? 15;
+        var configured = FinTvRuntime.Current?.Configuration.Transcode?.RunAheadSeconds
+            ?? TranscodeSettings.DefaultRunAheadSeconds;
+        if (configured > 0 && configured < TranscodeSettings.DefaultRunAheadSeconds)
+        {
+            configured = TranscodeSettings.DefaultRunAheadSeconds;
+        }
+
         return TranscodeSettings.ClampRunAheadSeconds(configured);
     }
 
-    internal const int RunAheadBytesPerSecond = 600_000;
+    /// <summary>
+    /// MPEG-TS bytes per second used to size the run-ahead ring and pace ffmpeg.
+    /// Sized above the 5 Mbps video maxrate plus audio and TS overhead so CRF spikes still buffer.
+    /// </summary>
+    internal const int RunAheadBytesPerSecond = 1_250_000;
 
     internal static int GetRunAheadRingBytes()
     {
@@ -166,6 +176,11 @@ public class StreamService : IDisposable
             var skipDelay = false;
             if (current is not null)
             {
+                await PrefetchUpcomingYouTubeCommercialsAsync(
+                    channel,
+                    current,
+                    youtubeCommercials,
+                    cancellationToken);
                 using var itemCts = CreateItemCutCts(channelId);
                 using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, itemCts.Token);
                 try
@@ -205,7 +220,7 @@ public class StreamService : IDisposable
 
             if (!skipDelay)
             {
-                await DelayIfStreamEndedImmediatelyAsync(channel.Name, started, cancellationToken);
+                await DelayIfStreamEndedImmediatelyAsync(channel.Name, current, started, cancellationToken);
             }
         }
     }
@@ -230,12 +245,13 @@ public class StreamService : IDisposable
                 continue;
             }
 
-            await DelayIfStreamEndedImmediatelyAsync(channelName, started, cancellationToken);
+            await DelayIfStreamEndedImmediatelyAsync(channelName, item: null, started, cancellationToken);
         }
     }
 
     private async Task DelayIfStreamEndedImmediatelyAsync(
         string channelName,
+        PlayoutItem? item,
         DateTime startedUtc,
         CancellationToken cancellationToken)
     {
@@ -250,11 +266,58 @@ public class StreamService : IDisposable
             return;
         }
 
+        if (item?.CommercialId is not null)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(200), cancellationToken);
+            return;
+        }
+
         _logger.LogWarning(
             "Stream ended after {ElapsedMs:0}ms for {Channel}; retrying in 5 seconds",
             elapsed.TotalMilliseconds,
             channelName);
         await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+    }
+
+    private async Task PrefetchUpcomingYouTubeCommercialsAsync(
+        Channel channel,
+        PlayoutItem current,
+        YouTubeCommercialStreamService youtubeCommercials,
+        CancellationToken cancellationToken)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
+        var horizon = DateTime.UtcNow.AddSeconds(90);
+        var upcoming = await db.PlayoutItems.AsNoTracking()
+            .Where(p => p.ChannelId == channel.Id
+                && p.CommercialId != null
+                && p.Id != current.Id
+                && p.Start <= horizon
+                && p.Finish > DateTime.UtcNow.AddSeconds(-1))
+            .OrderBy(p => p.Start)
+            .Take(4)
+            .ToListAsync(cancellationToken);
+
+        if (upcoming.Count == 0)
+        {
+            return;
+        }
+
+        var ids = upcoming.Select(p => p.CommercialId!.Value).Distinct().ToList();
+        var commercials = await db.Commercials.AsNoTracking()
+            .Where(c => ids.Contains(c.Id))
+            .ToListAsync(cancellationToken);
+        var byId = commercials.ToDictionary(c => c.Id);
+        foreach (var item in upcoming)
+        {
+            if (!byId.TryGetValue(item.CommercialId!.Value, out var commercial))
+            {
+                continue;
+            }
+
+            var duration = Math.Max(1, (item.Finish - DateTime.UtcNow).TotalSeconds);
+            youtubeCommercials.BeginPrefetch(commercial, duration, cancellationToken);
+        }
     }
 
     public async Task<PlayoutItem?> GetCurrentItemAsync(Guid channelId, CancellationToken cancellationToken = default)

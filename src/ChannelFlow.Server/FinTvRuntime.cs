@@ -32,6 +32,8 @@ public sealed class FinTvRuntime
         Directory.CreateDirectory(WeatherStarFolder);
         Directory.CreateDirectory(NewsFolder);
         Directory.CreateDirectory(LogsFolder);
+        MusicFolder = Path.Combine(configDir, "music");
+        Directory.CreateDirectory(MusicFolder);
         Current = this;
     }
 
@@ -46,6 +48,8 @@ public sealed class FinTvRuntime
     public string WeatherStarFolder { get; }
 
     public string NewsFolder { get; }
+
+    public string MusicFolder { get; }
 
     public string LogsFolder { get; }
 

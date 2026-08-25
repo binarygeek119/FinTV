@@ -21,11 +21,13 @@ public class EbsService
         new(StringComparer.OrdinalIgnoreCase) { ".png", ".jpg", ".jpeg" };
 
     private readonly JellyfinCatalogService _catalog;
+    private readonly MusicPackService _musicPacks;
     private readonly ILogger<EbsService> _logger;
 
-    public EbsService(JellyfinCatalogService catalog, ILogger<EbsService> logger)
+    public EbsService(JellyfinCatalogService catalog, MusicPackService musicPacks, ILogger<EbsService> logger)
     {
         _catalog = catalog;
+        _musicPacks = musicPacks;
         _logger = logger;
     }
 
@@ -202,7 +204,13 @@ public class EbsService
         var config = FinTvRuntime.Current?.Configuration;
         if (config is null)
         {
-            return _catalog.PickPlayableMusicPath(null, null, fallbackToAllMusic: true);
+            return _musicPacks.PickActiveTrackPath()
+                ?? _catalog.PickPlayableMusicPath(null, null, fallbackToAllMusic: true);
+        }
+
+        if (config.EbsBackgroundMusicSource == EbsBackgroundMusicSource.LocalPacks)
+        {
+            return _musicPacks.PickActiveTrackPath();
         }
 
         return config.EbsBackgroundMusicSource == EbsBackgroundMusicSource.AllMusicLibraries

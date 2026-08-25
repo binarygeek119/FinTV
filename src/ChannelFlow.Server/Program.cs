@@ -100,6 +100,19 @@ builder.Services.AddHttpClient(nameof(SponsorBlockClient), client =>
     client.Timeout = TimeSpan.FromSeconds(8);
     client.DefaultRequestHeaders.UserAgent.ParseAdd("ChannelFlow-Server/1.0 (SponsorBlock)");
 });
+builder.Services.AddHttpClient(nameof(MusicPackService))
+    .ConfigureHttpClient(client =>
+    {
+        client.Timeout = TimeSpan.FromMinutes(30);
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("ChannelFlow-Server/1.0 (music-packs)");
+    })
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+    {
+        UseCookies = true,
+        CookieContainer = new CookieContainer(),
+        AllowAutoRedirect = true,
+        AutomaticDecompression = DecompressionMethods.All
+    });
 builder.Services.AddHttpClient();
 
 builder.Services.AddSingleton<FinTvRuntime>();
@@ -111,6 +124,7 @@ builder.Services.AddSingleton<FfmpegEncodingService>();
 builder.Services.AddSingleton<FfmpegCommandBuilder>();
 builder.Services.AddSingleton<YtDlpLocator>();
 builder.Services.AddSingleton<YouTubeCookieStore>();
+builder.Services.AddSingleton<MusicPackService>();
 builder.Services.AddSingleton<StreamService>();
 builder.Services.AddSingleton<WeatherGeocoder>();
 builder.Services.AddSingleton<WeatherDataClient>();
@@ -168,6 +182,7 @@ builder.Services.AddHostedService<ScheduledTaskHost>();
 builder.Services.AddHostedService<NewsRefreshHostedService>();
 builder.Services.AddHostedService<NewsBulletinHostedService>();
 builder.Services.AddHostedService<WeatherGuideRefreshHostedService>();
+builder.Services.AddHostedService<MusicPackStartupHostedService>();
 
 var app = builder.Build();
 

@@ -173,6 +173,8 @@ public class FfmpegEncodingService
             "-preset", "veryfast",
             "-tune", stillImage ? "stillimage" : "film",
             "-crf", stillImage ? "23" : "21",
+            "-maxrate", stillImage ? "2500k" : "5000k",
+            "-bufsize", stillImage ? "4000k" : "10000k",
             "-pix_fmt", "yuv420p",
             "-g", stillImage ? "12" : "30",
             "-bf", "0"

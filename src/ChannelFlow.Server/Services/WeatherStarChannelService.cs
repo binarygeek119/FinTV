@@ -279,23 +279,19 @@ public class WeatherStarChannelService
     {
         var config = FinTvRuntime.Current?.Configuration;
         string? fromLibrary = null;
-        if (config is null)
-        {
-            fromLibrary = _ebs.ResolveBackgroundMusicPath();
-        }
-        else
+        if (config is not null)
         {
             var selectedId = string.IsNullOrWhiteSpace(config.WeatherMusicLibraryId) ? null : config.WeatherMusicLibraryId;
             var selectedName = string.IsNullOrWhiteSpace(config.WeatherMusicLibraryName) ? null : config.WeatherMusicLibraryName;
-            var libraryId = selectedId ?? config.EbsBackgroundMusicLibraryId;
-            var libraryName = selectedName ?? config.EbsBackgroundMusicLibraryName;
-            fromLibrary = string.IsNullOrWhiteSpace(libraryId) && string.IsNullOrWhiteSpace(libraryName)
-                ? _catalog.PickPlayableMusicPath(null, null, fallbackToAllMusic: true)
-                : _catalog.PickPlayableMusicPath(libraryId, libraryName, fallbackToAllMusic: true);
-            fromLibrary ??= _ebs.ResolveBackgroundMusicPath();
+            if (!string.IsNullOrWhiteSpace(selectedId) || !string.IsNullOrWhiteSpace(selectedName))
+            {
+                fromLibrary = _catalog.PickPlayableMusicPath(selectedId, selectedName, fallbackToAllMusic: true);
+            }
         }
 
-        var path = PlayableMusicPath(fromLibrary) ?? _assets.PickRandomMusicPath();
+        var path = PlayableMusicPath(fromLibrary)
+            ?? PlayableMusicPath(_ebs.ResolveBackgroundMusicPath())
+            ?? _assets.PickRandomMusicPath();
         if (string.IsNullOrWhiteSpace(path))
         {
             _logger.LogWarning("Weather stream has no music file; encoding silence");

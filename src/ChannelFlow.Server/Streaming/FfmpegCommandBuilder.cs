@@ -67,7 +67,10 @@ public class FfmpegCommandBuilder
             "-ac", "2",
             "-ar", "48000",
             "-f", "mpegts",
-            "-mpegts_flags", "+initial_discontinuity",
+            "-mpegts_flags", "+resend_headers+initial_discontinuity",
+            "-muxdelay", "0",
+            "-muxpreload", "0",
+            "-flush_packets", "1",
             "pipe:1"
         });
 
@@ -119,9 +122,9 @@ public class FfmpegCommandBuilder
         {
             args.AddRange(new[]
             {
-                "-fflags", "+genpts",
-                "-probesize", "5000000",
-                "-analyzeduration", "5000000"
+                "-fflags", "+genpts+discardcorrupt",
+                "-probesize", "32768",
+                "-analyzeduration", "500000"
             });
         }
         else
@@ -176,7 +179,10 @@ public class FfmpegCommandBuilder
         args.AddRange(new[]
         {
             "-f", "mpegts",
-            "-mpegts_flags", "+initial_discontinuity",
+            "-mpegts_flags", "+resend_headers+initial_discontinuity",
+            "-muxdelay", "0",
+            "-muxpreload", "0",
+            "-flush_packets", "1",
             "pipe:1"
         });
 

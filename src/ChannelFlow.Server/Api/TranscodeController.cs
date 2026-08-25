@@ -3,6 +3,7 @@ using CliWrap;
 using FinTv;
 using FinTv.Configuration;
 using FinTv.Domain;
+using FinTv.Services;
 using FinTv.Streaming;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -140,7 +141,7 @@ public class TranscodeController : ControllerBase
                 : _encoding.EnvironmentHardwareAcceleration,
             videoEncoder = string.IsNullOrWhiteSpace(saved.VideoEncoder) ? "auto" : saved.VideoEncoder,
             vaapiDevice = FirstNonEmpty(saved.VaapiDevice, status.VaapiDevice, _encoding.EnvironmentVaapiDevice),
-            runAheadSeconds = TranscodeSettings.ClampRunAheadSeconds(saved.RunAheadSeconds),
+            runAheadSeconds = StreamService.GetRunAheadSeconds(),
             effectiveEncoder = status.Encoder,
             useVaapi = status.UseVaapi,
             vaapiRequested = status.VaapiRequested,
