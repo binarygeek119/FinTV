@@ -172,18 +172,18 @@ public class FfmpegEncodingService
 
         if (Encoder.Contains("vaapi", StringComparison.OrdinalIgnoreCase))
         {
-            var vaapiProfile = _gpu.MapVaapiH264Profile(safeProfile);
-            var args = new List<string>
-            {
+            // Do not force -profile:v. Intel iHD often rejects an explicit Main/High
+            // profile on real overlay/hwupload surfaces even when a lavfi probe of
+            // the same profile succeeds.
+            return
+            [
                 "-b:v", bitrate ?? (stillImage ? "1500k" : "4000k"),
                 "-maxrate", bitrate ?? (stillImage ? "2500k" : "5000k"),
                 "-bufsize", bufsize,
-                "-profile:v", vaapiProfile,
                 "-r", safeRate,
                 "-g", keyint.ToString(),
                 "-bf", "0"
-            };
-            return args;
+            ];
         }
 
         if (Encoder.Contains("nvenc", StringComparison.OrdinalIgnoreCase))
@@ -258,13 +258,14 @@ public class FfmpegEncodingService
         args.AddRange(GetVideoEncoderArguments(stillImage));
     }
 
-    private static Snapshot BuildSnapshot(string hardwareAcceleration, string requestedEncoder, string vaapiDevice)
+    private Snapshot BuildSnapshot(string hardwareAcceleration, string requestedEncoder, string vaapiDevice)
     {
         var wantVaapi = hardwareAcceleration == "vaapi"
             || requestedEncoder.Contains("vaapi", StringComparison.OrdinalIgnoreCase);
         var wantNvenc = hardwareAcceleration == "nvenc"
             || requestedEncoder.Contains("nvenc", StringComparison.OrdinalIgnoreCase);
-        var deviceExists = !string.IsNullOrWhiteSpace(vaapiDevice) && File.Exists(vaapiDevice);
+        var encodeDevice = _gpu.ClampVaapiDevice(vaapiDevice);
+        var deviceExists = !string.IsNullOrWhiteSpace(encodeDevice) && File.Exists(encodeDevice);
         var useVaapi = wantVaapi && deviceExists;
 
         if (useVaapi)
@@ -276,11 +277,11 @@ public class FfmpegEncodingService
             return new Snapshot(
                 "vaapi",
                 encoder,
-                vaapiDevice,
+                encodeDevice,
                 true,
                 true,
                 true,
-                ["-init_hw_device", $"vaapi=va:{vaapiDevice}", "-filter_hw_device", "va"],
+                ["-init_hw_device", $"vaapi=va:{encodeDevice}", "-filter_hw_device", "va"],
                 ["-hwaccel", "vaapi", "-hwaccel_device", "va", "-hwaccel_output_format", "nv12"]);
         }
 
@@ -293,7 +294,7 @@ public class FfmpegEncodingService
             return new Snapshot(
                 "nvenc",
                 encoder,
-                vaapiDevice,
+                encodeDevice,
                 false,
                 deviceExists,
                 wantVaapi,
@@ -310,7 +311,7 @@ public class FfmpegEncodingService
         return new Snapshot(
             "none",
             softwareEncoder,
-            vaapiDevice,
+            encodeDevice,
             false,
             deviceExists,
             wantVaapi,

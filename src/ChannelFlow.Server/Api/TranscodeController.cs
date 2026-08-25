@@ -156,6 +156,7 @@ public class TranscodeController : ControllerBase
     {
         var caps = await _gpu.GetAsync(cancellationToken);
         var saved = FinTvRuntime.Current?.Configuration.Transcode ?? new TranscodeSettings();
+        _encoding.ApplyFromSaved(saved);
         var status = _encoding.Describe();
         var usingSaved = !string.IsNullOrWhiteSpace(saved.HardwareAcceleration)
             || !string.IsNullOrWhiteSpace(saved.VideoEncoder)
@@ -193,12 +194,13 @@ public class TranscodeController : ControllerBase
             {
                 summary = caps.Summary,
                 driver = caps.Driver,
+                vaapiDevices = caps.VaapiDevices,
                 accelerations = caps.Accelerations.Select(item => new
                 {
                     value = item.Id,
                     label = item.Label,
                     encoders = item.Encoders,
-                    devices = item.Devices
+                    devices = item.Devices.Count > 0 ? item.Devices : caps.VaapiDevices
                 }),
                 formats = caps.Formats
             }

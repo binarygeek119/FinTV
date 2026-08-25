@@ -89,6 +89,7 @@ public class NormalizationController : ControllerBase
     private async Task<object> BuildPayloadAsync(CancellationToken cancellationToken)
     {
         var caps = await _gpu.GetAsync(cancellationToken);
+        _encoding.ApplyFromSaved(FinTvRuntime.Current?.Configuration.Transcode);
         var accel = _encoding.Describe().HardwareAcceleration;
         var clamped = _gpu.ClampNormalization(_normalization.Current.ToSettings(), accel);
         _normalization.ApplyFromSaved(clamped);

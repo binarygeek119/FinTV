@@ -50,6 +50,8 @@ public sealed class GpuCapabilityService
     private readonly ILogger<GpuCapabilityService> _logger;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private GpuCapabilities? _cached;
+    private int _emptyHardwareProbes;
+    private readonly HashSet<string> _encodeVaapiDevices = new(StringComparer.Ordinal);
 
     public GpuCapabilityService(IFfmpegLocator ffmpeg, ILogger<GpuCapabilityService> logger)
     {
@@ -59,11 +61,15 @@ public sealed class GpuCapabilityService
 
     public GpuCapabilities? TryGetCached() => _cached;
 
-    public void Invalidate() => _cached = null;
+    public void Invalidate()
+    {
+        _cached = null;
+        _encodeVaapiDevices.Clear();
+    }
 
     public async Task<GpuCapabilities> GetAsync(CancellationToken cancellationToken = default)
     {
-        if (_cached is not null)
+        if (_cached is not null && HasHardwareEncode(_cached))
         {
             return _cached;
         }
@@ -71,12 +77,27 @@ public sealed class GpuCapabilityService
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            if (_cached is not null)
+            if (_cached is not null && !ShouldRetryEmptyHardwareProbe())
             {
                 return _cached;
             }
 
             _cached = await ProbeAsync(cancellationToken);
+            if (ShouldRetryEmptyHardwareProbe())
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+                _cached = await ProbeAsync(cancellationToken);
+            }
+
+            if (HasHardwareEncode(_cached))
+            {
+                _emptyHardwareProbes = 0;
+            }
+            else if (DiscoverVaapiDevices().Any())
+            {
+                _emptyHardwareProbes++;
+            }
+
             _logger.LogInformation("GPU encode capabilities: {Summary}", _cached.Summary);
             return _cached;
         }
@@ -135,19 +156,62 @@ public sealed class GpuCapabilityService
     public string ClampVaapiDevice(string? device)
     {
         var trimmed = string.IsNullOrWhiteSpace(device) ? null : device.Trim();
+        if (IsSelectableRenderNode(trimmed))
+        {
+            return trimmed!;
+        }
+
         var caps = _cached;
-        if (caps is null)
+        var preferred = caps?.VaapiDevices.FirstOrDefault(item => CanEncodeOnVaapiDevice(item.Value))
+            ?? caps?.VaapiDevices.FirstOrDefault();
+        if (preferred is not null)
         {
-            return trimmed ?? "/dev/dri/renderD128";
+            return preferred.Value;
         }
 
-        if (trimmed is not null && caps.VaapiDevices.Any(item => item.Value == trimmed))
-        {
-            return trimmed;
-        }
-
-        return caps.VaapiDevices.FirstOrDefault()?.Value ?? trimmed ?? "/dev/dri/renderD128";
+        return DiscoverVaapiDevices().FirstOrDefault()
+            ?? trimmed
+            ?? "/dev/dri/renderD128";
     }
+
+    public bool CanEncodeOnVaapiDevice(string? device)
+    {
+        if (string.IsNullOrWhiteSpace(device))
+        {
+            return false;
+        }
+
+        if (_encodeVaapiDevices.Contains(device))
+        {
+            return true;
+        }
+
+        return _cached is null && File.Exists(device);
+    }
+
+    private bool IsSelectableRenderNode(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        if (_cached?.VaapiDevices.Any(item => item.Value == path) == true)
+        {
+            return true;
+        }
+
+        return path.StartsWith("/dev/dri/", StringComparison.Ordinal)
+            && File.Exists(path);
+    }
+
+    private bool ShouldRetryEmptyHardwareProbe()
+        => _emptyHardwareProbes < 3
+           && (_cached is null || !HasHardwareEncode(_cached))
+           && DiscoverVaapiDevices().Any();
+
+    private static bool HasHardwareEncode(GpuCapabilities caps)
+        => caps.Accelerations.Any(item => item.Id is "vaapi" or "nvenc");
 
     public NormalizationSettings ClampNormalization(NormalizationSettings settings, string acceleration)
     {
@@ -214,24 +278,40 @@ public sealed class GpuCapabilityService
 
         var vaapiDevices = new List<GpuSelectOption>();
         var driverNotes = new List<string>();
+        _encodeVaapiDevices.Clear();
 
-        if (hasH264Vaapi)
+        var discovered = DiscoverVaapiDevices().ToList();
+        if (hasH264Vaapi || discovered.Count > 0)
         {
-            foreach (var path in DiscoverVaapiDevices())
+            foreach (var path in discovered)
             {
-                var vaapi = await ProbeVaapiDeviceAsync(path, hasMpeg2Vaapi, cancellationToken);
-                if (vaapi is null)
+                var vaapi = hasH264Vaapi
+                    ? await ProbeVaapiDeviceAsync(path, hasMpeg2Vaapi, cancellationToken)
+                    : null;
+                if (vaapi is not null)
                 {
+                    _encodeVaapiDevices.Add(path);
+                    vaapiDevices.Add(new GpuSelectOption(path, vaapi.Label));
+                    driverNotes.Add(vaapi.Driver);
+                    formats["vaapi"] = vaapi.Format;
                     continue;
                 }
 
-                vaapiDevices.Add(new GpuSelectOption(path, vaapi.Label));
-                driverNotes.Add(vaapi.Driver);
-                formats["vaapi"] = vaapi.Format;
+                var driver = (await ReadVainfoAsync(path, cancellationToken))?.Driver;
+                vaapiDevices.Add(new GpuSelectOption(
+                    path,
+                    string.IsNullOrWhiteSpace(driver)
+                        ? $"{path} (no H.264 encode)"
+                        : $"{path} ({driver}, no H.264 encode)"));
             }
 
-            if (vaapiDevices.Count > 0)
+            if (vaapiDevices.Count > 0 && hasH264Vaapi)
             {
+                if (!formats.ContainsKey("vaapi"))
+                {
+                    formats["vaapi"] = software;
+                }
+
                 accelerations.Add(new GpuAccelOption(
                     "vaapi",
                     "Intel / AMD VAAPI",
