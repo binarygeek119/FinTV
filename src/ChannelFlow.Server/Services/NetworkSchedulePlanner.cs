@@ -67,8 +67,9 @@ public static class NetworkSchedulePlanner
 
             var isMovie = string.Equals(block.Kind, "movie", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(entry.Type, "Movie", StringComparison.OrdinalIgnoreCase);
+            var runtimeSpan = LineupSlotSpans.SpanFromRuntimeMinutes(Math.Max(0, entry.RuntimeMinutes));
             var length = isMovie
-                ? Math.Clamp(block.SpanSlots ?? Math.Max(1, (int)Math.Ceiling(Math.Max(30, entry.RuntimeMinutes) / 30.0)), 1, 8)
+                ? Math.Clamp(Math.Max(runtimeSpan, block.SpanSlots ?? runtimeSpan), 1, 8)
                 : Math.Clamp(block.EpisodeBlock ?? block.SpanSlots ?? 2, 1, 6);
 
             foreach (var day in days)
@@ -83,6 +84,51 @@ public static class NetworkSchedulePlanner
         }
 
         return weekly;
+    }
+
+    public const int MixedTvWeekendMovieCap = 2;
+
+    /// <summary>
+    /// Mixed TV channels keep series as the default. Weekdays drop leftover movies;
+    /// Friday-Sunday keep at most two (primetime wins). SprinkleMovies may then add
+    /// the weekend features if the day is still short.
+    /// </summary>
+    public static void LimitMixedTvMovies(
+        Dictionary<DayOfWeek, List<LineupSlotDto>> weekly,
+        IReadOnlyList<AiCatalogEntry> catalog,
+        ChannelCatalogMode catalogMode,
+        ChannelContentType contentType)
+    {
+        if (catalogMode != ChannelCatalogMode.Mixed || contentType != ChannelContentType.TvShow)
+        {
+            return;
+        }
+
+        var movieIds = MovieIds(catalog);
+        if (movieIds.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var day in weekly.Keys.ToList())
+        {
+            var cap = day is DayOfWeek.Friday or DayOfWeek.Saturday or DayOfWeek.Sunday
+                ? MixedTvWeekendMovieCap
+                : 0;
+            var slots = weekly[day];
+            var extras = slots
+                .Where(s => IsMovieSlot(s, movieIds))
+                .OrderByDescending(s => s.SlotIndex)
+                .Skip(cap)
+                .Select(s => s.SlotIndex)
+                .ToHashSet();
+            if (extras.Count == 0)
+            {
+                continue;
+            }
+
+            slots.RemoveAll(s => extras.Contains(s.SlotIndex));
+        }
     }
 
     public static void SprinkleMovies(
@@ -105,10 +151,11 @@ public static class NetworkSchedulePlanner
             return;
         }
 
-        TryPlaceMovie(weekly, DayOfWeek.Friday, 40, movies, 0);
+        var movieIds = MovieIds(catalog);
+        TryPlaceMovie(weekly, DayOfWeek.Friday, 40, movies, movieIds, 0);
         if (movies.Count > 1)
         {
-            TryPlaceMovie(weekly, DayOfWeek.Saturday, 36, movies, 1);
+            TryPlaceMovie(weekly, DayOfWeek.Saturday, 36, movies, movieIds, 1);
         }
     }
 
@@ -184,17 +231,19 @@ public static class NetworkSchedulePlanner
         var occupied = new bool[48];
         foreach (var slot in slots.Where(s => s.IsRerunSlot || s.Candidates.Count > 0))
         {
-            for (var i = slot.SlotIndex; i < slot.SlotIndex + slot.SpanSlots && i < 48; i++)
+            var span = LineupSlotSpans.ClampSpan(slot.SlotIndex, slot.SpanSlots);
+            for (var i = slot.SlotIndex; i < slot.SlotIndex + span && i < 48; i++)
             {
                 occupied[i] = true;
             }
         }
 
-        var seriesFirst = catalogMode is ChannelCatalogMode.TvOnly or ChannelCatalogMode.Mixed
+        var skipMovies = catalogMode is ChannelCatalogMode.TvOnly or ChannelCatalogMode.Mixed
             && contentType == ChannelContentType.TvShow;
+        var catalogById = catalog.ToDictionary(c => c.Id);
         var fillQueue = catalog
-            .OrderBy(e => seriesFirst && e.Type is "Movie" or "Clip" ? 1 : 0)
-            .ThenBy(e => e.Year ?? int.MaxValue)
+            .Where(e => !(skipMovies && e.Type is "Movie" or "Clip"))
+            .OrderBy(e => e.Year ?? int.MaxValue)
             .ThenBy(e => e.Title, StringComparer.OrdinalIgnoreCase)
             .Select(e => e.Id)
             .ToList();
@@ -216,8 +265,37 @@ public static class NetworkSchedulePlanner
                 continue;
             }
 
-            Upsert(slots, i, 1, fillQueue[q % fillQueue.Count]);
-            q++;
+            AiCatalogEntry? chosen = null;
+            var span = 1;
+            for (var attempt = 0; attempt < fillQueue.Count; attempt++)
+            {
+                var id = fillQueue[q % fillQueue.Count];
+                q++;
+                if (!catalogById.TryGetValue(id, out var entry))
+                {
+                    continue;
+                }
+
+                span = SpanThatFits(entry, i, occupied);
+                if (span <= 0)
+                {
+                    continue;
+                }
+
+                chosen = entry;
+                break;
+            }
+
+            if (chosen is null)
+            {
+                continue;
+            }
+
+            Upsert(slots, i, span, chosen.Id);
+            for (var j = i; j < i + span && j < 48; j++)
+            {
+                occupied[j] = true;
+            }
         }
     }
 
@@ -266,6 +344,7 @@ public static class NetworkSchedulePlanner
         DayOfWeek day,
         int startSlot,
         List<AiCatalogEntry> movies,
+        HashSet<Guid> movieIds,
         int movieIndex)
     {
         if (!weekly.TryGetValue(day, out var slots) || movieIndex >= movies.Count)
@@ -273,18 +352,58 @@ public static class NetworkSchedulePlanner
             return;
         }
 
-        if (CountMovies(slots) >= 2)
+        if (CountMovies(slots, movieIds) >= MixedTvWeekendMovieCap)
         {
             return;
         }
 
         var movie = movies[movieIndex % movies.Count];
-        var span = Math.Clamp(Math.Max(2, (int)Math.Ceiling(Math.Max(30, movie.RuntimeMinutes) / 30.0)), 2, 8);
+        var span = Math.Clamp(Math.Max(2, LineupSlotSpans.SpanFromRuntimeMinutes(Math.Max(30, movie.RuntimeMinutes))), 2, 8);
         PlaceSeriesOrMovie(slots, movie.Id, startSlot, span, isMovie: true);
     }
 
-    private static int CountMovies(List<LineupSlotDto> slots)
-        => slots.Count(s => s.SpanSlots >= 3 && s.Candidates.Count > 0);
+    private static int CountMovies(List<LineupSlotDto> slots, HashSet<Guid> movieIds)
+        => slots.Count(s => IsMovieSlot(s, movieIds));
+
+    private static HashSet<Guid> MovieIds(IEnumerable<AiCatalogEntry> catalog)
+        => catalog
+            .Where(c => string.Equals(c.Type, "Movie", StringComparison.OrdinalIgnoreCase))
+            .Select(c => c.Id)
+            .ToHashSet();
+
+    private static bool IsMovieSlot(LineupSlotDto slot, HashSet<Guid> movieIds)
+        => !slot.IsRerunSlot
+            && slot.Candidates.Any(c => c.JellyfinItemId is Guid id && movieIds.Contains(id));
+
+    private static int SpanThatFits(AiCatalogEntry entry, int start, bool[] occupied)
+    {
+        var isMovie = string.Equals(entry.Type, "Movie", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(entry.Type, "Clip", StringComparison.OrdinalIgnoreCase);
+        var span = string.Equals(entry.Type, "Series", StringComparison.OrdinalIgnoreCase)
+            ? LineupSlotSpans.SpanFromRuntimeMinutes(
+                entry.RuntimeMinutes is > 5 and <= 90 ? entry.RuntimeMinutes : 30,
+                maxSpan: 2)
+            : LineupSlotSpans.SpanFromRuntimeMinutes(entry.RuntimeMinutes);
+        span = LineupSlotSpans.ClampSpan(start, span);
+
+        var free = 0;
+        while (start + free < 48 && !occupied[start + free])
+        {
+            free++;
+        }
+
+        if (free <= 0)
+        {
+            return 0;
+        }
+
+        if (isMovie && span > free && free < 2)
+        {
+            return 0;
+        }
+
+        return Math.Min(span, free);
+    }
 
     private static void PlaceRerun(List<LineupSlotDto> slots, int start, int length)
     {

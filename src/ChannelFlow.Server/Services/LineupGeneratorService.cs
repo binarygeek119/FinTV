@@ -397,22 +397,7 @@ public class LineupGeneratorService
     }
 
     private static bool IsSlotConsumedByEarlierSpan(IReadOnlyList<LineupSlot> slots, int slotIndex)
-    {
-        foreach (var slot in slots)
-        {
-            if (slot.SlotIndex >= slotIndex || slot.SpanSlots <= 1)
-            {
-                continue;
-            }
-
-            if (slotIndex >= slot.SlotIndex && slotIndex < slot.SlotIndex + slot.SpanSlots)
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+        => LineupSlotSpans.IsCoveredByEarlierSpan(slots, slotIndex);
 
     private async Task AddMusicPlayoutItemAsync(
         Channel channel,

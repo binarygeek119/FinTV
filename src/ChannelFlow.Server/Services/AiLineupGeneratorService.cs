@@ -133,18 +133,27 @@ public class AiLineupGeneratorService
                 channel.FilterJson,
                 yearConstraints,
                 playoutTemplate,
-                catalogMode);
+                catalogMode,
+                channel.ContentType);
 
             weekly = aiResponse.Blocks is { Count: > 0 }
                 ? NetworkSchedulePlanner.ExpandBlocks(aiResponse.Blocks, manifest.Catalog, catalogMode, channel.ContentType)
                 : NetworkSchedulePlanner.CloneDailyToWeek(slots);
 
+            var runtimeById = CatalogRuntimeLookup(manifest.Catalog);
+            foreach (var day in weekly.Keys.ToList())
+            {
+                weekly[day] = LineupSlotSpans.ExpandUsingRuntimes(weekly[day], runtimeById);
+            }
+
+            NetworkSchedulePlanner.LimitMixedTvMovies(weekly, manifest.Catalog, catalogMode, channel.ContentType);
             NetworkSchedulePlanner.SprinkleMovies(weekly, manifest.Catalog, catalogMode);
             NetworkSchedulePlanner.ApplyTemplateRerunDayparts(weekly, playoutTemplate);
-            foreach (var daySlots in weekly.Values)
+            foreach (var day in weekly.Keys.ToList())
             {
-                NetworkSchedulePlanner.FillRemainingGaps(daySlots, manifest.Catalog, catalogMode, channel.ContentType);
-                NetworkSchedulePlanner.FillEmptySlotsWithChannelFilter(daySlots, channel.FilterJson);
+                NetworkSchedulePlanner.FillRemainingGaps(weekly[day], manifest.Catalog, catalogMode, channel.ContentType);
+                NetworkSchedulePlanner.FillEmptySlotsWithChannelFilter(weekly[day], channel.FilterJson);
+                weekly[day] = LineupSlotSpans.Compact(weekly[day]);
             }
 
             slots = weekly.GetValueOrDefault(DayOfWeek.Monday) ?? slots;
@@ -358,7 +367,8 @@ public class AiLineupGeneratorService
         string? channelFilterJson,
         ChannelCatalogYearConstraints? yearConstraints,
         AiPlayoutTemplate? playoutTemplate = null,
-        ChannelCatalogMode catalogMode = ChannelCatalogMode.TvOnly)
+        ChannelCatalogMode catalogMode = ChannelCatalogMode.TvOnly,
+        ChannelContentType contentType = ChannelContentType.TvShow)
     {
         var occupied = new bool[48];
         var result = ChannelService.CreateEmptySlots()
@@ -465,8 +475,9 @@ public class AiLineupGeneratorService
             result,
             occupied,
             catalogById,
-            preferSeries: catalogMode is ChannelCatalogMode.TvOnly or ChannelCatalogMode.Mixed);
-        return FillEmptySlotsWithFilterFallback(result, occupied, channelFilterJson);
+            preferSeries: catalogMode is ChannelCatalogMode.TvOnly
+                || (catalogMode == ChannelCatalogMode.Mixed && contentType == ChannelContentType.TvShow));
+        return LineupSlotSpans.Compact(FillEmptySlotsWithFilterFallback(result, occupied, channelFilterJson));
     }
 
     private static bool ShouldPackMarathon(AiPlayoutTemplate? template, ChannelCatalogMode catalogMode)
@@ -545,7 +556,7 @@ public class AiLineupGeneratorService
         }
 
         FillEmptySlotsFromCatalog(result, occupied, catalogById, preferSeries: true);
-        return FillEmptySlotsWithFilterFallback(result, occupied, channelFilterJson);
+        return LineupSlotSpans.Compact(FillEmptySlotsWithFilterFallback(result, occupied, channelFilterJson));
     }
 
     private static List<Guid> BuildAiredOrderFillQueue(
@@ -590,12 +601,16 @@ public class AiLineupGeneratorService
         }
 
         var fillQueue = catalogById.Values
-            .OrderBy(e => preferSeries && e.Type is "Movie" or "Clip" ? 1 : 0)
-            .ThenBy(e => e.Year ?? int.MaxValue)
+            .Where(e => !(preferSeries && e.Type is "Movie" or "Clip"))
+            .OrderBy(e => e.Year ?? int.MaxValue)
             .ThenBy(e => e.PremiereDate ?? DateTime.MaxValue)
             .ThenBy(e => e.Title, StringComparer.OrdinalIgnoreCase)
             .Select(e => e.Id)
             .ToList();
+        if (fillQueue.Count == 0)
+        {
+            return result.Values.OrderBy(s => s.SlotIndex).ToList();
+        }
 
         var queueIndex = 0;
         for (var slotIndex = 0; slotIndex < 48; slotIndex++)
@@ -605,24 +620,52 @@ public class AiLineupGeneratorService
                 continue;
             }
 
-            var itemId = fillQueue[queueIndex % fillQueue.Count];
-            queueIndex++;
-            occupied[slotIndex] = true;
+            AiCatalogEntry? chosen = null;
+            var span = 1;
+            for (var attempt = 0; attempt < fillQueue.Count; attempt++)
+            {
+                var itemId = fillQueue[queueIndex % fillQueue.Count];
+                queueIndex++;
+                if (!catalogById.TryGetValue(itemId, out var entry))
+                {
+                    continue;
+                }
+
+                span = SpanThatFits(entry, slotIndex, occupied);
+                if (span <= 0)
+                {
+                    continue;
+                }
+
+                chosen = entry;
+                break;
+            }
+
+            if (chosen is null)
+            {
+                continue;
+            }
+
+            MarkOccupied(occupied, slotIndex, span);
             result[slotIndex] = new LineupSlotDto
             {
                 SlotIndex = slotIndex,
-                SpanSlots = 1,
+                SpanSlots = span,
                 Candidates =
                 [
                     new SlotCandidateDto
                     {
                         Kind = SlotCandidateKind.JellyfinItem,
-                        JellyfinItemId = itemId,
+                        JellyfinItemId = chosen.Id,
                         Weight = 1,
                         SortOrder = 0
                     }
                 ]
             };
+            for (var covered = slotIndex + 1; covered < slotIndex + span && covered < 48; covered++)
+            {
+                result.Remove(covered);
+            }
         }
 
         return result.Values.OrderBy(s => s.SlotIndex).ToList();
@@ -666,7 +709,32 @@ public class AiLineupGeneratorService
     }
 
     private static int ComputeSpanFromRuntime(int runtimeMinutes, int maxSpan = 8)
-        => Math.Clamp((int)Math.Ceiling(runtimeMinutes / 30.0), 1, maxSpan);
+        => LineupSlotSpans.SpanFromRuntimeMinutes(runtimeMinutes, maxSpan);
+
+    private static int SpanThatFits(AiCatalogEntry entry, int start, bool[] occupied)
+    {
+        var isMovie = string.Equals(entry.Type, "Movie", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(entry.Type, "Clip", StringComparison.OrdinalIgnoreCase);
+        var span = ComputePlayoutSpan(entry, requestedSpan: 1, maxSpan: 8);
+        span = LineupSlotSpans.ClampSpan(start, span);
+        var free = 0;
+        while (start + free < 48 && !occupied[start + free])
+        {
+            free++;
+        }
+
+        if (free <= 0)
+        {
+            return 0;
+        }
+
+        if (isMovie && span > free && free < 2)
+        {
+            return 0;
+        }
+
+        return Math.Min(span, free);
+    }
 
     /// <summary>
     /// Series IDs play the next episode per slot, so span is one episode (30 or 60 min),
@@ -686,6 +754,23 @@ public class AiLineupGeneratorService
         }
 
         return Math.Clamp(requestedSpan ?? 1, 1, maxSpan);
+    }
+
+    private static Dictionary<Guid, int> CatalogRuntimeLookup(IEnumerable<AiCatalogEntry> catalog)
+    {
+        var result = new Dictionary<Guid, int>();
+        foreach (var entry in catalog)
+        {
+            if (string.Equals(entry.Type, "Series", StringComparison.OrdinalIgnoreCase)
+                || entry.RuntimeMinutes <= LineupSlotSpans.MinutesPerSlot)
+            {
+                continue;
+            }
+
+            result[entry.Id] = entry.RuntimeMinutes;
+        }
+
+        return result;
     }
 
     private static Guid? ResolveCatalogId(
@@ -796,10 +881,7 @@ public class AiLineupGeneratorService
 
     private static List<LineupSlotDto> NormalizeSlots(IReadOnlyList<LineupSlotDto> slots)
     {
-        var normalized = ChannelService.CreateEmptySlots()
-            .Select(s => new LineupSlotDto { SlotIndex = s.SlotIndex, SpanSlots = 1 })
-            .ToDictionary(s => s.SlotIndex);
-
+        var normalized = new Dictionary<int, LineupSlotDto>();
         foreach (var slot in slots)
         {
             if (slot.SlotIndex is < 0 or >= 48)
@@ -816,7 +898,7 @@ public class AiLineupGeneratorService
             };
         }
 
-        return normalized.Values.OrderBy(s => s.SlotIndex).ToList();
+        return LineupSlotSpans.Compact(normalized.Values);
     }
 
     private static AiLineupAiResponse ParseAiResponse(string rawJson)
@@ -844,8 +926,8 @@ public class AiLineupGeneratorService
 
         var mixedRule = catalogMode == ChannelCatalogMode.Mixed
             ? contentType == ChannelContentType.Movie
-                ? "\n- Mixed movie channel: movies are the default. TV series are optional holiday/thematic filler only."
-                : "\n- Mixed TV channel: series are the default. After the weekly grid is set, ChannelFlow may add at most 1-2 movies on Friday night and/or weekend. Do not load weekdays with movies."
+                ? "\n- Mixed movie channel: movies are the default. TV series are optional holiday/thematic filler only. Each movie uses spanSlots from runtime so a 90-minute title occupies three half-hours. Do not start another movie until that runtime ends."
+                : "\n- Mixed TV channel: series are the default. After the weekly grid is set, ChannelFlow may add at most 1-2 movies on Friday night and/or weekend. Do not load weekdays with movies. Never place a movie in a leftover 30-minute hole; movies occupy spanSlots from runtime."
             : string.Empty;
 
         var formatHint = contentType == ChannelContentType.Movie

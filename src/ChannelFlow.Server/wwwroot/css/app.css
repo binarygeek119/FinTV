@@ -500,6 +500,16 @@ body.channel-editor-open {
 table.data-table tbody tr.selected {
     background: rgba(225, 29, 72, 0.14);
 }
+.override-card {
+    cursor: pointer;
+}
+.override-card:hover {
+    border-color: var(--accent);
+}
+.override-card.selected {
+    border-color: var(--accent);
+    background: rgba(225, 29, 72, 0.14);
+}
 .playlist-sample-caption,
 .playlist-sample-caption {
     color: var(--muted);

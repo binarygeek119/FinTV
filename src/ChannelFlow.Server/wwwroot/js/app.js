@@ -47,6 +47,7 @@
     let editingChannelId = null;
     let lineupSlots = [];
     let lineupOverrides = [];
+    let selectedLineupOverrideId = null;
     let lineupIsWeather = false;
     let itemTitleCache = {};
     let itemMetaCache = {};
@@ -739,6 +740,49 @@
 
     function isRerunSlot(slot) {
         return !!(slot && (slot.isRerunSlot || slot.IsRerunSlot));
+    }
+
+    function slotSpan(slot) {
+        return Math.max(1, Math.min(8, Number(slot?.spanSlots ?? slot?.SpanSlots ?? 1) || 1));
+    }
+
+    function spanFromRuntimeMinutes(runtimeMinutes) {
+        const minutes = Number(runtimeMinutes);
+        if (!minutes || minutes <= 0) {
+            return 1;
+        }
+
+        return Math.max(1, Math.min(8, Math.ceil(minutes / 30)));
+    }
+
+    function compactLineupSlots(slots) {
+        const occupied = new Array(48).fill(false);
+        const kept = [];
+        [...(slots || [])]
+            .sort((a, b) => (a.slotIndex - b.slotIndex))
+            .forEach((slot) => {
+                const index = slot.slotIndex;
+                if (index < 0 || index > 47 || occupied[index]) {
+                    return;
+                }
+
+                const first = (slot.candidates || slot.Candidates || [])[0];
+                const itemId = first?.jellyfinItemId || first?.JellyfinItemId;
+                const meta = itemId ? itemMetaCache[itemId] : null;
+                const type = String(meta?.type || '').toLowerCase();
+                if ((type === 'movie' || type === 'episode') && Number(meta.runtimeMinutes) > 30) {
+                    slot.spanSlots = Math.max(slotSpan(slot), spanFromRuntimeMinutes(meta.runtimeMinutes));
+                }
+
+                const span = slotSpan(slot);
+                slot.spanSlots = span;
+                for (let i = index; i < index + span && i < 48; i++) {
+                    occupied[i] = true;
+                }
+
+                kept.push(slot);
+            });
+        return kept;
     }
 
     function applyLineupSlotKinds(slots, kinds) {
@@ -1815,6 +1859,7 @@
         if (!selectedChannelId) return;
 
         try {
+            selectedLineupOverrideId = null;
             const dateVal = $('lineup-preview-date')?.value || todayIsoDate();
             const data = await api('/lineups/' + selectedChannelId + '?date=' + encodeURIComponent(dateVal));
             lineupIsWeather = !!(data.isWeather || getLineupChannel()?.contentType === CONTENT_TYPE_VALUES.Weather);
@@ -1824,6 +1869,8 @@
                 lineupSlots = [{ slotIndex: 0, spanSlots: 48, candidates: [] }];
             } else if (lineupSlots.length === 0) {
                 lineupSlots = Array.from({ length: 48 }, (_, i) => ({ slotIndex: i, candidates: [] }));
+            } else {
+                lineupSlots = compactLineupSlots(lineupSlots);
             }
             applyLineupSlotKinds(lineupSlots, data.slotKinds);
 
@@ -1838,6 +1885,7 @@
             }
 
             await collectItemIdsFromSlots(lineupSlots);
+            lineupSlots = compactLineupSlots(lineupSlots);
             renderLineupGrid();
             renderOverrideList();
             $('lineup-preview-banner').classList.add('hidden');
@@ -1928,7 +1976,12 @@
         }
 
         if (hint) {
-            hint.textContent = 'Click a 30-minute slot to edit candidates. Check Rerun slot to fill it from yesterday’s primetime (yellow).';
+            const selected = selectedWeekLineup();
+            if (selected) {
+                hint.textContent = 'Showing ' + weekLineupLabel(selected) + '. Click a 30-minute slot to edit candidates. Save Lineup writes this day’s template.';
+            } else {
+                hint.textContent = 'Click a 30-minute slot to edit candidates. Check Rerun slot to fill it from yesterday’s primetime (yellow). Click a Weeks lineups row to load that day’s template.';
+            }
         }
 
         weatherBanner?.classList.add('hidden');
@@ -1957,34 +2010,136 @@
 
     function renderLineupGrid() {
         const grid = $('lineup-grid');
-        grid.innerHTML = lineupSlots.sort((a, b) => a.slotIndex - b.slotIndex).map((s) => {
+        const occupied = new Array(48).fill(false);
+        const byIndex = {};
+        compactLineupSlots(lineupSlots).forEach((s) => {
+            byIndex[s.slotIndex] = s;
+        });
+
+        let html = '';
+        for (let i = 0; i < 48; i++) {
+            if (occupied[i]) {
+                continue;
+            }
+
+            const s = byIndex[i] || { slotIndex: i, spanSlots: 1, candidates: [] };
             const rerun = isRerunSlot(s);
             const count = (s.candidates || []).length;
             const first = rerun
                 ? 'Rerun · yesterday primetime'
                 : (count ? candidateSummary(s.candidates[0]) : 'Empty slot');
-            const span = Math.max(1, s.spanSlots || 1);
+            const span = slotSpan(s);
+            for (let j = i; j < i + span && j < 48; j++) {
+                occupied[j] = true;
+            }
+
             const spanLabel = span > 1 ? ` · ${span * 30}m` : '';
             const typeClass = lineupSlotColorClass(s);
-            const classes = ['slot-card', rerun ? 'rerun-slot' : (count ? 'has-items' : 'empty'), typeClass]
+            const classes = ['slot-card', rerun ? 'rerun-slot' : (count ? 'has-items' : 'empty'), typeClass, span > 1 ? 'span-block' : '']
                 .filter(Boolean)
                 .join(' ');
-            return `<div class="${classes}" data-slot="${s.slotIndex}" style="${span > 1 ? '--slot-span:' + span + ';grid-column:span ' + span : ''}">
+            html += `<div class="${classes}" data-slot="${s.slotIndex}" style="${span > 1 ? '--slot-span:' + span + ';grid-column:span ' + span : ''}">
                 <div class="time">${slotTime(s.slotIndex)}${spanLabel}</div>
                 <div class="summary">${escapeHtml(first)}</div>
                 <div class="count">${rerun ? 'Rerun slot' : `${count} candidate${count === 1 ? '' : 's'}`}</div>
             </div>`;
-        }).join('');
+        }
 
+        grid.innerHTML = html;
         grid.querySelectorAll('.slot-card').forEach((card) => {
             card.onclick = () => openSlotEditor(parseInt(card.dataset.slot, 10));
         });
     }
 
+    function weekLineupLabel(override) {
+        if (!override) {
+            return 'week lineup';
+        }
+        if (override.name) {
+            return override.name;
+        }
+        if (override.kind === 1 && override.specificDate) {
+            return override.specificDate;
+        }
+        if (override.dayOfWeek !== undefined && override.dayOfWeek !== null) {
+            return DAYS[override.dayOfWeek] || 'week lineup';
+        }
+        return 'week lineup';
+    }
+
+    function selectedWeekLineup() {
+        if (!selectedLineupOverrideId) {
+            return null;
+        }
+        return lineupOverrides.find((o) => o.id === selectedLineupOverrideId) || null;
+    }
+
+    function cloneLineupSlots(slots) {
+        return (slots || []).map((s) => ({
+            ...s,
+            slotIndex: s.slotIndex ?? s.SlotIndex,
+            spanSlots: s.spanSlots ?? s.SpanSlots ?? 1,
+            isRerunSlot: !!(s.isRerunSlot || s.IsRerunSlot),
+            candidates: (s.candidates || s.Candidates || []).map((c) => ({ ...c }))
+        }));
+    }
+
+    function applyLoadedLineupSlots(slots, kinds) {
+        lineupSlots = compactLineupSlots(cloneLineupSlots(slots));
+        if (lineupSlots.length === 0) {
+            lineupSlots = Array.from({ length: 48 }, (_, i) => ({ slotIndex: i, candidates: [] }));
+        }
+        applyLineupSlotKinds(lineupSlots, kinds);
+    }
+
+    function isoDateValue(value) {
+        if (!value) {
+            return '';
+        }
+        if (typeof value === 'string') {
+            return value.slice(0, 10);
+        }
+        return String(value);
+    }
+
+    async function selectWeekLineup(overrideId) {
+        if (!overrideId || lineupIsWeather) {
+            return;
+        }
+
+        const fallback = lineupOverrides.find((o) => o.id === overrideId);
+        try {
+            const dateVal = $('lineup-preview-date')?.value || todayIsoDate();
+            const data = await api('/lineups/overrides/' + overrideId + '?date=' + encodeURIComponent(dateVal));
+            selectedLineupOverrideId = data.id || overrideId;
+            applyLoadedLineupSlots(data.slots, data.slotKinds);
+            const aligned = isoDateValue(data.date);
+            const previewDate = $('lineup-preview-date');
+            if (aligned && previewDate) {
+                previewDate.value = aligned;
+            }
+        } catch (err) {
+            if (!fallback) {
+                reportApiError(err, 'Could not load week lineup.');
+                return;
+            }
+            selectedLineupOverrideId = fallback.id;
+            applyLoadedLineupSlots(fallback.slots || fallback.Slots, null);
+        }
+
+        await collectItemIdsFromSlots(lineupSlots);
+        lineupSlots = compactLineupSlots(lineupSlots);
+        updateLineupToolbarState();
+        renderLineupGrid();
+        renderOverrideList();
+        $('lineup-preview-banner')?.classList.add('hidden');
+        await loadLineupPlayoutStatus();
+    }
+
     function renderOverrideList() {
         const el = $('override-list');
         if (!lineupOverrides.length) {
-            el.innerHTML = '<div class="empty-state">No override lineups configured.</div>';
+            el.innerHTML = '<div class="empty-state">No week lineups configured.</div>';
             return;
         }
 
@@ -1992,7 +2147,8 @@
             const when = o.kind === 1 && o.specificDate
                 ? o.specificDate
                 : (o.dayOfWeek !== undefined && o.dayOfWeek !== null ? DAYS[o.dayOfWeek] : 'Schedule');
-            return `<div class="override-card">
+            const selected = o.id === selectedLineupOverrideId ? ' selected' : '';
+            return `<div class="override-card${selected}" data-override-id="${o.id}" role="button" tabindex="0" aria-pressed="${o.id === selectedLineupOverrideId ? 'true' : 'false'}">
                 <div>
                     <strong>${escapeHtml(o.name)}</strong>
                     <div class="meta">${when} · ${(o.slots || []).filter((s) => (s.candidates || []).length).length} filled slots</div>
@@ -2004,7 +2160,26 @@
         }).join('');
 
         el.querySelectorAll('[data-delete-override]').forEach((btn) => {
-            btn.onclick = () => deleteOverride(btn.dataset.deleteOverride);
+            btn.onclick = (ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                deleteOverride(btn.dataset.deleteOverride);
+            };
+        });
+        el.querySelectorAll('.override-card[data-override-id]').forEach((card) => {
+            card.onclick = (ev) => {
+                if (ev.target.closest('[data-delete-override]')) {
+                    return;
+                }
+                selectWeekLineup(card.dataset.overrideId);
+            };
+            card.onkeydown = (ev) => {
+                if (ev.key !== 'Enter' && ev.key !== ' ') {
+                    return;
+                }
+                ev.preventDefault();
+                selectWeekLineup(card.dataset.overrideId);
+            };
         });
     }
 
@@ -2126,6 +2301,15 @@
                         weight: 1,
                         sortOrder: slot.candidates.length
                     });
+                    const type = String(row.dataset.type || '').toLowerCase();
+                    const runtime = row.dataset.runtime ? parseInt(row.dataset.runtime, 10) : 0;
+                    if (type === 'movie' && runtime > 30) {
+                        slot.spanSlots = Math.max(slotSpan(slot), spanFromRuntimeMinutes(runtime));
+                        const spanInput = document.getElementById('slot-span-slots');
+                        if (spanInput) {
+                            spanInput.value = String(slot.spanSlots);
+                        }
+                    }
                     refreshCandidateList(slot);
                     toast('Item added to slot.', 'success');
                 };
@@ -2138,9 +2322,19 @@
             slot.isRerunSlot = !!document.getElementById('slot-rerun')?.checked;
             delete slot.slotKind;
             delete slot.isShortEpisodeBlock;
+            lineupSlots.forEach((s) => {
+                if (s.slotIndex < index && s.slotIndex + slotSpan(s) > index) {
+                    s.spanSlots = Math.max(1, index - s.slotIndex);
+                }
+            });
+            lineupSlots = lineupSlots.filter((s) =>
+                s.slotIndex === index
+                || s.slotIndex < index
+                || s.slotIndex >= index + slot.spanSlots);
             const idx = lineupSlots.findIndex((s) => s.slotIndex === index);
             if (idx >= 0) lineupSlots[idx] = slot;
             else lineupSlots.push(slot);
+            lineupSlots = compactLineupSlots(lineupSlots);
             closeModal();
             renderLineupGrid();
             toast('Slot updated. Click Save Lineup to persist.', 'success');
@@ -2185,8 +2379,25 @@
 
     async function saveLineup() {
         try {
-            await api('/lineups/' + selectedChannelId, { method: 'PUT', body: JSON.stringify(lineupSlots) });
-            toast('Lineup saved. Playout rebuild started in background.', 'success');
+            const selected = selectedWeekLineup();
+            if (selected) {
+                await api('/lineups/overrides/' + selected.id, {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        name: selected.name,
+                        kind: selected.kind,
+                        dayOfWeek: selected.dayOfWeek,
+                        specificDate: selected.specificDate,
+                        slots: compactLineupSlots(lineupSlots)
+                    })
+                });
+                selected.slots = cloneLineupSlots(compactLineupSlots(lineupSlots));
+                renderOverrideList();
+                toast('Week lineup saved. Playout rebuild started in background.', 'success');
+            } else {
+                await api('/lineups/' + selectedChannelId, { method: 'PUT', body: JSON.stringify(compactLineupSlots(lineupSlots)) });
+                toast('Lineup saved. Playout rebuild started in background.', 'success');
+            }
             await loadLineupPlayoutStatus();
         } catch (err) {
             toast(err.message, 'error');
@@ -2242,7 +2453,14 @@
             });
             renderLineupGrid();
 
-            const filled = (data.slots || []).filter((s) => s.candidateCount > 0).length;
+            const filled = (data.slots || []).reduce((sum, s) => {
+                const count = Number(s.candidateCount || 0);
+                if (!count && !isRerunSlot(s)) {
+                    return sum;
+                }
+
+                return sum + slotSpan(s);
+            }, 0);
             $('lineup-preview-banner').classList.remove('hidden');
             $('lineup-preview-banner').textContent = `Preview for ${data.date}: ${filled}/48 slots have candidates.`;
         } catch (err) {
@@ -2305,10 +2523,13 @@
     }
 
     async function deleteOverride(id) {
-        if (!confirm('Delete this override lineup?')) return;
+        if (!confirm('Delete this week lineup?')) return;
         try {
             await api('/lineups/overrides/' + id, { method: 'DELETE' });
-            toast('Override deleted.', 'success');
+            if (selectedLineupOverrideId === id) {
+                selectedLineupOverrideId = null;
+            }
+            toast('Week lineup deleted.', 'success');
             await loadLineups();
         } catch (err) {
             toast(err.message, 'error');

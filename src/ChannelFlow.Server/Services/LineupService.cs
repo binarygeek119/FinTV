@@ -27,31 +27,54 @@ public class LineupService
 
     public async Task<Lineup?> GetDefaultLineupAsync(Guid channelId, CancellationToken cancellationToken = default)
     {
-        return await _db.Lineups
+        var lineup = await _db.Lineups
+            .AsNoTracking()
             .AsSplitQuery()
             .Include(l => l.Slots.OrderBy(s => s.SlotIndex))
                 .ThenInclude(s => s.Candidates.OrderBy(c => c.SortOrder))
             .FirstOrDefaultAsync(l => l.ChannelId == channelId && l.IsDefault, cancellationToken);
+        if (lineup is not null)
+        {
+            lineup.Slots = await ApplyRuntimeSpansAsync(lineup.Slots, cancellationToken);
+        }
+
+        return lineup;
     }
 
     public async Task<List<LineupOverride>> GetOverridesAsync(Guid channelId, CancellationToken cancellationToken = default)
     {
-        return await _db.LineupOverrides
+        var overrides = await _db.LineupOverrides
             .AsSplitQuery()
             .Include(o => o.Slots.OrderBy(s => s.SlotIndex))
                 .ThenInclude(s => s.Candidates.OrderBy(c => c.SortOrder))
             .Where(o => o.ChannelId == channelId)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
+        var overrideRuntimes = await LoadRuntimeMinutesAsync(
+            overrides.SelectMany(o => o.Slots),
+            cancellationToken);
+        foreach (var item in overrides)
+        {
+            item.Slots = LineupSlotSpans.ExpandUsingRuntimes(item.Slots, overrideRuntimes);
+        }
+
+        return overrides;
     }
 
     public async Task<LineupOverride?> GetOverrideAsync(Guid overrideId, CancellationToken cancellationToken = default)
     {
-        return await _db.LineupOverrides
+        var entity = await _db.LineupOverrides
+            .AsNoTracking()
             .AsSplitQuery()
             .Include(o => o.Slots.OrderBy(s => s.SlotIndex))
                 .ThenInclude(s => s.Candidates)
             .FirstOrDefaultAsync(o => o.Id == overrideId, cancellationToken);
+        if (entity is not null)
+        {
+            entity.Slots = await ApplyRuntimeSpansAsync(entity.Slots, cancellationToken);
+        }
+
+        return entity;
     }
 
     public async Task UpdateDefaultSlotsAsync(Guid channelId, IReadOnlyList<LineupSlotDto> slots, CancellationToken cancellationToken = default)
@@ -103,7 +126,11 @@ public class LineupService
                 Kind = LineupOverrideKind.DayOfWeek,
                 DayOfWeek = day,
                 Name = day.ToString(),
-                Slots = slots.Select(s => MapSlot(s, null, null)).ToList()
+                Slots = LineupSlotSpans.ExpandUsingRuntimes(
+                        slots,
+                        await LoadRuntimeMinutesAsync(slots, cancellationToken))
+                    .Select(s => MapSlot(s, null, null))
+                    .ToList()
             };
             foreach (var slot in entity.Slots)
             {
@@ -127,7 +154,11 @@ public class LineupService
             DayOfWeek = dto.DayOfWeek,
             SpecificDate = dto.SpecificDate,
             Name = dto.Name,
-            Slots = dto.Slots.Select(s => MapSlot(s, null, null)).ToList()
+            Slots = LineupSlotSpans.ExpandUsingRuntimes(
+                    dto.Slots,
+                    await LoadRuntimeMinutesAsync(dto.Slots, cancellationToken))
+                .Select(s => MapSlot(s, null, null))
+                .ToList()
         };
 
         foreach (var slot in entity.Slots)
@@ -236,7 +267,8 @@ public class LineupService
 
         existingCollection.Clear();
 
-        foreach (var dto in incoming.OrderBy(s => s.SlotIndex))
+        var runtimes = await LoadRuntimeMinutesAsync(incoming, cancellationToken);
+        foreach (var dto in LineupSlotSpans.ExpandUsingRuntimes(incoming, runtimes))
         {
             var slot = MapSlot(dto, lineupId, overrideId);
             existingCollection.Add(slot);
@@ -302,8 +334,18 @@ public class LineupService
             .Include(l => l.Slots.OrderBy(s => s.SlotIndex))
                 .ThenInclude(s => s.Candidates.OrderBy(c => c.SortOrder))
             .FirstOrDefaultAsync(l => l.ChannelId == channelId && l.IsDefault, cancellationToken);
+
         var presentations = await _specialPresentations.GetForChannelAsync(channelId, cancellationToken);
-        return new LineupResolutionSnapshot(false, defaultLineup, overrides, presentations);
+        var runtimeIds = CandidateIds(defaultLineup?.Slots)
+            .Concat(overrides.SelectMany(o => CandidateIds(o.Slots)))
+            .Concat(presentations.SelectMany(p => p.Candidates.Select(c => c.JellyfinItemId)));
+        var runtimes = await LoadRuntimeMinutesAsync(runtimeIds, cancellationToken);
+        if (defaultLineup is not null)
+        {
+            defaultLineup.Slots = LineupSlotSpans.ExpandUsingRuntimes(defaultLineup.Slots, runtimes);
+        }
+
+        return new LineupResolutionSnapshot(false, defaultLineup, overrides, presentations, runtimes);
     }
 
     public IReadOnlyList<LineupSlot> ResolveSlotsForDate(LineupResolutionSnapshot snapshot, DateOnly date)
@@ -321,7 +363,9 @@ public class LineupService
             ? match.Slots.OrderBy(s => s.SlotIndex).ToList()
             : snapshot.DefaultLineup?.Slots.OrderBy(s => s.SlotIndex).ToList() ?? new List<LineupSlot>();
 
-        return _specialPresentations.MergeIntoSlots(baseSlots, snapshot.Presentations, date.DayOfWeek);
+        return LineupSlotSpans.ExpandUsingRuntimes(
+            _specialPresentations.MergeIntoSlots(baseSlots, snapshot.Presentations, date.DayOfWeek),
+            snapshot.ItemRuntimeMinutes);
     }
 
     public async Task<IReadOnlyList<LineupSlot>> ResolveSlotsForDateAsync(
@@ -340,6 +384,79 @@ public class LineupService
         {
             throw new InvalidOperationException("Lineup overrides are not supported on live weather or news channels.");
         }
+    }
+
+    private async Task<ICollection<LineupSlot>> ApplyRuntimeSpansAsync(
+        ICollection<LineupSlot> slots,
+        CancellationToken cancellationToken)
+    {
+        var runtimes = await LoadRuntimeMinutesAsync(slots, cancellationToken);
+        return LineupSlotSpans.ExpandUsingRuntimes(slots, runtimes);
+    }
+
+    private Task<Dictionary<Guid, int>> LoadRuntimeMinutesAsync(
+        IEnumerable<LineupSlot> slots,
+        CancellationToken cancellationToken)
+        => LoadRuntimeMinutesAsync(CandidateIds(slots), cancellationToken);
+
+    private Task<Dictionary<Guid, int>> LoadRuntimeMinutesAsync(
+        IEnumerable<LineupSlotDto> slots,
+        CancellationToken cancellationToken)
+        => LoadRuntimeMinutesAsync(CandidateIds(slots), cancellationToken);
+
+    private async Task<Dictionary<Guid, int>> LoadRuntimeMinutesAsync(
+        IEnumerable<Guid?> ids,
+        CancellationToken cancellationToken)
+    {
+        var idList = ids.Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToList();
+        var result = new Dictionary<Guid, int>();
+        if (idList.Count == 0)
+        {
+            return result;
+        }
+
+        var movies = await _db.Movies.AsNoTracking()
+            .Where(m => idList.Contains(m.Id) || idList.Contains(m.JellyfinItemId))
+            .Select(m => new { m.Id, m.JellyfinItemId, m.RuntimeTicks })
+            .ToListAsync(cancellationToken);
+        foreach (var movie in movies)
+        {
+            AddRuntime(result, movie.Id, movie.JellyfinItemId, movie.RuntimeTicks);
+        }
+
+        var episodes = await _db.Episodes.AsNoTracking()
+            .Where(e => idList.Contains(e.Id) || idList.Contains(e.JellyfinItemId))
+            .Select(e => new { e.Id, e.JellyfinItemId, e.RuntimeTicks })
+            .ToListAsync(cancellationToken);
+        foreach (var episode in episodes)
+        {
+            AddRuntime(result, episode.Id, episode.JellyfinItemId, episode.RuntimeTicks);
+        }
+
+        return result;
+    }
+
+    private static IEnumerable<Guid?> CandidateIds(IEnumerable<LineupSlot>? slots)
+        => (slots ?? []).SelectMany(s => s.Candidates).Select(c => c.JellyfinItemId);
+
+    private static IEnumerable<Guid?> CandidateIds(IEnumerable<LineupSlotDto>? slots)
+        => (slots ?? []).SelectMany(s => s.Candidates ?? []).Select(c => c.JellyfinItemId);
+
+    private static void AddRuntime(Dictionary<Guid, int> result, Guid id, Guid jellyfinItemId, long? ticks)
+    {
+        if (ticks is not > 0)
+        {
+            return;
+        }
+
+        var minutes = (int)Math.Round(TimeSpan.FromTicks(ticks.Value).TotalMinutes);
+        if (minutes <= LineupSlotSpans.MinutesPerSlot)
+        {
+            return;
+        }
+
+        result[id] = minutes;
+        result[jellyfinItemId] = minutes;
     }
 
     private static LineupSlot MapSlot(LineupSlotDto dto, Guid? lineupId, Guid? overrideId)
@@ -375,12 +492,14 @@ public sealed class LineupResolutionSnapshot
         bool isContinuousLive,
         Lineup? defaultLineup,
         IReadOnlyList<LineupOverride> overrides,
-        IReadOnlyList<SpecialPresentation> presentations)
+        IReadOnlyList<SpecialPresentation> presentations,
+        IReadOnlyDictionary<Guid, int>? itemRuntimeMinutes = null)
     {
         IsContinuousLive = isContinuousLive;
         DefaultLineup = defaultLineup;
         Overrides = overrides;
         Presentations = presentations;
+        ItemRuntimeMinutes = itemRuntimeMinutes ?? new Dictionary<Guid, int>();
     }
 
     public bool IsContinuousLive { get; }
@@ -390,6 +509,8 @@ public sealed class LineupResolutionSnapshot
     public IReadOnlyList<LineupOverride> Overrides { get; }
 
     public IReadOnlyList<SpecialPresentation> Presentations { get; }
+
+    public IReadOnlyDictionary<Guid, int> ItemRuntimeMinutes { get; }
 }
 
 public class LineupSlotDto

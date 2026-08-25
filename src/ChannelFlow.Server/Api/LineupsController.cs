@@ -150,6 +150,54 @@ public class LineupsController : ControllerBase
     }
 
     /// <summary>
+    /// Gets a week/day lineup override and slot colors for the grid.
+    /// </summary>
+    /// <param name="overrideId">Override identifier.</param>
+    /// <param name="date">Optional calendar date used to color slots from that day's playout.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Override slots and timeslot kinds.</returns>
+    [HttpGet("overrides/{overrideId:guid}")]
+    public async Task<ActionResult<object>> GetOverride(
+        Guid overrideId,
+        [FromQuery] string? date,
+        CancellationToken cancellationToken)
+    {
+        var entity = await _lineups.GetOverrideAsync(overrideId, cancellationToken);
+        if (entity is null)
+        {
+            return NotFound();
+        }
+
+        var channel = await _channels.GetByIdAsync(entity.ChannelId, cancellationToken);
+        if (channel is null)
+        {
+            return NotFound();
+        }
+
+        var slots = LineupSlotSpans.Compact(entity.Slots.OrderBy(s => s.SlotIndex));
+        var classifyDate = AlignLineupDate(ParseLineupDate(date), entity);
+        var slotKinds = await _slotKinds.ClassifyAsync(
+            channel.Id,
+            channel.ContentType,
+            slots,
+            classifyDate,
+            cancellationToken);
+
+        return Ok(new
+        {
+            id = entity.Id,
+            name = entity.Name,
+            kind = entity.Kind,
+            dayOfWeek = entity.DayOfWeek,
+            specificDate = entity.SpecificDate,
+            channelId = entity.ChannelId,
+            date = classifyDate,
+            slots,
+            slotKinds
+        });
+    }
+
+    /// <summary>
     /// Updates an existing lineup override.
     /// </summary>
     /// <param name="overrideId">Override identifier.</param>
@@ -160,7 +208,13 @@ public class LineupsController : ControllerBase
     public async Task<ActionResult<LineupOverride>> UpdateOverride(Guid overrideId, [FromBody] LineupOverrideDto dto, CancellationToken cancellationToken)
     {
         var updated = await _lineups.UpdateOverrideAsync(overrideId, dto, cancellationToken);
-        return updated is null ? NotFound() : updated;
+        if (updated is null)
+        {
+            return NotFound();
+        }
+
+        _playoutBuilder.QueueRebuildChannel(updated.ChannelId);
+        return updated;
     }
 
     /// <summary>
@@ -234,6 +288,7 @@ public class LineupsController : ControllerBase
                 return new
                 {
                     s.SlotIndex,
+                    spanSlots = s.SpanSlots,
                     candidateCount = s.Candidates.Count,
                     candidates = s.Candidates,
                     slotKind = kind,
@@ -317,6 +372,22 @@ public class LineupsController : ControllerBase
         var tz = ScheduleTimeZoneHelper.ResolveScheduleTimeZone();
         var local = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz);
         return DateOnly.FromDateTime(local);
+    }
+
+    private static DateOnly AlignLineupDate(DateOnly date, LineupOverride entity)
+    {
+        if (entity.Kind == LineupOverrideKind.SpecificDate && entity.SpecificDate.HasValue)
+        {
+            return entity.SpecificDate.Value;
+        }
+
+        if (entity.Kind == LineupOverrideKind.DayOfWeek && entity.DayOfWeek.HasValue)
+        {
+            var delta = ((int)date.DayOfWeek - (int)entity.DayOfWeek.Value + 7) % 7;
+            return date.AddDays(-delta);
+        }
+
+        return date;
     }
 }
 
