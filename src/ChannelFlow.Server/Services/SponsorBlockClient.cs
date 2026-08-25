@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
@@ -8,6 +9,9 @@ namespace FinTv.Services;
 
 public sealed class SponsorBlockClient
 {
+    private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(30);
+    private static readonly ConcurrentDictionary<string, CacheEntry> Cache = new(StringComparer.Ordinal);
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<SponsorBlockClient> _logger;
 
@@ -29,6 +33,12 @@ public sealed class SponsorBlockClient
         }
 
         var categories = YouTubeSettings.NormalizeCategories(settings.SponsorBlockCategories);
+        var cacheKey = id + "|" + string.Join(',', categories);
+        if (Cache.TryGetValue(cacheKey, out var cached) && cached.ExpiresUtc > DateTime.UtcNow)
+        {
+            return cached.Ranges;
+        }
+
         var query = string.Join('&', categories.Select(category => "category=" + Uri.EscapeDataString(category)));
         var url = $"https://sponsor.ajay.app/api/skipSegments?videoID={Uri.EscapeDataString(id)}&{query}";
 
@@ -38,7 +48,7 @@ public sealed class SponsorBlockClient
             using var response = await client.GetAsync(url, cancellationToken);
             if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
-                return [];
+                return Remember(cacheKey, []);
             }
 
             if (!response.IsSuccessStatusCode)
@@ -57,7 +67,7 @@ public sealed class SponsorBlockClient
                 .Select(range => range!)
                 .ToList();
 
-            return FfmpegSkipCuts.Merge(ranges);
+            return Remember(cacheKey, FfmpegSkipCuts.Merge(ranges));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -65,6 +75,14 @@ public sealed class SponsorBlockClient
             return [];
         }
     }
+
+    private static IReadOnlyList<SponsorSkipRange> Remember(string cacheKey, IReadOnlyList<SponsorSkipRange> ranges)
+    {
+        Cache[cacheKey] = new CacheEntry(ranges, DateTime.UtcNow.Add(CacheDuration));
+        return ranges;
+    }
+
+    private readonly record struct CacheEntry(IReadOnlyList<SponsorSkipRange> Ranges, DateTime ExpiresUtc);
 
     private static SponsorSkipRange? ToRange(SponsorBlockSegment segment)
     {

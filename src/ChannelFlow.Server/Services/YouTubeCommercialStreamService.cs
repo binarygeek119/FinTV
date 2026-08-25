@@ -195,20 +195,42 @@ public class YouTubeCommercialStreamService
         Stream output,
         CancellationToken cancellationToken)
     {
+        var ytDlpError = new StringBuilder();
         var ytDlp = Cli.Wrap(ytDlpPath)
-            .WithArguments(BuildYtDlpArgs(settings, ["-f", "b", "-o", "-", youtubeUrl]))
+            .WithArguments(BuildYtDlpArgs(settings, [
+                "-f", GetPipeFormat(settings),
+                "--merge-output-format", "mkv",
+                "--remux-video", "mkv",
+                "-o", "-",
+                youtubeUrl
+            ]))
+            .WithStandardErrorPipe(PipeTarget.ToStringBuilder(ytDlpError))
             .WithValidation(CommandResultValidation.None);
 
         var ffmpegArgs = ffmpeg.BuildRemoteMediaCommand(channel, "pipe:0", 0, durationSeconds, null, skipRanges, overlayBug: false);
-
-        await Cli.Wrap(ffmpegPath)
+        var ffmpegError = new StringBuilder();
+        var result = await Cli.Wrap(ffmpegPath)
             .WithArguments(ffmpegArgs)
             .WithStandardInputPipe(PipeSource.FromCommand(ytDlp))
             .WithStandardOutputPipe(PipeTarget.ToStream(output))
-            .WithStandardErrorPipe(PipeTarget.ToStringBuilder(new StringBuilder()))
+            .WithStandardErrorPipe(PipeTarget.ToStringBuilder(ffmpegError))
             .WithValidation(CommandResultValidation.None)
             .ExecuteAsync(cancellationToken);
+
+        if (result.ExitCode != 0 && !cancellationToken.IsCancellationRequested)
+        {
+            throw new InvalidOperationException(
+                "YouTube pipe ffmpeg exited "
+                + result.ExitCode
+                + ": "
+                + TrimProcessOutput(ffmpegError, ytDlpError));
+        }
     }
+
+    private string GetPipeFormat(YouTubeSettings settings)
+        => settings.PreferPremium && _cookies.HasCookies()
+            ? "bv*[height<=1080]+ba/b"
+            : "bv*+ba/b";
 
     private async Task<string?> ResolveStreamUrlAsync(
         string ytDlpPath,
@@ -259,7 +281,8 @@ public class YouTubeCommercialStreamService
             "--no-playlist",
             "--no-part",
             "--no-cache-dir",
-            "--no-warnings"
+            "--no-warnings",
+            "--no-progress"
         };
 
         var cookiePath = _cookies.GetPathIfPresent();
@@ -279,17 +302,39 @@ public class YouTubeCommercialStreamService
         return args;
     }
 
-    private static Task RunFfmpegToStreamAsync(
+    private static async Task RunFfmpegToStreamAsync(
         string ffmpegPath,
         IReadOnlyList<string> args,
         Stream output,
         CancellationToken cancellationToken)
     {
-        return Cli.Wrap(ffmpegPath)
+        var stderr = new StringBuilder();
+        var result = await Cli.Wrap(ffmpegPath)
             .WithArguments(args)
             .WithStandardOutputPipe(PipeTarget.ToStream(output))
-            .WithStandardErrorPipe(PipeTarget.ToStringBuilder(new StringBuilder()))
+            .WithStandardErrorPipe(PipeTarget.ToStringBuilder(stderr))
             .WithValidation(CommandResultValidation.None)
             .ExecuteAsync(cancellationToken);
+
+        if (result.ExitCode != 0 && !cancellationToken.IsCancellationRequested)
+        {
+            throw new InvalidOperationException(
+                "ffmpeg exited " + result.ExitCode + ": " + TrimProcessOutput(stderr));
+        }
+    }
+
+    private static string TrimProcessOutput(params StringBuilder[] outputs)
+    {
+        var text = string.Join(
+            " | ",
+            outputs
+                .Select(output => output.ToString().Trim())
+                .Where(line => line.Length > 0));
+        if (text.Length <= 1500)
+        {
+            return text;
+        }
+
+        return text[^1500..];
     }
 }

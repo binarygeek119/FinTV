@@ -109,17 +109,31 @@ public class FfmpegCommandBuilder
         }
 
         args.AddRange(context.HardwareDeviceArgs);
-        if (!string.Equals(inputPath, "pipe:0", StringComparison.Ordinal))
+        var isPipe = string.Equals(inputPath, "pipe:0", StringComparison.Ordinal);
+        if (!isPipe)
         {
             args.AddRange(context.HardwareDecodeArgs);
         }
 
-        args.AddRange(new[]
+        if (isPipe)
         {
-            "-ss", startSeconds.ToString("F3", CultureInfo.InvariantCulture),
-            "-t", durationSeconds.ToString("F3", CultureInfo.InvariantCulture),
-            "-i", inputPath
-        });
+            args.AddRange(new[]
+            {
+                "-fflags", "+genpts",
+                "-probesize", "5000000",
+                "-analyzeduration", "5000000"
+            });
+        }
+        else
+        {
+            args.AddRange(new[]
+            {
+                "-ss", startSeconds.ToString("F3", CultureInfo.InvariantCulture),
+                "-t", durationSeconds.ToString("F3", CultureInfo.InvariantCulture)
+            });
+        }
+
+        args.AddRange(new[] { "-i", inputPath });
         AppendMediaVideoGraph(
             args,
             context,
@@ -149,7 +163,18 @@ public class FfmpegCommandBuilder
             "-c:a", "aac",
             "-b:a", "192k",
             "-ac", "2",
-            "-ar", "48000",
+            "-ar", "48000"
+        });
+        if (isPipe)
+        {
+            args.AddRange(new[]
+            {
+                "-t", durationSeconds.ToString("F3", CultureInfo.InvariantCulture)
+            });
+        }
+
+        args.AddRange(new[]
+        {
             "-f", "mpegts",
             "-mpegts_flags", "+initial_discontinuity",
             "pipe:1"
