@@ -1,3 +1,4 @@
+using FinTv.Configuration;
 using FinTv.Data;
 using FinTv.Domain;
 using Microsoft.EntityFrameworkCore;
@@ -65,6 +66,7 @@ public class CommercialService
 
         var cursor = start;
         var programs = new List<PlayoutItem>();
+        var rotation = await CreateRotationAsync(channel, start, cancellationToken);
 
         if (preCount > 0)
         {
@@ -73,7 +75,8 @@ public class CommercialService
                 cursor,
                 preCount,
                 FillerKind.PreRoll,
-                cancellationToken);
+                cancellationToken,
+                rotation);
         }
 
         var segmentStart = TimeSpan.Zero;
@@ -96,7 +99,8 @@ public class CommercialService
                     cursor,
                     midCount,
                     FillerKind.MidRoll,
-                    cancellationToken);
+                    cancellationToken,
+                    rotation);
             }
         }
 
@@ -108,7 +112,7 @@ public class CommercialService
         }
 
         var padUntil = preferredSlotEnd > cursor ? preferredSlotEnd : cursor;
-        await FillSlotPaddingAsync(channel, preset, cursor, padUntil, cancellationToken);
+        await FillSlotPaddingAsync(channel, preset, cursor, padUntil, cancellationToken, rotation);
         if (padUntil > cursor)
         {
             cursor = padUntil;
@@ -140,7 +144,8 @@ public class CommercialService
         CommercialPreset? preset,
         DateTime from,
         DateTime? slotEnd,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        CommercialRotationState? rotation = null)
     {
         if (slotEnd is not DateTime until || until <= from)
         {
@@ -148,8 +153,8 @@ public class CommercialService
         }
 
         _ = preset;
-        var pool = await PickCommercialsAsync(channel, 32, cancellationToken);
-        if (pool.Count == 0)
+        rotation ??= await CreateRotationAsync(channel, from, cancellationToken);
+        if (rotation.Buckets.Count == 0)
         {
             _db.PlayoutItems.Add(new PlayoutItem
             {
@@ -174,31 +179,14 @@ public class CommercialService
                 break;
             }
 
-            var fitting = pool
-                .Where(commercial => commercial.Duration > TimeSpan.Zero && commercial.Duration <= remaining)
-                .ToList();
-            Commercial pick;
-            DateTime end;
-            if (fitting.Count > 0)
+            var pick = PickNextCommercial(rotation, remaining)
+                ?? PickNextCommercial(rotation, maxDuration: null);
+            if (pick is null || pick.Duration <= TimeSpan.Zero)
             {
-                pick = fitting[Random.Shared.Next(fitting.Count)];
-                end = cursor.Add(pick.Duration);
-            }
-            else
-            {
-                pick = pool
-                    .Where(commercial => commercial.Duration > TimeSpan.Zero)
-                    .OrderBy(commercial => commercial.Duration)
-                    .FirstOrDefault()
-                    ?? pool[0];
-                if (pick.Duration <= TimeSpan.Zero)
-                {
-                    break;
-                }
-
-                end = until;
+                break;
             }
 
+            var end = pick.Duration <= remaining ? cursor.Add(pick.Duration) : until;
             AddCommercialPlayoutItem(channel.Id, pick, cursor, end, FillerKind.PostRoll);
             cursor = end;
         }
@@ -228,55 +216,20 @@ public class CommercialService
 
     public async Task<List<Commercial>> PickCommercialsAsync(Channel channel, int count, CancellationToken cancellationToken)
     {
-        var config = FinTvRuntime.Current?.Configuration;
-        var playlistIds = channel.CommercialSearchPlaylistIds;
-        var query = _db.Commercials.AsNoTracking().AsQueryable();
-        HashSet<string>? playlistSbids = null;
-
-        if (playlistIds.Count > 0)
+        var rotation = await CreateRotationAsync(channel, DateTime.UtcNow, cancellationToken);
+        var picks = new List<Commercial>();
+        for (var i = 0; i < Math.Max(0, count); i++)
         {
-            playlistSbids = (config?.CommercialSearchPlaylists ?? new List<Configuration.CommercialSearchPlaylist>())
-                .Where(playlist => playlistIds.Contains(playlist.Id))
-                .SelectMany(playlist => playlist.VideoSbids ?? new List<string>())
-                .Where(sbid => !string.IsNullOrWhiteSpace(sbid))
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            if (playlistSbids.Count == 0)
+            var pick = PickNextCommercial(rotation, maxDuration: null);
+            if (pick is null)
             {
-                return new List<Commercial>();
+                break;
             }
 
-            query = query.Where(c =>
-                c.Source == CommercialSource.CommercialBrainz
-                && c.CommercialBrainzVideoSbid != null);
-        }
-        else
-        {
-            var poolMode = config?.CommercialBrainz?.PoolMode ?? CommercialPoolMode.Both;
-            query = poolMode switch
-            {
-                CommercialPoolMode.JellyfinOnly => query.Where(c => c.Source == CommercialSource.Jellyfin),
-                CommercialPoolMode.CommercialBrainzOnly => query.Where(c => c.Source == CommercialSource.CommercialBrainz),
-                _ => query
-            };
+            picks.Add(pick);
         }
 
-        var all = await query.ToListAsync(cancellationToken);
-        if (playlistSbids is not null)
-        {
-            all = all
-                .Where(c => c.CommercialBrainzVideoSbid != null && playlistSbids.Contains(c.CommercialBrainzVideoSbid))
-                .ToList();
-        }
-        if (all.Count == 0)
-        {
-            return new List<Commercial>();
-        }
-
-        var rng = Random.Shared;
-        return Enumerable.Range(0, count)
-            .Select(_ => all[rng.Next(all.Count)])
-            .ToList();
+        return picks;
     }
 
     public async Task SyncCommercialLibraryAsync(CancellationToken cancellationToken = default)
@@ -341,15 +294,17 @@ public class CommercialService
         DateTime start,
         int count,
         FillerKind fillerKind,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        CommercialRotationState? rotation = null)
     {
-        var commercials = await PickCommercialsAsync(channel, Math.Max(1, count), cancellationToken);
+        rotation ??= await CreateRotationAsync(channel, start, cancellationToken);
         var cursor = start;
-        foreach (var commercial in commercials)
+        for (var i = 0; i < Math.Max(1, count); i++)
         {
-            if (commercial.Duration <= TimeSpan.Zero)
+            var commercial = PickNextCommercial(rotation, maxDuration: null);
+            if (commercial is null || commercial.Duration <= TimeSpan.Zero)
             {
-                continue;
+                break;
             }
 
             var end = cursor.Add(commercial.Duration);
@@ -464,6 +419,249 @@ public class CommercialService
         var delaySeconds = Math.Max(1, (int)Math.Round((breakAt - now).TotalSeconds));
         return ForcedCommercialBreakResult.Ok(channel.Name, delaySeconds);
     }
+
+    private async Task<CommercialRotationState> CreateRotationAsync(
+        Channel channel,
+        DateTime before,
+        CancellationToken cancellationToken)
+    {
+        var all = await LoadChannelCommercialsAsync(channel, cancellationToken);
+        var buckets = BuildBuckets(channel, all);
+        var state = new CommercialRotationState { Buckets = buckets };
+        await SeedRotationAsync(channel, before, state, cancellationToken);
+        return state;
+    }
+
+    private async Task<List<Commercial>> LoadChannelCommercialsAsync(Channel channel, CancellationToken cancellationToken)
+    {
+        var config = FinTvRuntime.Current?.Configuration;
+        var playlistIds = channel.CommercialSearchPlaylistIds;
+        var query = _db.Commercials.AsNoTracking().AsQueryable();
+        HashSet<string>? playlistSbids = null;
+
+        if (playlistIds.Count > 0)
+        {
+            playlistSbids = (config?.CommercialSearchPlaylists ?? [])
+                .Where(playlist => playlistIds.Contains(playlist.Id))
+                .SelectMany(playlist => playlist.VideoSbids ?? [])
+                .Where(sbid => !string.IsNullOrWhiteSpace(sbid))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (playlistSbids.Count == 0)
+            {
+                return [];
+            }
+
+            query = query.Where(c =>
+                c.Source == CommercialSource.CommercialBrainz
+                && c.CommercialBrainzVideoSbid != null);
+        }
+        else
+        {
+            var poolMode = config?.CommercialBrainz?.PoolMode ?? CommercialPoolMode.Both;
+            query = poolMode switch
+            {
+                CommercialPoolMode.JellyfinOnly => query.Where(c => c.Source == CommercialSource.Jellyfin),
+                CommercialPoolMode.CommercialBrainzOnly => query.Where(c => c.Source == CommercialSource.CommercialBrainz),
+                _ => query
+            };
+        }
+
+        var all = await query.ToListAsync(cancellationToken);
+        if (playlistSbids is not null)
+        {
+            all = all
+                .Where(c => c.CommercialBrainzVideoSbid != null && playlistSbids.Contains(c.CommercialBrainzVideoSbid))
+                .ToList();
+        }
+
+        return all;
+    }
+
+    private static List<CommercialBucket> BuildBuckets(Channel channel, IReadOnlyList<Commercial> all)
+    {
+        if (all.Count == 0)
+        {
+            return [];
+        }
+
+        var playlists = (FinTvRuntime.Current?.Configuration.CommercialSearchPlaylists ?? [])
+            .Where(playlist => channel.CommercialSearchPlaylistIds.Contains(playlist.Id))
+            .ToList();
+        if (playlists.Count > 0)
+        {
+            var buckets = new List<CommercialBucket>();
+            foreach (var playlist in playlists)
+            {
+                var sbids = (playlist.VideoSbids ?? [])
+                    .Where(sbid => !string.IsNullOrWhiteSpace(sbid))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var items = all
+                    .Where(c => c.CommercialBrainzVideoSbid != null && sbids.Contains(c.CommercialBrainzVideoSbid))
+                    .ToList();
+                if (items.Count == 0)
+                {
+                    continue;
+                }
+
+                buckets.Add(new CommercialBucket(playlist.Id.ToString("N"), playlist.Name, items));
+            }
+
+            if (buckets.Count > 1)
+            {
+                return buckets;
+            }
+
+            if (buckets.Count == 1)
+            {
+                all = buckets[0].Items;
+            }
+        }
+
+        return all
+            .GroupBy(FallbackTypeKey, StringComparer.OrdinalIgnoreCase)
+            .Select(group => new CommercialBucket(group.Key, group.Key, group.ToList()))
+            .Where(bucket => bucket.Items.Count > 0)
+            .ToList();
+    }
+
+    private async Task SeedRotationAsync(
+        Channel channel,
+        DateTime before,
+        CommercialRotationState state,
+        CancellationToken cancellationToken)
+    {
+        var pending = _db.ChangeTracker.Entries<PlayoutItem>()
+            .Select(entry => entry.Entity)
+            .Where(item => item.ChannelId == channel.Id && item.CommercialId.HasValue && item.Start < before)
+            .OrderBy(item => item.Start)
+            .Select(item => item.CommercialId!.Value)
+            .ToList();
+        var recent = await _db.PlayoutItems
+            .AsNoTracking()
+            .Where(item => item.ChannelId == channel.Id && item.CommercialId != null && item.Start < before)
+            .OrderByDescending(item => item.Start)
+            .Take(24)
+            .Select(item => item.CommercialId!.Value)
+            .ToListAsync(cancellationToken);
+        recent.Reverse();
+
+        var history = pending.Count > 0 ? pending : recent;
+        var byId = state.Buckets
+            .SelectMany(bucket => bucket.Items.Select(item => (item.Id, bucket.TypeKey)))
+            .GroupBy(pair => pair.Id)
+            .ToDictionary(group => group.Key, group => group.First().TypeKey);
+        foreach (var commercialId in history)
+        {
+            if (!byId.TryGetValue(commercialId, out var typeKey))
+            {
+                continue;
+            }
+
+            state.LastTypeKey = typeKey;
+            state.LastIndexByType[typeKey] = state.PickCount;
+            state.PickCount++;
+            RememberRecent(state, commercialId);
+        }
+    }
+
+    private static Commercial? PickNextCommercial(CommercialRotationState state, TimeSpan? maxDuration)
+    {
+        if (state.Buckets.Count == 0)
+        {
+            return null;
+        }
+
+        var ranked = new List<(CommercialBucket Bucket, List<Commercial> Fitting, int LastAt)>();
+        foreach (var bucket in state.Buckets)
+        {
+            var fitting = bucket.Items
+                .Where(item => item.Duration > TimeSpan.Zero
+                    && (maxDuration is null || item.Duration <= maxDuration.Value))
+                .ToList();
+            if (fitting.Count == 0)
+            {
+                continue;
+            }
+
+            ranked.Add((
+                bucket,
+                fitting,
+                state.LastIndexByType.GetValueOrDefault(bucket.TypeKey, int.MinValue / 4)));
+        }
+
+        if (ranked.Count == 0)
+        {
+            return null;
+        }
+
+        var withoutLast = ranked
+            .Where(row => !string.Equals(row.Bucket.TypeKey, state.LastTypeKey, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (withoutLast.Count > 0)
+        {
+            ranked = withoutLast;
+        }
+
+        var farthest = ranked.Min(row => row.LastAt);
+        var candidates = ranked.Where(row => row.LastAt == farthest).ToList();
+        var chosen = candidates[Random.Shared.Next(candidates.Count)];
+        var unused = chosen.Fitting.Where(item => !state.RecentIds.Contains(item.Id)).ToList();
+        var pool = unused.Count > 0 ? unused : chosen.Fitting;
+        var pick = pool[Random.Shared.Next(pool.Count)];
+
+        state.LastTypeKey = chosen.Bucket.TypeKey;
+        state.LastIndexByType[chosen.Bucket.TypeKey] = state.PickCount;
+        state.PickCount++;
+        RememberRecent(state, pick.Id);
+        return pick;
+    }
+
+    private static void RememberRecent(CommercialRotationState state, Guid commercialId)
+    {
+        if (!state.RecentIds.Add(commercialId))
+        {
+            return;
+        }
+
+        state.RecentOrder.Enqueue(commercialId);
+        while (state.RecentOrder.Count > 12)
+        {
+            var oldest = state.RecentOrder.Dequeue();
+            state.RecentIds.Remove(oldest);
+        }
+    }
+
+    private static string FallbackTypeKey(Commercial commercial)
+    {
+        if (!string.IsNullOrWhiteSpace(commercial.Brand))
+        {
+            return "brand:" + commercial.Brand.Trim().ToLowerInvariant();
+        }
+
+        if (commercial.Decade is int decade)
+        {
+            return "decade:" + decade;
+        }
+
+        return "source:" + commercial.Source;
+    }
+
+    private sealed class CommercialRotationState
+    {
+        public List<CommercialBucket> Buckets { get; init; } = [];
+
+        public string? LastTypeKey { get; set; }
+
+        public Dictionary<string, int> LastIndexByType { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public Queue<Guid> RecentOrder { get; } = new();
+
+        public HashSet<Guid> RecentIds { get; } = [];
+
+        public int PickCount { get; set; }
+    }
+
+    private sealed record CommercialBucket(string TypeKey, string Label, List<Commercial> Items);
 
     private PlayoutItem AddProgramSegment(
         Channel channel,
