@@ -307,6 +307,8 @@ public class StreamService : IDisposable
         {
             session.DropReplayAndResetPace();
         }
+
+        _logger.LogInformation("Cutting the current encode on {ChannelId} so it matches the new playout", channelId);
     }
 
     private CancellationTokenSource CreateItemCutCts(Guid channelId)

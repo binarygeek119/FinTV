@@ -14,6 +14,7 @@ public class LineupGeneratorService
     private readonly ChannelService _channelService;
     private readonly HolidayChannelService _holidays;
     private readonly GuideUpdateTracker _guideUpdates;
+    private readonly StreamService _stream;
 
     public LineupGeneratorService(
         FinTvDbContext db,
@@ -22,7 +23,8 @@ public class LineupGeneratorService
         CommercialService commercialService,
         ChannelService channelService,
         HolidayChannelService holidays,
-        GuideUpdateTracker guideUpdates)
+        GuideUpdateTracker guideUpdates,
+        StreamService stream)
     {
         _db = db;
         _lineupService = lineupService;
@@ -31,6 +33,7 @@ public class LineupGeneratorService
         _channelService = channelService;
         _holidays = holidays;
         _guideUpdates = guideUpdates;
+        _stream = stream;
     }
 
     public async Task BuildPlayoutAsync(
@@ -43,7 +46,7 @@ public class LineupGeneratorService
         if (channel.ContentType is ChannelContentType.Weather or ChannelContentType.News)
         {
             await BuildContinuousPlayoutAsync(channel, startUtc, endUtc, mode, cancellationToken);
-            _guideUpdates.MarkUpdated();
+            NotifyPlayoutChanged(channel, mode);
             return;
         }
 
@@ -231,7 +234,18 @@ public class LineupGeneratorService
                 setters => setters.SetProperty(c => c.LastPlayoutBuiltAt, DateTime.UtcNow),
                 cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
+        NotifyPlayoutChanged(channel, mode);
+    }
+
+    private void NotifyPlayoutChanged(Channel channel, PlayoutBuildMode mode)
+    {
         _guideUpdates.MarkUpdated();
+        if (mode != PlayoutBuildMode.ReplaceWindow)
+        {
+            return;
+        }
+
+        _stream.InterruptCurrentItem(channel.Id);
     }
 
     private static bool IsSlotConsumedByEarlierSpan(IReadOnlyList<LineupSlot> slots, int slotIndex)
