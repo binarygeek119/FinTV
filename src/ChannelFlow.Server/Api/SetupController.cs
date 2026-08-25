@@ -281,6 +281,21 @@ public class TasksController : ControllerBase
     }
 
     /// <summary>
+    /// Deletes every playout item and episode cursor so the Live TV guide can be rebuilt from scratch.
+    /// Lineups are kept. Live encodes are cut so channels go Off Air until playout is rebuilt.
+    /// </summary>
+    [HttpPost("clear-guide")]
+    public async Task<ActionResult<object>> ClearGuide(CancellationToken cancellationToken)
+    {
+        var cleared = await _playoutBuilder.ClearAllGuideDataAsync(cancellationToken);
+        return Ok(new
+        {
+            cleared,
+            message = "Guide playout cleared. Rebuild All Playouts to fill the schedule again."
+        });
+    }
+
+    /// <summary>
     /// Cuts every currently watched channel to a commercial break in 15 seconds.
     /// </summary>
     [HttpPost("force-commercial")]

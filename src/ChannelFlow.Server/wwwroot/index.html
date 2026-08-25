@@ -999,8 +999,11 @@
                 </div>
                 <div class="card">
                     <h2>Maintenance</h2>
-                    <p class="hint">Rebuild playout timelines for all enabled channels after bulk lineup changes.</p>
-                    <button id="btn-rebuild-all" class="raised button-submit emby-button">Rebuild All Playouts</button>
+                    <p class="hint">Rebuild fills the Live TV guide from current lineups. Clear Guide Data deletes every playout item and episode cursor so the next rebuild starts from scratch. Lineups stay. Channels go Off Air until you rebuild.</p>
+                    <div class="actions">
+                        <button id="btn-rebuild-all" class="raised button-submit emby-button">Rebuild All Playouts</button>
+                        <button type="button" id="btn-clear-guide" class="emby-button">Clear Guide Data</button>
+                    </div>
                     <div id="task-status" class="status-card"></div>
                 </div>
                 <div class="card section-card">

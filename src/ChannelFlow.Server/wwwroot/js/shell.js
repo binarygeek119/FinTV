@@ -53,7 +53,7 @@
         news: 'FlowWire News',
         transcode: 'Hardware encoding for live MPEG-TS streams',
         general: 'Server-wide ChannelFlow-Server settings',
-        tasks: 'Rebuild playouts and maintenance',
+        tasks: 'Rebuild playouts, clear the guide, and maintenance',
         about: 'Version, system, and transcode information',
         credits: 'People and projects ChannelFlow builds on'
     };

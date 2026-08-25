@@ -311,6 +311,18 @@ public class StreamService : IDisposable
         _logger.LogInformation("Cutting the current encode on {ChannelId} so it matches the new playout", channelId);
     }
 
+    /// <summary>
+    /// Cuts every live encode so each channel re-reads playout (or goes Off Air if none remains).
+    /// </summary>
+    public void InterruptAllCurrentItems()
+    {
+        var ids = _itemCuts.Keys.Concat(_liveSessions.Keys).Distinct().ToArray();
+        foreach (var id in ids)
+        {
+            InterruptCurrentItem(id);
+        }
+    }
+
     private CancellationTokenSource CreateItemCutCts(Guid channelId)
     {
         var cts = new CancellationTokenSource();

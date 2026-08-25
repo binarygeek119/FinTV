@@ -5673,7 +5673,7 @@
         news: 'FlowWire News',
         transcode: 'Hardware encoding for live MPEG-TS streams',
         general: 'Server-wide ChannelFlow-Server settings',
-        tasks: 'Rebuild playouts and maintenance',
+        tasks: 'Rebuild playouts, clear the guide, and maintenance',
         about: 'Version, system, and transcode information',
         credits: 'People and projects ChannelFlow builds on'
     };
@@ -5952,6 +5952,18 @@
                 $('task-status').textContent = 'Rebuild all playouts running in background…';
             })
             .catch((e) => toast(e.message, 'error')));
+        click('btn-clear-guide', () => {
+            if (!confirm('Delete all Live TV guide playout so you can start fresh? Channels go Off Air until you Rebuild All Playouts. Channel lineups are kept.')) {
+                return;
+            }
+            api('/tasks/clear-guide', { method: 'POST' })
+                .then((data) => {
+                    const count = Number(data.cleared || 0);
+                    toast(`Cleared ${count} guide item${count === 1 ? '' : 's'}. Rebuild All Playouts to fill the schedule again.`, 'success');
+                    $('task-status').textContent = `Cleared ${count} playout items. Channels are Off Air until you rebuild.`;
+                })
+                .catch((e) => toast(e.message, 'error'));
+        });
         click('btn-force-commercial', () => forceWatchedChannelsToCommercial().catch((e) => toast(e.message, 'error')));
         click('btn-save-catalog-cleanup', () => saveCatalogCleanupSettings().catch((e) => toast(e.message, 'error')));
         click('btn-run-catalog-cleanup', () => runCatalogCleanup().catch((e) => toast(e.message, 'error')));

@@ -13,11 +13,19 @@ public class PlayoutBuilderService : BackgroundService
     private static readonly ConcurrentDictionary<Guid, ChannelPlayoutRebuildState> RebuildStates = new();
 
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly StreamService _stream;
+    private readonly GuideUpdateTracker _guideUpdates;
     private readonly ILogger<PlayoutBuilderService> _logger;
 
-    public PlayoutBuilderService(IServiceScopeFactory scopeFactory, ILogger<PlayoutBuilderService> logger)
+    public PlayoutBuilderService(
+        IServiceScopeFactory scopeFactory,
+        StreamService stream,
+        GuideUpdateTracker guideUpdates,
+        ILogger<PlayoutBuilderService> logger)
     {
         _scopeFactory = scopeFactory;
+        _stream = stream;
+        _guideUpdates = guideUpdates;
         _logger = logger;
     }
 
@@ -310,6 +318,28 @@ public class PlayoutBuilderService : BackgroundService
             PlayoutItemCount = playoutItemCount,
             HasCoverageNow = hasCoverageNow
         };
+    }
+
+    /// <summary>
+    /// Deletes all playout items and resets episode cursors so the next rebuild starts fresh.
+    /// </summary>
+    public async Task<int> ClearAllGuideDataAsync(CancellationToken cancellationToken = default)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
+
+        var cleared = await db.PlayoutItems.CountAsync(cancellationToken);
+        await db.PlayoutItems.ExecuteDeleteAsync(cancellationToken);
+        await db.Channels.ExecuteUpdateAsync(
+            setters => setters
+                .SetProperty(channel => channel.LastPlayoutBuiltAt, (DateTime?)null)
+                .SetProperty(channel => channel.PlayoutAnchorJson, "{}"),
+            cancellationToken);
+
+        _stream.InterruptAllCurrentItems();
+        _guideUpdates.MarkUpdated();
+        _logger.LogInformation("Cleared {Count} playout items so the Live TV guide can start fresh", cleared);
+        return cleared;
     }
 
     /// <summary>
