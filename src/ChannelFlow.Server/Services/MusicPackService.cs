@@ -171,37 +171,35 @@ public sealed class MusicPackService
     private async Task DownloadDriveFileAsync(string fileId, string destination, CancellationToken cancellationToken)
     {
         var client = _httpFactory.CreateClient(nameof(MusicPackService));
-        var url = "https://drive.google.com/uc?export=download&id="
-            + Uri.EscapeDataString(fileId)
-            + "&confirm=t";
+        var url = "https://drive.google.com/uc?export=download&id=" + Uri.EscapeDataString(fileId);
         using var first = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         first.EnsureSuccessStatusCode();
 
-        if (LooksLikeHtml(first))
+        if (!LooksLikeHtml(first))
         {
-            var html = await first.Content.ReadAsStringAsync(cancellationToken);
-            var confirm = ExtractConfirmToken(html);
-            var retryUrl = confirm is not null
-                ? "https://drive.google.com/uc?export=download&id="
-                    + Uri.EscapeDataString(fileId)
-                    + "&confirm="
-                    + Uri.EscapeDataString(confirm)
-                : "https://drive.usercontent.google.com/download?id="
-                    + Uri.EscapeDataString(fileId)
-                    + "&export=download&confirm=t";
-            using var retry = await client.GetAsync(retryUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-            retry.EnsureSuccessStatusCode();
-            if (LooksLikeHtml(retry))
-            {
-                throw new InvalidOperationException("Google Drive returned a web page instead of the zip. Check that the file is shared with anyone who has the link.");
-            }
-
-            await WriteFileAsync(retry, destination, cancellationToken);
+            await WriteFileAsync(first, destination, cancellationToken);
             await EnsureZipMagicAsync(destination, cancellationToken);
             return;
         }
 
-        await WriteFileAsync(first, destination, cancellationToken);
+        var html = await first.Content.ReadAsStringAsync(cancellationToken);
+        var downloadUrl = BuildVirusScanDownloadUrl(html, fileId);
+        if (string.IsNullOrWhiteSpace(downloadUrl))
+        {
+            throw new InvalidOperationException(
+                "Google Drive returned a web page instead of the zip. Check that the file is shared with anyone who has the link.");
+        }
+
+        _logger.LogInformation("Confirming Google Drive virus-scan page for music pack download");
+        using var retry = await client.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        retry.EnsureSuccessStatusCode();
+        if (LooksLikeHtml(retry))
+        {
+            throw new InvalidOperationException(
+                "Google Drive returned a web page instead of the zip. Check that the file is shared with anyone who has the link.");
+        }
+
+        await WriteFileAsync(retry, destination, cancellationToken);
         await EnsureZipMagicAsync(destination, cancellationToken);
     }
 
@@ -226,20 +224,75 @@ public sealed class MusicPackService
     private static bool LooksLikeHtml(HttpResponseMessage response)
     {
         var media = response.Content.Headers.ContentType?.MediaType ?? "";
-        return media.Contains("html", StringComparison.OrdinalIgnoreCase)
-            || media.Contains("text/", StringComparison.OrdinalIgnoreCase);
+        return media.Contains("html", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string? ExtractConfirmToken(string html)
+    private static string? BuildVirusScanDownloadUrl(string html, string fileId)
     {
-        var named = Regex.Match(html, @"name=[""']confirm[""']\s+value=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
-        if (named.Success)
+        var fields = ParseInputFields(html);
+        fields.TryAdd("id", fileId);
+        fields.TryAdd("export", "download");
+        if (!fields.ContainsKey("confirm"))
         {
-            return named.Groups[1].Value;
+            var confirm = Regex.Match(html, @"confirm=([0-9A-Za-z_-]+)", RegexOptions.IgnoreCase);
+            fields["confirm"] = confirm.Success ? confirm.Groups[1].Value : "t";
         }
 
-        var query = Regex.Match(html, @"confirm=([0-9A-Za-z_-]+)", RegexOptions.IgnoreCase);
-        return query.Success ? query.Groups[1].Value : null;
+        if (!fields.ContainsKey("uuid"))
+        {
+            return null;
+        }
+
+        var action = ExtractDownloadFormAction(html) ?? "https://drive.usercontent.google.com/download";
+        if (action.StartsWith('/'))
+        {
+            action = "https://drive.usercontent.google.com" + action;
+        }
+
+        var query = string.Join("&", fields.Select(pair =>
+            Uri.EscapeDataString(pair.Key) + "=" + Uri.EscapeDataString(pair.Value)));
+        var separator = action.Contains('?', StringComparison.Ordinal) ? "&" : "?";
+        return action + separator + query;
+    }
+
+    private static Dictionary<string, string> ParseInputFields(string html)
+    {
+        var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Match input in Regex.Matches(html, @"<input\b[^>]*>", RegexOptions.IgnoreCase))
+        {
+            var name = ReadHtmlAttribute(input.Value, "name");
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            fields[name] = ReadHtmlAttribute(input.Value, "value") ?? "";
+        }
+
+        return fields;
+    }
+
+    private static string? ExtractDownloadFormAction(string html)
+    {
+        var form = Regex.Match(
+            html,
+            @"<form\b[^>]*(?:id=[""']download-form[""'][^>]*action=[""']([^""']+)[""']|action=[""']([^""']+)[""'][^>]*id=[""']download-form[""'])[^>]*>",
+            RegexOptions.IgnoreCase);
+        if (form.Success)
+        {
+            return form.Groups[1].Success && form.Groups[1].Length > 0
+                ? form.Groups[1].Value
+                : form.Groups[2].Value;
+        }
+
+        form = Regex.Match(html, @"<form\b[^>]*action=[""']([^""']*download[^""']*)[""'][^>]*>", RegexOptions.IgnoreCase);
+        return form.Success ? form.Groups[1].Value : null;
+    }
+
+    private static string? ReadHtmlAttribute(string tag, string name)
+    {
+        var match = Regex.Match(tag, $@"\b{Regex.Escape(name)}=[""']([^""']*)[""']", RegexOptions.IgnoreCase);
+        return match.Success ? match.Groups[1].Value : null;
     }
 
     private MusicPackStatus Describe(MusicPackDefinition pack, string? activeId)
@@ -372,8 +425,35 @@ public sealed class MusicPackService
         pack.Name = string.IsNullOrWhiteSpace(pack.Name) ? pack.Id : pack.Name.Trim();
         pack.Season = string.IsNullOrWhiteSpace(pack.Season) ? "anytime" : pack.Season.Trim().ToLowerInvariant();
         pack.Version = MusicPackVersions.Normalize(pack.Version);
-        pack.GoogleDriveFileId = string.IsNullOrWhiteSpace(pack.GoogleDriveFileId) ? null : pack.GoogleDriveFileId.Trim();
+        pack.GoogleDriveFileId = NormalizeDriveFileId(pack.GoogleDriveFileId);
         return pack;
+    }
+
+    private static string? NormalizeDriveFileId(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var text = value.Trim();
+        if (Uri.TryCreate(text, UriKind.Absolute, out var uri)
+            && string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            var query = Regex.Match(uri.Query, @"[?&]id=([^&]+)", RegexOptions.IgnoreCase);
+            if (query.Success)
+            {
+                return Uri.UnescapeDataString(query.Groups[1].Value).Trim();
+            }
+
+            var path = Regex.Match(uri.AbsolutePath, @"/(?:file/)?d/([^/]+)", RegexOptions.IgnoreCase);
+            if (path.Success)
+            {
+                return Uri.UnescapeDataString(path.Groups[1].Value).Trim();
+            }
+        }
+
+        return text;
     }
 
     private static string? ResolveCatalogPath()
