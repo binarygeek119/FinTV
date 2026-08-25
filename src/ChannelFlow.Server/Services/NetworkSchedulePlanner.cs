@@ -32,7 +32,9 @@ public static class NetworkSchedulePlanner
         IReadOnlyList<AiGeneratedBlock> blocks,
         IReadOnlyList<AiCatalogEntry> catalog,
         ChannelCatalogMode catalogMode,
-        ChannelContentType contentType)
+        ChannelContentType contentType,
+        AiPlayoutTemplate? template = null,
+        string? libraryTag = null)
     {
         var catalogById = catalog.ToDictionary(c => c.Id);
         var catalogByN = catalog
@@ -74,13 +76,41 @@ public static class NetworkSchedulePlanner
 
             foreach (var day in days)
             {
-                PlaceSeriesOrMovie(weekly[day], entry.Id, start, length, isMovie);
+                var daypartName = AiPlayoutTemplates.GetDaypartNameForSlot(template, start, day);
+                if (NetworkClockDaypartMatcher.IsRerunDaypartName(daypartName))
+                {
+                    continue;
+                }
+
+                var place = entry;
+                var placeMovie = isMovie;
+                var placeLength = length;
+                if (NetworkClockDaypartMatcher.IsHardReject(ScoreEntry(place, libraryTag, daypartName)))
+                {
+                    place = PickBest(catalog, libraryTag, daypartName, [], start, occupied: null);
+                    if (place is null)
+                    {
+                        continue;
+                    }
+
+                    placeMovie = string.Equals(place.Type, "Movie", StringComparison.OrdinalIgnoreCase);
+                    placeLength = placeMovie
+                        ? Math.Clamp(LineupSlotSpans.SpanFromRuntimeMinutes(Math.Max(0, place.RuntimeMinutes)), 1, 8)
+                        : Math.Min(placeLength, 2);
+                }
+
+                var remaining = AiPlayoutTemplates.SlotsRemainingInDaypart(template, start, day);
+                var maxEpisodes = NetworkClockDaypartMatcher.MaxSeriesEpisodes(daypartName);
+                placeLength = placeMovie
+                    ? Math.Min(placeLength, remaining)
+                    : Math.Min(placeLength, Math.Min(remaining, maxEpisodes));
+                PlaceSeriesOrMovie(weekly[day], place.Id, start, placeLength, placeMovie);
             }
         }
 
         foreach (var day in weekly.Keys.ToList())
         {
-            FillRemainingGaps(weekly[day], catalog, catalogMode, contentType);
+            FillRemainingGaps(weekly[day], catalog, catalogMode, contentType, template, libraryTag, day);
         }
 
         return weekly;
@@ -97,8 +127,14 @@ public static class NetworkSchedulePlanner
         Dictionary<DayOfWeek, List<LineupSlotDto>> weekly,
         IReadOnlyList<AiCatalogEntry> catalog,
         ChannelCatalogMode catalogMode,
-        ChannelContentType contentType)
+        ChannelContentType contentType,
+        AiPlayoutTemplate? template = null)
     {
+        if (AiPlayoutTemplates.UsesNetworkClock(template?.Id))
+        {
+            return;
+        }
+
         if (catalogMode != ChannelCatalogMode.Mixed || contentType != ChannelContentType.TvShow)
         {
             return;
@@ -238,7 +274,10 @@ public static class NetworkSchedulePlanner
         List<LineupSlotDto> slots,
         IReadOnlyList<AiCatalogEntry> catalog,
         ChannelCatalogMode catalogMode,
-        ChannelContentType contentType)
+        ChannelContentType contentType,
+        AiPlayoutTemplate? template = null,
+        string? libraryTag = null,
+        DayOfWeek? day = null)
     {
         var occupied = new bool[48];
         foreach (var slot in slots.Where(s => s.IsRerunSlot || s.Candidates.Count > 0))
@@ -250,52 +289,28 @@ public static class NetworkSchedulePlanner
             }
         }
 
-        var skipMovies = catalogMode is ChannelCatalogMode.TvOnly or ChannelCatalogMode.Mixed
+        var skipMoviesDefault = catalogMode is ChannelCatalogMode.TvOnly or ChannelCatalogMode.Mixed
             && contentType == ChannelContentType.TvShow;
-        var catalogById = catalog.ToDictionary(c => c.Id);
-        var fillQueue = catalog
-            .Where(e => !(skipMovies && e.Type is "Movie" or "Clip"))
-            .OrderBy(e => e.Year ?? int.MaxValue)
-            .ThenBy(e => e.Title, StringComparer.OrdinalIgnoreCase)
-            .Select(e => e.Id)
-            .ToList();
-        if (fillQueue.Count == 0)
-        {
-            return;
-        }
-
-        var q = 0;
+        var used = UsedIds(slots);
         for (var i = 0; i < 48; i++)
         {
-            if (occupied[i])
+            if (occupied[i] || slots.Any(s => s.SlotIndex == i && (s.IsRerunSlot || s.Candidates.Count > 0)))
             {
                 continue;
             }
 
-            if (slots.Any(s => s.SlotIndex == i && (s.IsRerunSlot || s.Candidates.Count > 0)))
+            var daypartName = AiPlayoutTemplates.GetDaypartNameForSlot(template, i, day);
+            if (NetworkClockDaypartMatcher.IsRerunDaypartName(daypartName))
             {
                 continue;
             }
 
-            AiCatalogEntry? chosen = null;
-            var span = 1;
-            for (var attempt = 0; attempt < fillQueue.Count; attempt++)
+            var skipMovies = skipMoviesDefault
+                && !NetworkClockDaypartMatcher.PrefersMovies(libraryTag, daypartName);
+            var chosen = PickBest(catalog, libraryTag, daypartName, used, i, occupied, skipMovies);
+            if (chosen is null)
             {
-                var id = fillQueue[q % fillQueue.Count];
-                q++;
-                if (!catalogById.TryGetValue(id, out var entry))
-                {
-                    continue;
-                }
-
-                span = SpanThatFits(entry, i, occupied);
-                if (span <= 0)
-                {
-                    continue;
-                }
-
-                chosen = entry;
-                break;
+                chosen = PickBest(catalog, libraryTag, daypartName, used, i, occupied, skipMovies: false);
             }
 
             if (chosen is null)
@@ -303,11 +318,44 @@ public static class NetworkSchedulePlanner
                 continue;
             }
 
+            var isMovie = string.Equals(chosen.Type, "Movie", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(chosen.Type, "Clip", StringComparison.OrdinalIgnoreCase);
+            var span = SpanThatFits(chosen, i, occupied);
+            span = Math.Min(span, AiPlayoutTemplates.SlotsRemainingInDaypart(template, i, day));
+            if (!isMovie)
+            {
+                span = Math.Min(span, NetworkClockDaypartMatcher.MaxSeriesEpisodes(daypartName));
+            }
+
+            if (span <= 0)
+            {
+                continue;
+            }
+
             Upsert(slots, i, span, chosen.Id);
+            used.Add(chosen.Id);
             for (var j = i; j < i + span && j < 48; j++)
             {
                 occupied[j] = true;
             }
+        }
+    }
+
+    public static void ApplyDaypartFit(
+        Dictionary<DayOfWeek, List<LineupSlotDto>> weekly,
+        IReadOnlyList<AiCatalogEntry> catalog,
+        AiPlayoutTemplate? template,
+        string? libraryTag)
+    {
+        if (template?.Dayparts is not { Count: > 0 })
+        {
+            return;
+        }
+
+        var catalogById = catalog.ToDictionary(c => c.Id);
+        foreach (var day in weekly.Keys.ToList())
+        {
+            FitDay(weekly[day], catalog, catalogById, template, libraryTag, day);
         }
     }
 
@@ -349,6 +397,149 @@ public static class NetworkSchedulePlanner
         }
 
         slots.Sort((a, b) => a.SlotIndex.CompareTo(b.SlotIndex));
+    }
+
+    private static void FitDay(
+        List<LineupSlotDto> slots,
+        IReadOnlyList<AiCatalogEntry> catalog,
+        Dictionary<Guid, AiCatalogEntry> catalogById,
+        AiPlayoutTemplate template,
+        string? libraryTag,
+        DayOfWeek day)
+    {
+        var usedByDaypart = new Dictionary<string, HashSet<Guid>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var slot in slots.OrderBy(s => s.SlotIndex).ToList())
+        {
+            if (slot.IsRerunSlot
+                || slots.All(s => s.SlotIndex != slot.SlotIndex)
+                || slots.Any(s => s.SlotIndex < slot.SlotIndex && s.SlotIndex + s.SpanSlots > slot.SlotIndex))
+            {
+                continue;
+            }
+
+            var daypartName = AiPlayoutTemplates.GetDaypartNameForSlot(template, slot.SlotIndex, day) ?? string.Empty;
+            if (NetworkClockDaypartMatcher.IsRerunDaypartName(daypartName))
+            {
+                continue;
+            }
+
+            if (!usedByDaypart.TryGetValue(daypartName, out var used))
+            {
+                used = [];
+                usedByDaypart[daypartName] = used;
+            }
+
+            var remaining = AiPlayoutTemplates.SlotsRemainingInDaypart(template, slot.SlotIndex, day);
+            var current = ResolveSlotEntry(slot, catalogById);
+            var currentScore = current is null
+                ? NetworkClockDaypartMatcher.HardReject
+                : ScoreEntry(current, libraryTag, daypartName);
+            var best = PickBest(catalog, libraryTag, daypartName, used, slot.SlotIndex, occupied: null);
+            var bestScore = best is null ? NetworkClockDaypartMatcher.HardReject : ScoreEntry(best, libraryTag, daypartName);
+            var replace = current is null
+                || NetworkClockDaypartMatcher.IsHardReject(currentScore)
+                || (best is not null
+                    && best.Id != current.Id
+                    && bestScore >= currentScore + 15
+                    && currentScore < 10);
+
+            var chosen = replace ? best : current;
+            if (chosen is null)
+            {
+                continue;
+            }
+
+            var isMovie = string.Equals(chosen.Type, "Movie", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(chosen.Type, "Clip", StringComparison.OrdinalIgnoreCase);
+            var maxSpan = isMovie
+                ? remaining
+                : Math.Min(remaining, NetworkClockDaypartMatcher.MaxSeriesEpisodes(daypartName));
+            if (replace)
+            {
+                var span = isMovie
+                    ? Math.Min(maxSpan, LineupSlotSpans.SpanFromRuntimeMinutes(Math.Max(30, chosen.RuntimeMinutes)))
+                    : maxSpan;
+                Upsert(slots, slot.SlotIndex, Math.Clamp(span, 1, maxSpan), chosen.Id);
+            }
+            else if (slot.SpanSlots > maxSpan)
+            {
+                slot.SpanSlots = maxSpan;
+            }
+
+            used.Add(chosen.Id);
+        }
+    }
+
+    private static HashSet<Guid> UsedIds(IEnumerable<LineupSlotDto> slots)
+        => slots
+            .SelectMany(s => s.Candidates)
+            .Select(c => c.JellyfinItemId)
+            .Where(id => id.HasValue)
+            .Select(id => id!.Value)
+            .ToHashSet();
+
+    private static AiCatalogEntry? ResolveSlotEntry(LineupSlotDto slot, Dictionary<Guid, AiCatalogEntry> catalogById)
+    {
+        var id = slot.Candidates.FirstOrDefault()?.JellyfinItemId;
+        return id is Guid guid && catalogById.TryGetValue(guid, out var entry) ? entry : null;
+    }
+
+    private static int ScoreEntry(AiCatalogEntry entry, string? libraryTag, string? daypartName)
+        => NetworkClockDaypartMatcher.Score(
+            entry.Title,
+            entry.Type,
+            entry.Genres,
+            entry.OfficialRating,
+            entry.Year,
+            entry.Plot,
+            libraryTag,
+            daypartName);
+
+    private static AiCatalogEntry? PickBest(
+        IReadOnlyList<AiCatalogEntry> catalog,
+        string? libraryTag,
+        string? daypartName,
+        HashSet<Guid> used,
+        int startSlot,
+        bool[]? occupied,
+        bool skipMovies = false)
+    {
+        AiCatalogEntry? best = null;
+        var bestScore = NetworkClockDaypartMatcher.HardReject;
+        var bestUsed = true;
+        foreach (var entry in catalog)
+        {
+            if (skipMovies && entry.Type is "Movie" or "Clip")
+            {
+                continue;
+            }
+
+            var score = ScoreEntry(entry, libraryTag, daypartName);
+            if (NetworkClockDaypartMatcher.IsHardReject(score))
+            {
+                continue;
+            }
+
+            if (occupied is not null && SpanThatFits(entry, startSlot, occupied) <= 0)
+            {
+                continue;
+            }
+
+            var alreadyUsed = used.Contains(entry.Id);
+            if (best is not null
+                && (score < bestScore
+                    || (score == bestScore && alreadyUsed && !bestUsed)
+                    || (score == bestScore && alreadyUsed == bestUsed && (entry.Year ?? int.MaxValue) >= (best.Year ?? int.MaxValue))))
+            {
+                continue;
+            }
+
+            best = entry;
+            bestScore = score;
+            bestUsed = alreadyUsed;
+        }
+
+        return best;
     }
 
     private static void TryPlaceMovie(

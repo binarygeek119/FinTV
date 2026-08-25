@@ -137,7 +137,13 @@ public class AiLineupGeneratorService
                 channel.ContentType);
 
             weekly = aiResponse.Blocks is { Count: > 0 }
-                ? NetworkSchedulePlanner.ExpandBlocks(aiResponse.Blocks, manifest.Catalog, catalogMode, channel.ContentType)
+                ? NetworkSchedulePlanner.ExpandBlocks(
+                    aiResponse.Blocks,
+                    manifest.Catalog,
+                    catalogMode,
+                    channel.ContentType,
+                    playoutTemplate,
+                    libraryTag)
                 : NetworkSchedulePlanner.CloneDailyToWeek(slots);
 
             var runtimeById = CatalogRuntimeLookup(manifest.Catalog);
@@ -146,12 +152,20 @@ public class AiLineupGeneratorService
                 weekly[day] = LineupSlotSpans.ExpandUsingRuntimes(weekly[day], runtimeById);
             }
 
-            NetworkSchedulePlanner.LimitMixedTvMovies(weekly, manifest.Catalog, catalogMode, channel.ContentType);
+            NetworkSchedulePlanner.LimitMixedTvMovies(weekly, manifest.Catalog, catalogMode, channel.ContentType, playoutTemplate);
             NetworkSchedulePlanner.SprinkleMovies(weekly, manifest.Catalog, catalogMode);
             NetworkSchedulePlanner.ApplyTemplateRerunDayparts(weekly, playoutTemplate);
+            NetworkSchedulePlanner.ApplyDaypartFit(weekly, manifest.Catalog, playoutTemplate, libraryTag);
             foreach (var day in weekly.Keys.ToList())
             {
-                NetworkSchedulePlanner.FillRemainingGaps(weekly[day], manifest.Catalog, catalogMode, channel.ContentType);
+                NetworkSchedulePlanner.FillRemainingGaps(
+                    weekly[day],
+                    manifest.Catalog,
+                    catalogMode,
+                    channel.ContentType,
+                    playoutTemplate,
+                    libraryTag,
+                    day);
                 NetworkSchedulePlanner.FillEmptySlotsWithChannelFilter(weekly[day], channel.FilterJson);
                 weekly[day] = LineupSlotSpans.Compact(weekly[day]);
             }
@@ -957,7 +971,7 @@ public class AiLineupGeneratorService
             Rules:
             - Identify catalog rows with n (preferred), jellyfinItemId, or exact title. Do not invent GUIDs.
             - Keep shows in the same time slot across days/weeks unless it is a weekly special (Monday-only, Friday movie, theme day).
-            - Typical series blocks are 2-4 episodes. Include at most one theme-day mini-marathon of 2-6 episodes per week.
+            - Typical series blocks are 1-2 episodes inside a single daypart. Include at most one theme-day mini-marathon of 2-6 episodes per week.
             - Fill all 48 half-hour slots (0-47). Overnight may reuse daytime or primetime series, or use rerun slots.
             """ + rerunExample + """
             - Schedule like a real TV network using the playout template dayparts.

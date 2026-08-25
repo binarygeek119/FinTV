@@ -308,22 +308,65 @@ public static class AiPlayoutTemplates
     public static bool IsPrimetimeSlot(int slotIndex, int startSlotIndex, int endSlotIndex)
         => slotIndex >= startSlotIndex && slotIndex <= endSlotIndex;
 
-    public static string? GetDaypartNameForSlot(AiPlayoutTemplate? template, int slotIndex)
+    public static string? GetDaypartNameForSlot(AiPlayoutTemplate? template, int slotIndex, DayOfWeek? day = null)
+    {
+        var daypart = GetDaypartForSlot(template, slotIndex, day);
+        return daypart?.Name;
+    }
+
+    public static AiPlayoutDaypart? GetDaypartForSlot(AiPlayoutTemplate? template, int slotIndex, DayOfWeek? day = null)
     {
         if (template is null || template.Dayparts.Count == 0)
         {
             return null;
         }
 
-        foreach (var daypart in template.Dayparts)
+        if (day == DayOfWeek.Friday)
         {
-            if (daypart.ContainsSlot(slotIndex))
+            var takeover = template.Dayparts.FirstOrDefault(d =>
+                d.Name.Contains("toon takeover", StringComparison.OrdinalIgnoreCase));
+            if (takeover?.ContainsSlot(slotIndex) == true)
             {
-                return daypart.Name;
+                return takeover;
             }
         }
 
-        return null;
+        foreach (var candidate in template.Dayparts)
+        {
+            if (candidate.Name.Contains("toon takeover", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (candidate.ContainsSlot(slotIndex))
+            {
+                return candidate;
+            }
+        }
+
+        return template.Dayparts.FirstOrDefault(d => d.ContainsSlot(slotIndex));
+    }
+
+    public static int SlotsRemainingInDaypart(AiPlayoutTemplate? template, int startSlotIndex, DayOfWeek? day = null)
+    {
+        var daypart = GetDaypartForSlot(template, startSlotIndex, day);
+        if (daypart is null)
+        {
+            return 48 - startSlotIndex;
+        }
+
+        var remaining = 0;
+        for (var i = startSlotIndex; i < 48; i++)
+        {
+            if (!daypart.ContainsSlot(i))
+            {
+                break;
+            }
+
+            remaining++;
+        }
+
+        return Math.Max(1, remaining);
     }
 
     public static string BuildPromptSection(AiPlayoutTemplate template)
@@ -362,6 +405,8 @@ public static class AiPlayoutTemplates
             lines.Add("- Mid-Day is original programming, not rerun slots.");
             lines.Add("- Do not place kids content in Late Night.");
             lines.Add("- Do not place adult-only titles in Before School, Morning, or After School.");
+            lines.Add("- Do not run a series block across a daypart boundary. Typical series blocks are 1-2 episodes, not multi-hour dumps of the same show.");
+            lines.Add("- Put movies in Prime Time when this channel's daypart guide asks for features/blockbusters. Do not fill Late Night with Saturday-morning cartoons.");
         }
 
         if (template.Id is "kids-all-day")
@@ -406,7 +451,7 @@ public static class AiPlayoutTemplates
         {
             "Series episode blocking:",
             "- For TV series, use consecutive slots with the same jellyfinItemId; ChannelFlow plays the next episode in order for each consecutive slot.",
-            "- Typical blocks: 1-4 consecutive episodes of the same series (1-4 back-to-back slots with the same jellyfinItemId). Use spanSlots=1 per slot for ~30-minute episodes, or spanSlots=2 for hour-long episodes.",
+            "- Typical blocks: 1-2 consecutive episodes of the same series (1-2 back-to-back slots with the same jellyfinItemId). Use spanSlots=1 per slot for ~30-minute episodes, or spanSlots=2 for hour-long episodes. Do not cross a daypart boundary.",
             "- Mini-marathon: include exactly ONE mini-marathon per lineup — 5-6 consecutive slots (max 6 episodes) of the same series. " + marathonSlots,
             "- Keep mini-marathons rare and special (about 1-2 per week channel-wide). On this daily template include one; use lineup overrides on other weekdays if you want a second weekly marathon or none.",
             "- Between blocks, switch to a different series or movie; do not repeat the same series later the same day unless it is a different block separated by other shows.",
