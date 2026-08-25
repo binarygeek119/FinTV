@@ -37,7 +37,7 @@ public static class ChannelPresets
         Preset(125, 124.1m, "Past Tense News", ChannelContentType.TvShow, "TV Shows", "Home movies treated as live breaking news", "channelflow-past-tense-news", "News/Past_Tense_News.png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(123.1m, 119.8m, "FlowWire News", ChannelContentType.News, "TV Shows", "Live FlowWire RSS news channel with optional TTS", "channelflow-live-news", "News/FlowWire.png"),
         Preset(128, 124.2m, "Cops And Robbers", ChannelContentType.TvShow, "TV Shows", "Crime and cop themed TV shows and movies (genre or plot)", "channelflow-crime", "Shows/cops_and_robbers.png", catalogMode: ChannelCatalogMode.Mixed),
-        Preset(129, 124.3m, "Slappy", ChannelContentType.TvShow, "TV Shows", "Comedy TV and movies with 6pm Slappy's Toon Takeover block", "channelflow-comedy", "Shows/Slappy.png", catalogMode: ChannelCatalogMode.Mixed),
+        Preset(129, 124.3m, "Slappy", ChannelContentType.TvShow, "TV Shows", "Comedy TV and movies with Friday 5–8pm Slappy's Toon Takeover", "channelflow-comedy", "Shows/Slappy.png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(130, 126.1m, "Winning", ChannelContentType.TvShow, "TV Shows", "Game shows channel", "channelflow-game-shows", "Shows/winning.png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(133, 126.2m, "GET LEARNEDED", ChannelContentType.TvShow, "TV Shows", "Educational tv shows and movies", "channelflow-education", "Shows/GET_LEARNEDED.png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(134, 126.3m, "YouTube TV", ChannelContentType.TvShow, "TV Shows", "Content from Jellyfin TV library YouTube only", "channelflow-youtube", "Shows/YouTube_TV.png"),

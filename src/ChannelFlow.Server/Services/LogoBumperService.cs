@@ -28,8 +28,8 @@ public sealed class LogoBumperService
         => string.Equals(guideGroup, "commercial", StringComparison.OrdinalIgnoreCase)
             || string.Equals(guideGroup, GuideGroup, StringComparison.OrdinalIgnoreCase);
 
-    public bool ShouldOpenToonTakeover(Channel channel, int slotIndex)
-        => AiPlayoutTemplates.IsToonTakeoverSlot(channel, slotIndex);
+    public bool ShouldOpenToonTakeover(Channel channel, int slotIndex, DateOnly date)
+        => AiPlayoutTemplates.IsToonTakeoverSlot(channel, slotIndex, date);
 
     public async Task<TimeSpan?> TryResolveToonTakeoverDurationAsync(CancellationToken cancellationToken)
     {

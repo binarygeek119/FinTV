@@ -689,6 +689,7 @@ public class CatalogController : ControllerBase
 
     private static string FormatRating(string? official, float? community)
     {
+        official = AiCatalogManifestBuilder.NormalizeOfficialRating(official);
         if (!string.IsNullOrWhiteSpace(official) && community.HasValue)
         {
             return $"{official} · {community.Value:0.0}";

@@ -7,31 +7,42 @@ using System.Text.RegularExpressions;
 /// </summary>
 public static class ChannelAiRules
 {
+    private const string CatalogMatchRule =
+        "This is the target tone. Pick the closest titles from the filtered catalog. If the library has no exact match, use the nearest theme from the pool (for example no 90s soaps → other Mid-Day family/drama). Do not invent titles. Ratings are preferences, not hard catalog cuts.";
+
     private static readonly Dictionary<string, ChannelAiRuleDefinition> Rules = new(StringComparer.OrdinalIgnoreCase)
     {
         ["channelflow-flashback"] = new(
             "TV series and movies released from 1970 through 2010 only. For TV series, eligibility uses the first episode premiere year in that range. Exclude crime, cops, and game shows.",
-            ChannelCatalogMode.Mixed),
+            ChannelCatalogMode.Mixed,
+            BuildFlashBackDaypartGuide()),
         ["channelflow-retro"] = new(
             "TV series and movies released from 1910 through 1969 only. For TV series, eligibility uses the first episode premiere year in that range. Exclude crime, cops, and game shows.",
-            ChannelCatalogMode.Mixed),
+            ChannelCatalogMode.Mixed,
+            BuildRetroDaypartGuide()),
         ["channelflow-open-swim"] = new(
             "Kids and teen TV and movies from any release year (no year cap). Only kid-rated content up to TV-PG. Prioritize Nickelodeon, Disney Channel, Fox Kids, and Cartoon Network style cartoons and live-action kids shows from any era. Exclude horror, crime, war, and adult thriller genres.",
             ChannelCatalogMode.Mixed),
         ["channelflow-reality"] = new(
             "Reality TV themed shows and movies. Match Reality genre or reality/competition keywords in title, plot, or tags. Exclude crime, cops, and game shows.",
-            ChannelCatalogMode.Mixed),
+            ChannelCatalogMode.Mixed,
+            BuildFlipTelevisionDaypartGuide()),
         ["channelflow-past-tense-news"] = new(
             "Home movies and home videos from the Past Tense News / Home Movies / Home Videos library. Shuffle clips at random and present every clip as live breaking news.",
             ChannelCatalogMode.Mixed),
         ["channelflow-crime"] = new(
             "Crime and cop themed TV shows and movies. Match Crime/Cop/Police/Detective genres or crime-related plot/overview text. Exclude animated comedies, game shows, and spy-comedy series that only mention CIA/FBI without crime themes.",
-            ChannelCatalogMode.Mixed),
+            ChannelCatalogMode.Mixed,
+            BuildCopsAndRobbersDaypartGuide()),
         ["channelflow-comedy"] = new(
-            "Comedy themed TV shows and movies. Match Comedy genre or comedy keywords in title, plot, or tags. Build Slappy's Toon Takeover at 6pm (slots 36-41).",
-            ChannelCatalogMode.Mixed),
+            "Comedy themed TV shows and movies. Match Comedy genre or comedy keywords in title, plot, or tags. Friday 5:00-8:00pm is Slappy's Toon Takeover (kid cartoons only).",
+            ChannelCatalogMode.Mixed,
+            BuildSlappyDaypartGuide()),
         ["channelflow-game-shows"] = new("Game shows only.", ChannelCatalogMode.Mixed),
-        ["channelflow-education"] = new("Educational TV and documentaries (History, Discovery, science, nature).", ChannelCatalogMode.Mixed),
+        ["channelflow-education"] = new(
+            "Educational TV and documentaries (History, Discovery, science, nature).",
+            ChannelCatalogMode.Mixed,
+            BuildGetLearnededDaypartGuide()),
         ["channelflow-youtube"] = new("Only content from the Jellyfin TV library named YouTube.", ChannelCatalogMode.TvOnly),
         ["channelflow-creature"] = new(
             "Creature and monster movies and TV. Match Horror/Sci-Fi/Monster genres or creature/monster keywords in title, plot, and tags.",
@@ -239,6 +250,88 @@ public static class ChannelAiRules
         ["channelflow-comedy"] = "slappy-comedy",
     };
 
+    private static string BuildFlashBackDaypartGuide() => NetworkDaypartGuide(
+        "FlashBack TV (1970s–2000s)",
+        ("Early Bird", "(TV-MA / R) Reruns of yesterday's blockbuster movies."),
+        ("Before School", "(TV-Y7 / G) 80s Saturday-morning cartoon shorts."),
+        ("Morning", "(TV-G / PG) Family sitcoms from the 70s/80s."),
+        ("Mid-Day", "(TV-PG / PG) Original curated 90s soap-opera arcs."),
+        ("After School", "(TV-G / PG) 90s/00s golden-era animation."),
+        ("Teen Hour", "(TV-14 / PG-13) 90s teen dramas and coming-of-age movies."),
+        ("Prime Time", "(TV-MA / R) Blockbuster movies (1970-2000)."),
+        ("Late Night", "(TV-MA / UR) Uncut cult classics, lost media, and director's cuts."));
+
+    private static string BuildRetroDaypartGuide() => NetworkDaypartGuide(
+        "Retro TV (1910s–1960s)",
+        ("Early Bird", "(TV-PG / PG) Reruns of yesterday's Hollywood features."),
+        ("Before School", "(TV-G / G) Early animation shorts (Popeye, Betty Boop)."),
+        ("Morning", "(TV-G / G) Mid-century variety shows."),
+        ("Mid-Day", "(TV-G / G) Early sitcoms and radio-style plays."),
+        ("After School", "(TV-G / PG) 50s/60s animated series."),
+        ("Teen Hour", "(TV-PG / PG) Retro youth-culture films."),
+        ("Prime Time", "(TV-PG / PG) Golden Age of Hollywood features."),
+        ("Late Night", "(TV-PG / PG-13) Film noir, psychological thrillers, and avant-garde early cinema."));
+
+    private static string BuildFlipTelevisionDaypartGuide() => NetworkDaypartGuide(
+        "Flip Television (reality)",
+        ("Early Bird", "(TV-MA / R) Reruns of yesterday's survival/elimination shows."),
+        ("Before School", "(TV-PG / PG) Short-form competition clips."),
+        ("Morning", "(TV-G / PG) Home improvement and cooking."),
+        ("Mid-Day", "(TV-14 / PG-13) Lifestyle vlogs and dating competitions."),
+        ("After School", "(TV-PG / PG) Casual, light-hearted reality."),
+        ("Teen Hour", "(TV-14 / PG-13) Influencer competitions and teen reality."),
+        ("Prime Time", "(TV-MA / R) High-stakes elimination and survival shows."),
+        ("Late Night", "(TV-MA / R) Unfiltered after-dark reunions and raw behind-the-scenes."));
+
+    private static string BuildCopsAndRobbersDaypartGuide() => NetworkDaypartGuide(
+        "Cops And Robbers (crime)",
+        ("Early Bird", "(TV-MA / R) Reruns of yesterday's gritty crime dramas."),
+        ("Before School", "(TV-PG / PG) Light mystery shorts and detective tips."),
+        ("Morning", "(TV-PG / PG) Classic whodunnit mysteries."),
+        ("Mid-Day", "(TV-14 / PG-13) Police procedurals and forensic studies."),
+        ("After School", "(TV-Y7 / PG) Animated crime-solving."),
+        ("Teen Hour", "(TV-14 / PG-13) YA crime dramas and teen detectives."),
+        ("Prime Time", "(TV-MA / R) Gritty modern crime dramas and forensics."),
+        ("Late Night", "(TV-MA / UR) Raw police bodycam footage and unsolved cold-case deep dives."));
+
+    private static string BuildSlappyDaypartGuide() => NetworkDaypartGuide(
+        "Slappy (comedy)",
+        ("Early Bird", "(TV-MA / R) Reruns of yesterday's roast/sketch specials."),
+        ("Before School", "(TV-G / G) Classic slapstick animated shorts."),
+        ("Morning", "(TV-G / G) Clean stand-up and family sketches."),
+        ("Mid-Day", "(TV-PG / PG) Thematic sitcom marathons."),
+        ("After School", "(TV-G / PG) All-ages comedy cartoons."),
+        ("Teen Hour", "(TV-14 / PG-13) Mon-Thu teen sitcoms and edgy sketch comedy. Friday 5:00-8:00pm is Toon Takeover instead."),
+        ("Prime Time", "(TV-MA / R) Mon-Thu roast specials and uncensored sketch. Friday 5:00-8:00pm is Toon Takeover; 8:00-10:00pm continues uncensored comedy."),
+        ("Late Night", "(TV-MA / UR) Uncensored adult stand-up and surrealist experimental comedy."),
+        ("Slappy's Toon Takeover", "Friday only, 5:00-8:00pm (slots 34-39): 3-hour kid-cartoon event (TV-Y7/TV-G, G/PG). Use days [\"fri\"]. Not adult animation and not Mon-Thu."));
+
+    private static string BuildGetLearnededDaypartGuide() => NetworkDaypartGuide(
+        "GET LEARNEDED (educational)",
+        ("Early Bird", "(TV-PG / PG) Reruns of yesterday's university lectures."),
+        ("Before School", "(TV-Y / G) Fact of the Day animated shorts."),
+        ("Morning", "(TV-G / G) Science for kids and basic tutorials."),
+        ("Mid-Day", "(TV-G / PG) Nature and history documentaries."),
+        ("After School", "(TV-G / PG) Educational cartoons."),
+        ("Teen Hour", "(TV-PG / PG-13) Advanced study guides and philosophy."),
+        ("Prime Time", "(TV-PG / PG) University-level lectures and deep-dive essays."),
+        ("Late Night", "(TV-PG / TV-14) Complex sociology, dark history, and metaphysical theories."));
+
+    private static string NetworkDaypartGuide(string heading, params (string Block, string Line)[] rows)
+    {
+        var lines = new List<string>
+        {
+            heading,
+            CatalogMatchRule
+        };
+        foreach (var (block, line) in rows)
+        {
+            lines.Add($"- {block}: {line}");
+        }
+
+        return string.Join('\n', lines);
+    }
+
     /// <summary>
     /// Gets the AI rule for a library tag, if defined.
     /// </summary>
@@ -262,6 +355,18 @@ public static class ChannelAiRules
     /// <returns>Rule brief or empty string.</returns>
     public static string GetBrief(string? libraryTag)
         => GetByLibraryTag(libraryTag)?.Brief ?? string.Empty;
+
+    /// <summary>
+    /// Per-channel daypart target copy for master-clock entertainment presets.
+    /// </summary>
+    public static string? GetDaypartGuide(string? libraryTag)
+        => GetByLibraryTag(libraryTag)?.DaypartGuide;
+
+    /// <summary>
+    /// Per-channel daypart target copy from a channel's filter tag.
+    /// </summary>
+    public static string? GetDaypartGuide(Channel channel)
+        => GetDaypartGuide(ExtractLibraryTag(channel.FilterJson));
 
     /// <summary>
     /// Gets the recommended AI playout template for a library tag, if any.
@@ -455,15 +560,18 @@ public static class ChannelAiRules
 /// </summary>
 public class ChannelAiRuleDefinition
 {
-    public ChannelAiRuleDefinition(string brief, ChannelCatalogMode defaultCatalogMode)
+    public ChannelAiRuleDefinition(string brief, ChannelCatalogMode defaultCatalogMode, string? daypartGuide = null)
     {
         Brief = brief;
         DefaultCatalogMode = defaultCatalogMode;
+        DaypartGuide = daypartGuide;
     }
 
     public string Brief { get; }
 
     public ChannelCatalogMode DefaultCatalogMode { get; }
+
+    public string? DaypartGuide { get; }
 }
 
 /// <summary>

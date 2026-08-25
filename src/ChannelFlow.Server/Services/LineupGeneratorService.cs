@@ -87,9 +87,7 @@ public class LineupGeneratorService
         var slotsByDate = new Dictionary<DateOnly, IReadOnlyList<LineupSlot>>();
         var anniversaryByDate = new Dictionary<DateOnly, Queue<AnniversaryPick>>();
         var stealEnabled = OriginalBroadcastSimulator.IsEnabled(channel);
-        var (primeStart, primeEnd) = stealEnabled
-            ? AiPlayoutTemplates.GetPrimetimeSlotRange(channel)
-            : (38, 41);
+        var (primeStart, primeEnd) = AiPlayoutTemplates.GetPrimetimeSlotRange(channel);
         var cursor = startUtc;
         var steps = 0;
         var maxSteps = Math.Max(96, (int)((endUtc - startUtc).TotalMinutes / 10) + 48);
@@ -258,7 +256,7 @@ public class LineupGeneratorService
                 continue;
             }
 
-            if (_bumpers.ShouldOpenToonTakeover(channel, slotIndex) && toonTakeoverBumperDates.Add(date))
+            if (_bumpers.ShouldOpenToonTakeover(channel, slotIndex, date) && toonTakeoverBumperDates.Add(date))
             {
                 var bumperEnd = await TryAddToonTakeoverBumperAsync(channel, slotStart, cancellationToken);
                 if (bumperEnd is DateTime insertedEnd)
@@ -539,7 +537,7 @@ public class LineupGeneratorService
         }
 
         return (slot is null || slot.Candidates.Count == 0)
-            && NetworkSchedulePlanner.IsOvernightRerunSlot(slotIndex);
+            && NetworkSchedulePlanner.IsOvernightRerunSlot(slotIndex, AiPlayoutTemplates.Resolve(channel));
     }
 
     private static LineupSlot CreatePastTenseNewsSlot(Channel channel, int slotIndex)
@@ -849,7 +847,7 @@ public class LineupGeneratorService
         CancellationToken cancellationToken)
     {
         var previousDate = localDate.AddDays(-1);
-        var pool = await LoadRerunPoolAsync(channel.Id, previousDate, tz, builtPrograms, cancellationToken);
+        var pool = await LoadRerunPoolAsync(channel, previousDate, tz, builtPrograms, cancellationToken);
         if (pool.Count == 0)
         {
             return null;
@@ -892,31 +890,34 @@ public class LineupGeneratorService
     }
 
     private async Task<List<PlayoutItem>> LoadRerunPoolAsync(
-        Guid channelId,
+        Channel channel,
         DateOnly localDate,
         TimeZoneInfo tz,
         List<PlayoutItem> builtPrograms,
         CancellationToken cancellationToken)
     {
+        var (primeStart, primeEnd) = AiPlayoutTemplates.GetPrimetimeSlotRange(channel);
         var fromBuilt = builtPrograms
             .Where(p => DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(p.Start, tz)) == localDate)
             .Where(IsProgramRerunSource)
             .ToList();
         if (fromBuilt.Count > 0)
         {
-            return RankRerunSources(fromBuilt, tz);
+            return RankRerunSources(fromBuilt, tz, primeStart, primeEnd);
         }
 
         var startLocal = localDate.ToDateTime(TimeOnly.MinValue);
         var startUtc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(startLocal, DateTimeKind.Unspecified), tz);
         var endUtc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(startLocal.AddDays(1), DateTimeKind.Unspecified), tz);
         var fromDb = await _db.PlayoutItems
-            .Where(p => p.ChannelId == channelId && p.Start >= startUtc && p.Start < endUtc)
+            .Where(p => p.ChannelId == channel.Id && p.Start >= startUtc && p.Start < endUtc)
             .ToListAsync(cancellationToken);
 
         return RankRerunSources(
             fromDb.Where(p => _db.Entry(p).State != EntityState.Deleted && IsProgramRerunSource(p)).ToList(),
-            tz);
+            tz,
+            primeStart,
+            primeEnd);
     }
 
     private static bool IsProgramRerunSource(PlayoutItem item)
@@ -927,16 +928,20 @@ public class LineupGeneratorService
             && (item.OutPoint > TimeSpan.Zero ? item.OutPoint : item.Finish - item.Start) <= TimeSpan.FromMinutes(45)
             && (item.OutPoint > TimeSpan.Zero ? item.OutPoint : item.Finish - item.Start) >= TimeSpan.FromMinutes(5);
 
-    private static List<PlayoutItem> RankRerunSources(List<PlayoutItem> items, TimeZoneInfo tz)
+    private static List<PlayoutItem> RankRerunSources(
+        List<PlayoutItem> items,
+        TimeZoneInfo tz,
+        int primeStart,
+        int primeEnd)
         => items
-            .OrderBy(p => RerunPriority(TimeZoneInfo.ConvertTimeFromUtc(p.Start, tz)))
+            .OrderBy(p => RerunPriority(TimeZoneInfo.ConvertTimeFromUtc(p.Start, tz), primeStart, primeEnd))
             .ThenBy(p => p.Start)
             .ToList();
 
-    private static int RerunPriority(DateTime localStart)
+    private static int RerunPriority(DateTime localStart, int primeStart, int primeEnd)
     {
         var slot = (localStart.Hour * 60 + localStart.Minute) / 30;
-        if (slot is >= 38 and <= 41)
+        if (AiPlayoutTemplates.IsPrimetimeSlot(slot, primeStart, primeEnd))
         {
             return 0;
         }

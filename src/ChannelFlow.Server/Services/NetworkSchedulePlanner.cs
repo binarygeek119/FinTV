@@ -192,6 +192,18 @@ public static class NetworkSchedulePlanner
     public static bool IsOvernightRerunSlot(int slotIndex)
         => slotIndex >= OvernightRerunStartSlot && slotIndex <= OvernightRerunEndSlot;
 
+    public static bool IsOvernightRerunSlot(int slotIndex, AiPlayoutTemplate? template)
+    {
+        var rerun = template?.Dayparts.FirstOrDefault(d =>
+            d.Name.Contains("rerun", StringComparison.OrdinalIgnoreCase));
+        if (rerun is not null)
+        {
+            return rerun.ContainsSlot(slotIndex);
+        }
+
+        return IsOvernightRerunSlot(slotIndex);
+    }
+
     public static void ApplyTemplateRerunDayparts(
         Dictionary<DayOfWeek, List<LineupSlotDto>> weekly,
         AiPlayoutTemplate? template)

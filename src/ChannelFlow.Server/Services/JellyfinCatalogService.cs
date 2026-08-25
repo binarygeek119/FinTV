@@ -966,6 +966,7 @@ public class JellyfinCatalogService
             "TV-14" => 4,
             "NC-17" => 5,
             "TV-MA" => 5,
+            "UR" or "NR" or "UNRATED" or "NOT RATED" or "NOTRATED" or "N/R" => null,
             _ => null
         };
     }

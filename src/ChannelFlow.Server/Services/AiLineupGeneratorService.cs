@@ -936,22 +936,15 @@ public class AiLineupGeneratorService
             Movies use spanSlots from runtime. Keep the same titles in the same clock times each week.
             Fill all 48 half-hour slots; overnight features are required.
             """
-            : """
-            Prefer `blocks` for a weekly TV grid. ChannelFlow expands this to 14 days and plays episodes in order (S01E01 onward, continuing from the last generated episode).
-            - episodeBlock: consecutive 30-minute episodes of the same series (usually 2-4; a theme day may use 2-6).
-            - days: weekdays, daily, weekends, or a list such as ["mon","tue","wed","thu","fri"] or ["fri"].
-            - If Show X is on at 11:00 every Monday, list only Monday for that block. If Show Y is on at noon every day, use daily.
-            - Overnight (slots 4-11, 2:00-6:00am) should usually be rerun slots (kind rerun) so yesterday's primetime plays back. You may also mark other encore half-hours as rerun.
-            """ + (playoutTemplate.Id is "classic-cable" or "kids-all-day" or "slappy-comedy"
-                ? """
+            : BuildTvFormatHint(playoutTemplate);
 
-            - Morning: a small cartoon block that matches the channel, then regular daytime series.
-            - 2:30-4:00pm (slots 29-31): after-school cartoons. Then teen hour. Then primetime. 9:00pm late-night adult. 12:00am adult cartoons.
+        var rerunExample = AiPlayoutTemplates.UsesNetworkClock(playoutTemplate.Id)
+            ? """
+            - Rerun slots: {"kind":"rerun","startSlot":4,"spanSlots":6,"days":["daily"]}. ChannelFlow fills those with yesterday's Prime Time. Do not assign catalog titles to rerun slots. You may also set "rerun":true on a daily slot.
             """
-                : """
-
-            - Follow the playout template dayparts for this channel. Keep the same series in the same clock times each weekday or each week.
-            """);
+            : """
+            - Rerun slots: {"kind":"rerun","startSlot":4,"spanSlots":8,"days":["daily"]}. ChannelFlow fills those with yesterday's primetime. Do not assign catalog titles to rerun slots. You may also set "rerun":true on a daily slot.
+            """;
 
         return """
             You are a cable-network scheduler for ChannelFlow.
@@ -966,9 +959,47 @@ public class AiLineupGeneratorService
             - Keep shows in the same time slot across days/weeks unless it is a weekly special (Monday-only, Friday movie, theme day).
             - Typical series blocks are 2-4 episodes. Include at most one theme-day mini-marathon of 2-6 episodes per week.
             - Fill all 48 half-hour slots (0-47). Overnight may reuse daytime or primetime series, or use rerun slots.
-            - Rerun slots: {"kind":"rerun","startSlot":4,"spanSlots":8,"days":["daily"]}. ChannelFlow fills those with yesterday's primetime. Do not assign catalog titles to rerun slots. You may also set "rerun":true on a daily slot.
+            """ + rerunExample + """
             - Schedule like a real TV network using the playout template dayparts.
             """ + mixedRule + "\n" + formatHint + $"\nCatalog mode: {catalogMode}." + templateBlock;
+    }
+
+    private static string BuildTvFormatHint(AiPlayoutTemplate playoutTemplate)
+    {
+        var overnight = AiPlayoutTemplates.UsesNetworkClock(playoutTemplate.Id)
+            ? """
+            - Early Bird (slots 4-9, 2:00-5:00am) should be rerun slots (kind rerun, spanSlots 6) so yesterday's Prime Time (18:00-22:00, slots 36-43) plays back. You may also mark other encore half-hours as rerun.
+            """
+            : """
+            - Overnight (slots 4-11, 2:00-6:00am) should usually be rerun slots (kind rerun) so yesterday's primetime plays back. You may also mark other encore half-hours as rerun.
+            """;
+
+        var clock = playoutTemplate.Id is "kids-all-day"
+            ? """
+
+            - Morning: a small cartoon block that matches the channel, then regular daytime series.
+            - 2:30-4:00pm (slots 29-31): after-school cartoons. Then teen hour. Then primetime. 9:00pm late-night adult. 12:00am adult cartoons.
+            """
+            : AiPlayoutTemplates.UsesNetworkClock(playoutTemplate.Id)
+                ? """
+
+            - Late Night 22:00-02:00 (slots 44-3). Early Bird 02:00-05:00 encore. Before School 05:00-06:00. Morning 06:00-12:00. Mid-Day 12:00-15:00 (no reruns). After School 15:00-17:00. Teen Hour 17:00-18:00. Prime Time 18:00-22:00.
+            """ + (playoutTemplate.Id == AiPlayoutTemplates.SlappyComedyId
+                    ? """
+            - Friday only: Slappy's Toon Takeover is 5:00-8:00pm (slots 34-39), kid cartoons (TV-Y7/TV-G, G/PG). Use days ["fri"]. Mon-Thu Teen Hour and Prime Time stay comedy. Friday 8:00-10:00pm after Takeover is uncensored comedy, then Late Night.
+            """
+                    : string.Empty)
+                : """
+
+            - Follow the playout template dayparts for this channel. Keep the same series in the same clock times each weekday or each week.
+            """;
+
+        return """
+            Prefer `blocks` for a weekly TV grid. ChannelFlow expands this to 14 days and plays episodes in order (S01E01 onward, continuing from the last generated episode).
+            - episodeBlock: consecutive 30-minute episodes of the same series (usually 2-4; a theme day may use 2-6).
+            - days: weekdays, daily, weekends, or a list such as ["mon","tue","wed","thu","fri"] or ["fri"].
+            - If Show X is on at 11:00 every Monday, list only Monday for that block. If Show Y is on at noon every day, use daily.
+            """ + overnight + clock;
     }
 
     private string BuildUserPrompt(
@@ -978,10 +1009,12 @@ public class AiLineupGeneratorService
         ChannelCatalogMode catalogMode,
         AiPlayoutTemplate playoutTemplate)
     {
+        var libraryTag = ChannelAiRules.ExtractLibraryTag(channel.FilterJson);
         var yearConstraints = ChannelAiRules.GetYearConstraints(channel);
         var genreConstraints = ChannelAiRules.GetGenreConstraints(channel);
         var libraryConstraints = ChannelAiRules.GetLibraryConstraints(channel);
         var channelFilter = FilterDefinition.Parse(channel.FilterJson);
+        var daypartGuide = ChannelAiRules.GetDaypartGuide(libraryTag);
         HolidayDefinition? activeHoliday = null;
         if (_holidays.IsHolidayChannel(channel))
         {
@@ -1049,6 +1082,7 @@ public class AiLineupGeneratorService
                         maxSpanSlots = d.MaxSpanSlots
                     })
                 },
+            daypartGuide,
             fineTune = channel.AiFineTunePrompt ?? string.Empty,
             catalog = manifest.Catalog.Select((c, index) => new
             {
@@ -1058,7 +1092,8 @@ public class AiLineupGeneratorService
                 type = c.Type,
                 year = c.Year,
                 runtimeMinutes = c.RuntimeMinutes,
-                genres = c.Genres
+                genres = c.Genres,
+                officialRating = c.OfficialRating
             }),
             totalAvailable = manifest.TotalAvailable
         };

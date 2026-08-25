@@ -7,6 +7,63 @@ public static class AiPlayoutTemplates
 {
     public const string NoneId = "none";
 
+    public const string ClassicCableId = "classic-cable";
+    public const string GetLearnededId = "get-learneded";
+    public const string SlappyComedyId = "slappy-comedy";
+
+    public const int LateNightStartSlot = 44;
+    public const int LateNightEndSlot = 3;
+    public const int EarlyBirdStartSlot = 4;
+    public const int EarlyBirdEndSlot = 9;
+    public const int BeforeSchoolStartSlot = 10;
+    public const int BeforeSchoolEndSlot = 11;
+    public const int MorningStartSlot = 12;
+    public const int MorningEndSlot = 23;
+    public const int MidDayStartSlot = 24;
+    public const int MidDayEndSlot = 29;
+    public const int AfterSchoolStartSlot = 30;
+    public const int AfterSchoolEndSlot = 33;
+    public const int TeenHourStartSlot = 34;
+    public const int TeenHourEndSlot = 35;
+    public const int PrimeTimeStartSlot = 36;
+    public const int PrimeTimeEndSlot = 43;
+    public const int ToonTakeoverStartSlot = 34;
+    public const int ToonTakeoverEndSlot = 39;
+
+    public static bool UsesNetworkClock(string? templateId)
+        => templateId is ClassicCableId or GetLearnededId or SlappyComedyId;
+
+    private static IReadOnlyList<AiPlayoutDaypart> CreateNetworkClockDayparts(
+        string lateNight,
+        string earlyBird,
+        string beforeSchool,
+        string morning,
+        string midDay,
+        string afterSchool,
+        string teenHour,
+        string primeTime,
+        IReadOnlyList<AiPlayoutDaypart>? extras)
+    {
+        var dayparts = new List<AiPlayoutDaypart>
+        {
+            new(LateNightStartSlot, LateNightEndSlot, "Late Night", lateNight),
+            new(EarlyBirdStartSlot, EarlyBirdEndSlot, "Early Bird Reruns", earlyBird),
+            new(BeforeSchoolStartSlot, BeforeSchoolEndSlot, "Before School", beforeSchool),
+            new(MorningStartSlot, MorningEndSlot, "Morning", morning, maxSpanSlots: 4),
+            new(MidDayStartSlot, MidDayEndSlot, "Mid-Day", midDay),
+            new(AfterSchoolStartSlot, AfterSchoolEndSlot, "After School", afterSchool),
+            new(TeenHourStartSlot, TeenHourEndSlot, "Teen Hour", teenHour),
+            new(PrimeTimeStartSlot, PrimeTimeEndSlot, "Prime Time", primeTime, maxSpanSlots: 8)
+        };
+
+        if (extras is { Count: > 0 })
+        {
+            dayparts.AddRange(extras);
+        }
+
+        return dayparts;
+    }
+
     private static readonly IReadOnlyList<AiPlayoutTemplate> All =
     [
         new AiPlayoutTemplate
@@ -17,28 +74,19 @@ public static class AiPlayoutTemplates
         },
         new AiPlayoutTemplate
         {
-            Id = "classic-cable",
+            Id = ClassicCableId,
             Name = "Classic Cable Dayparts",
-            Description = "Morning cartoons, after-school block, teen hour, primetime, 9pm late night, midnight adult cartoons, and overnight encore.",
-            Dayparts =
-            [
-                new AiPlayoutDaypart(0, 3, "Adult Cartoons",
-                    "Midnight-2:00am adult animation. No kids content."),
-                new AiPlayoutDaypart(4, 11, "Overnight Reruns",
-                    "2:00-6:00am encore. Mark as rerun slots (kind rerun). ChannelFlow repeats yesterday's primetime here. Do not assign catalog titles."),
-                new AiPlayoutDaypart(12, 15, "Morning Cartoons",
-                    "Small morning cartoon block that matches the channel (6:00-8:00am)."),
-                new AiPlayoutDaypart(16, 28, "Daytime TV",
-                    "Regular daytime series stripped at the same time each weekday."),
-                new AiPlayoutDaypart(29, 31, "After School Cartoons",
-                    "2:30-4:00pm after-school cartoons matching the channel."),
-                new AiPlayoutDaypart(32, 37, "Teen Hour",
-                    "Teen shows and cartoons from 4:00-7:00pm; not preschool."),
-                new AiPlayoutDaypart(38, 41, "Primetime",
-                    "Flagship 7:00-9:00pm series. Sticky each weeknight.", maxSpanSlots: 8),
-                new AiPlayoutDaypart(42, 47, "Late Night Adult",
-                    "9:00pm-midnight adult-oriented series. No kids content.")
-            ]
+            Description = "Network clock: Early Bird encore of yesterday Prime Time, morning through teen blocks, 6–10pm flagship, and late night wrapping midnight.",
+            Dayparts = CreateNetworkClockDayparts(
+                lateNight: "22:00-02:00 uncut / edgy / experimental. Prefer TV-MA or UR series and R/UR movies. No kids content.",
+                earlyBird: "02:00-05:00 encore. Mark as rerun slots (kind rerun). ChannelFlow repeats yesterday's Prime Time (18:00-22:00). Do not assign catalog titles.",
+                beforeSchool: "05:00-06:00 high-energy cartoons to wake the audience. Prefer TV-Y7/TV-G and G/PG.",
+                morning: "06:00-12:00 educational, family-friendly programming. Prefer TV-G/TV-PG and G/PG.",
+                midDay: "12:00-15:00 thematic / casual viewing. No reruns. Prefer TV-PG/TV-14 and PG/PG-13.",
+                afterSchool: "15:00-17:00 all-ages cartoons and broad-appeal animation. Prefer TV-Y7/TV-G and G/PG.",
+                teenHour: "17:00-18:00 content for ages 13-19. Prefer TV-PG/TV-14 and PG/PG-13.",
+                primeTime: "18:00-22:00 flagship shows and main-event programming. Prefer TV-14 to TV-MA and PG-13 to R.",
+                extras: null)
         },
         new AiPlayoutTemplate
         {
@@ -139,28 +187,19 @@ public static class AiPlayoutTemplates
         },
         new AiPlayoutTemplate
         {
-            Id = "get-learneded",
+            Id = GetLearnededId,
             Name = "GET LEARNEDED · Ed TV Blocks",
-            Description = "126.2 GET LEARNEDED: group educational TV and documentaries by subject across consecutive slots.",
-            Dayparts =
-            [
-                new AiPlayoutDaypart(0, 11, "Overnight Reruns",
-                    "Midnight-6:00am encore. Mark as rerun slots (kind rerun). ChannelFlow repeats yesterday's primetime educational shows. Do not assign catalog titles."),
-                new AiPlayoutDaypart(12, 17, "Morning Discovery",
-                    "Science and nature for a general audience; keep the same subject across 2-4 consecutive slots."),
-                new AiPlayoutDaypart(18, 23, "History Block",
-                    "History Channel-style series grouped together."),
-                new AiPlayoutDaypart(24, 29, "Science & Tech",
-                    "Discovery, engineering, and space documentaries as a block."),
-                new AiPlayoutDaypart(30, 33, "Nature Hour",
-                    "Wildlife and ecology programming grouped together."),
-                new AiPlayoutDaypart(34, 37, "Afternoon Deep Dive",
-                    "Long documentaries; use spanSlots for feature-length content.", maxSpanSlots: 4),
-                new AiPlayoutDaypart(38, 43, "Primetime Learning",
-                    "Prestige docs and educational movies; longer spans allowed.", maxSpanSlots: 6),
-                new AiPlayoutDaypart(44, 47, "Late Night Encore",
-                    "Calm educational reruns.")
-            ]
+            Description = "126.2 GET LEARNEDED: educational network clock from Early Bird lecture encore through late-night deep dives.",
+            Dayparts = CreateNetworkClockDayparts(
+                lateNight: "22:00-02:00 complex sociology, dark history, and metaphysical theories. Prefer TV-PG/TV-14.",
+                earlyBird: "02:00-05:00 encore. Mark as rerun slots (kind rerun). ChannelFlow repeats yesterday's Prime Time lectures. Do not assign catalog titles.",
+                beforeSchool: "05:00-06:00 Fact of the Day animated shorts. Prefer TV-Y/G.",
+                morning: "06:00-12:00 science for kids and basic tutorials. Prefer TV-G/G.",
+                midDay: "12:00-15:00 nature and history documentaries. No reruns. Prefer TV-G/PG.",
+                afterSchool: "15:00-17:00 educational cartoons. Prefer TV-G/PG.",
+                teenHour: "17:00-18:00 advanced study guides and philosophy. Prefer TV-PG/PG-13.",
+                primeTime: "18:00-22:00 university-level lectures and deep-dive essays. Prefer TV-PG/PG.",
+                extras: null)
         },
         new AiPlayoutTemplate
         {
@@ -175,24 +214,27 @@ public static class AiPlayoutTemplates
         },
         new AiPlayoutTemplate
         {
-            Id = "slappy-comedy",
+            Id = SlappyComedyId,
             Name = "Slappy · Comedy + Slappy's Toon Takeover",
-            Description = "124.3 Slappy: comedy all day with Slappy's Toon Takeover adult animation block at 6pm.",
-            Dayparts =
-            [
-                new AiPlayoutDaypart(0, 11, "Overnight Comedy",
-                    "Sitcom and comedy reruns; lighter live-action comedy."),
-                new AiPlayoutDaypart(12, 17, "Morning Laughs",
-                    "Sitcom blocks and comedy series reruns."),
-                new AiPlayoutDaypart(18, 29, "Daytime Comedy",
-                    "Comedy talk, sketch, and sitcom blocks grouped by show."),
-                new AiPlayoutDaypart(30, 35, "Afternoon Comedy",
-                    "Comedy movies or multi-episode sitcom marathons before primetime.", maxSpanSlots: 4),
-                new AiPlayoutDaypart(36, 41, "Slappy's Toon Takeover",
-                    "6pm-9pm block (slots 36-41): stack adult animated comedy back-to-back (e.g. Family Guy, American Dad, Bob's Burgers, The Simpsons, Futurama). Run 2-3 episodes of the same series consecutively; use spanSlots=2 for hour-long episodes.", maxSpanSlots: 4),
-                new AiPlayoutDaypart(42, 47, "Late Night Comedy",
-                    "Edgier animated or live-action comedy; adult sitcoms and late-night style comedy.")
-            ]
+            Description = "124.3 Slappy: comedy network clock with a Friday 5–8pm kid-cartoon Toon Takeover.",
+            Dayparts = CreateNetworkClockDayparts(
+                lateNight: "22:00-02:00 uncensored adult stand-up and surrealist experimental comedy. Prefer TV-MA/UR.",
+                earlyBird: "02:00-05:00 encore. Mark as rerun slots (kind rerun). ChannelFlow repeats yesterday's Prime Time. Do not assign catalog titles.",
+                beforeSchool: "05:00-06:00 classic slapstick animated shorts. Prefer TV-G/G.",
+                morning: "06:00-12:00 clean stand-up and family sketches. Prefer TV-G/G.",
+                midDay: "12:00-15:00 thematic sitcom marathons. No reruns. Prefer TV-PG/PG.",
+                afterSchool: "15:00-17:00 all-ages comedy cartoons. Prefer TV-G/PG.",
+                teenHour: "17:00-18:00 Mon-Thu teen sitcoms and edgy sketch comedy. Prefer TV-PG/TV-14. Friday 5-8pm is Toon Takeover instead.",
+                primeTime: "18:00-22:00 Mon-Thu roast specials and uncensored sketch. Prefer TV-MA/R. Friday 5-8pm is Toon Takeover; 8-10pm continues uncensored comedy.",
+                extras:
+                [
+                    new AiPlayoutDaypart(
+                        ToonTakeoverStartSlot,
+                        ToonTakeoverEndSlot,
+                        "Slappy's Toon Takeover",
+                        "Friday only, 5:00-8:00pm (slots 34-39): 3-hour kid-cartoon event (TV-Y7/TV-G, G/PG all-ages animation). Use days [\"fri\"]. Not adult animation and not Mon-Thu. Bumper plays Friday 5-8pm only.",
+                        maxSpanSlots: 4)
+                ])
         },
         new AiPlayoutTemplate
         {
@@ -233,25 +275,34 @@ public static class AiPlayoutTemplates
             d.Name.Contains("toon takeover", StringComparison.OrdinalIgnoreCase));
     }
 
-    public static bool IsToonTakeoverSlot(Channel channel, int slotIndex)
-        => GetToonTakeoverDaypart(channel)?.ContainsSlot(slotIndex) == true;
+    public static bool IsToonTakeoverSlot(Channel channel, int slotIndex, DateOnly? date = null)
+    {
+        var daypart = GetToonTakeoverDaypart(channel);
+        if (daypart is null || !daypart.ContainsSlot(slotIndex))
+        {
+            return false;
+        }
+
+        return date?.DayOfWeek == DayOfWeek.Friday;
+    }
 
     /// <summary>
     /// Primetime wall-clock slots for original-broadcast simulation.
-    /// Names containing "prime" win; otherwise 7:00–9:00pm (slots 38–41).
+    /// Names containing "prime" win; otherwise 18:00–22:00 (slots 36–43).
     /// </summary>
     public static (int StartSlotIndex, int EndSlotIndex) GetPrimetimeSlotRange(Channel channel)
     {
         var template = Resolve(channel);
         var prime = template.Dayparts.FirstOrDefault(d =>
             d.Name.Contains("prime", StringComparison.OrdinalIgnoreCase)
-            && !d.Name.Contains("rerun", StringComparison.OrdinalIgnoreCase));
+            && !d.Name.Contains("rerun", StringComparison.OrdinalIgnoreCase)
+            && !d.Name.Contains("toon takeover", StringComparison.OrdinalIgnoreCase));
         if (prime is not null && prime.StartSlotIndex <= prime.EndSlotIndex)
         {
             return (prime.StartSlotIndex, prime.EndSlotIndex);
         }
 
-        return (38, 41);
+        return (PrimeTimeStartSlot, PrimeTimeEndSlot);
     }
 
     public static bool IsPrimetimeSlot(int slotIndex, int startSlotIndex, int endSlotIndex)
@@ -300,17 +351,23 @@ public static class AiPlayoutTemplates
 
         if (template.Dayparts.Any(d => d.Name.Contains("rerun", StringComparison.OrdinalIgnoreCase)))
         {
-            lines.Add("- Overnight Reruns dayparts must use kind \"rerun\" (no catalog titles). ChannelFlow fills them with yesterday's primetime.");
+            lines.Add(UsesNetworkClock(template.Id)
+                ? "- Early Bird Reruns must use kind \"rerun\" (no catalog titles). ChannelFlow fills them with yesterday's Prime Time (18:00-22:00)."
+                : "- Overnight Reruns dayparts must use kind \"rerun\" (no catalog titles). ChannelFlow fills them with yesterday's primetime.");
         }
 
-        if (template.Id is "classic-cable" or "kids-all-day")
+        if (UsesNetworkClock(template.Id))
         {
-            lines.Add("- Do not place kids content in Late Night or adult-only dayparts.");
-            lines.Add("- Do not place adult-only titles in Morning Cartoons or After School blocks.");
+            lines.Add("- The table ratings are preferences, not hard catalog cuts. Prefer those ratings; if the library lacks them, pick the closest available title from this catalog. Do not invent titles.");
+            lines.Add("- Mid-Day is original programming, not rerun slots.");
+            lines.Add("- Do not place kids content in Late Night.");
+            lines.Add("- Do not place adult-only titles in Before School, Morning, or After School.");
         }
 
         if (template.Id is "kids-all-day")
         {
+            lines.Add("- Do not place kids content in Late Night or adult-only dayparts.");
+            lines.Add("- Do not place adult-only titles in Morning Cartoons or After School blocks.");
             lines.Add("- No release year cap; classic and modern kid-rated titles are equally eligible.");
             lines.Add("- Prefer Nickelodeon, Disney Channel, Fox Kids, and Cartoon Network style cartoons and live-action kids shows.");
         }

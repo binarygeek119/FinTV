@@ -80,7 +80,8 @@ public class AiCatalogManifestBuilder
                 RuntimeMinutes = EstimateSeriesRuntimeMinutes(series),
                 Genres = series.Genres?.ToList() ?? new List<string>(),
                 Tags = series.Tags?.ToList() ?? new List<string>(),
-                Plot = TruncatePlot(series.Overview)
+                Plot = TruncatePlot(series.Overview),
+                OfficialRating = NormalizeOfficialRating(series.OfficialRating)
             };
         }
 
@@ -111,7 +112,8 @@ public class AiCatalogManifestBuilder
                 RuntimeMinutes = _catalog.GetRuntimeMinutes(movie),
                 Genres = movie.Genres?.ToList() ?? new List<string>(),
                 Tags = movie.Tags?.ToList() ?? new List<string>(),
-                Plot = TruncatePlot(movie.Overview)
+                Plot = TruncatePlot(movie.Overview),
+                OfficialRating = NormalizeOfficialRating(movie.OfficialRating)
             };
         }
 
@@ -132,7 +134,8 @@ public class AiCatalogManifestBuilder
                 RuntimeMinutes = _catalog.GetRuntimeMinutes(item),
                 Genres = item.Genres?.ToList() ?? new List<string>(),
                 Tags = item.Tags?.ToList() ?? new List<string>(),
-                Plot = TruncatePlot(item.Overview)
+                Plot = TruncatePlot(item.Overview),
+                OfficialRating = NormalizeOfficialRating(item.OfficialRating)
             };
         }
 
@@ -151,7 +154,8 @@ public class AiCatalogManifestBuilder
                 Year = musicVideo.ProductionYear,
                 RuntimeMinutes = _catalog.GetRuntimeMinutes(musicVideo),
                 Genres = musicVideo.Genres?.ToList() ?? new List<string>(),
-                Tags = musicVideo.Tags?.ToList() ?? new List<string>()
+                Tags = musicVideo.Tags?.ToList() ?? new List<string>(),
+                OfficialRating = NormalizeOfficialRating(musicVideo.OfficialRating)
             };
         }
 
@@ -180,6 +184,19 @@ public class AiCatalogManifestBuilder
         }
 
         return overview.Length <= 240 ? overview : overview[..240] + "...";
+    }
+
+    internal static string? NormalizeOfficialRating(string? rating)
+    {
+        if (string.IsNullOrWhiteSpace(rating))
+        {
+            return null;
+        }
+
+        var key = rating.Trim().ToUpperInvariant();
+        return key is "UR" or "NR" or "UNRATED" or "NOT RATED" or "NOTRATED" or "N/R"
+            ? "UR"
+            : rating.Trim();
     }
 }
 
@@ -215,4 +232,6 @@ public class AiCatalogEntry
     public List<string> Tags { get; set; } = new();
 
     public string? Plot { get; set; }
+
+    public string? OfficialRating { get; set; }
 }
