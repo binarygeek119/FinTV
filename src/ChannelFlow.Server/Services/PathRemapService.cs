@@ -212,6 +212,7 @@ public sealed class FfmpegLocator : IFfmpegLocator
             yield return configured.Trim();
         }
 
+        yield return "/usr/local/bin/ffmpeg";
         yield return "/usr/lib/jellyfin-ffmpeg/ffmpeg";
 
         var onPath = FindOnPath("ffmpeg");

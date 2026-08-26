@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0-noble-amd64 AS build
 WORKDIR /src
 RUN apt-get update && apt-get install -y --no-install-recommends python3 ca-certificates \
     && rm -rf /var/lib/apt/lists/*
@@ -25,54 +25,36 @@ RUN dotnet publish src/ChannelFlow.Server/ChannelFlow.Server.csproj -c Release -
     /p:Version=1.0.0 \
     /p:InformationalVersion=${CHANNELFLOW_VERSION}+${CHANNELFLOW_REVISION}
 
-FROM mcr.microsoft.com/dotnet/aspnet:10.0
+# Same layout as https://github.com/ErsatzTV/legacy/blob/main/docker/Dockerfile:
+# .NET runtime on top of ersatztv-ffmpeg (VAAPI/QSV, libva 2.23, Intel iHD).
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble-amd64 AS dotnet-runtime
+
+FROM --platform=linux/amd64 ghcr.io/ersatztv/ersatztv-ffmpeg:8.1.2
 ARG CHANNELFLOW_VERSION=1.0.0
 ARG CHANNELFLOW_REVISION=dev
-ARG JELLYFIN_FFMPEG_VERSION=7.1.4-3
-ARG TARGETARCH=amd64
-ENV TZ=America/Chicago
+COPY --from=dotnet-runtime /usr/share/dotnet /usr/share/dotnet
+ENV TZ=America/Chicago \
+    FONTCONFIG_PATH=/etc/fonts \
+    DOTNET_ROOT=/usr/share/dotnet \
+    PATH="/usr/share/dotnet:${PATH}"
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         tzdata \
-        ca-certificates \
         python3 \
+        ca-certificates \
         wget \
-        xz-utils \
-        fonts-liberation \
-        fonts-dejavu-core \
-        intel-media-va-driver \
-        i965-va-driver \
-        mesa-va-drivers \
-        libva2 \
-        vainfo \
-        libfontconfig1 \
-        libfreetype6 \
-        libdrm2 \
-    && mkdir -p /usr/lib/jellyfin-ffmpeg \
-    && if [ "${TARGETARCH}" = "arm64" ]; then \
-         wget -t 3 -O /tmp/jellyfin-ffmpeg.tar.xz \
-           "https://github.com/jellyfin/jellyfin-ffmpeg/releases/download/v${JELLYFIN_FFMPEG_VERSION}/jellyfin-ffmpeg_${JELLYFIN_FFMPEG_VERSION}_portable_linuxarm64-gpl.tar.xz"; \
-       else \
-         wget -t 3 -O /tmp/jellyfin-ffmpeg.tar.xz \
-           "https://github.com/jellyfin/jellyfin-ffmpeg/releases/download/v${JELLYFIN_FFMPEG_VERSION}/jellyfin-ffmpeg_${JELLYFIN_FFMPEG_VERSION}_portable_linux64-gpl.tar.xz"; \
-       fi \
-    && tar -xJf /tmp/jellyfin-ffmpeg.tar.xz -C /usr/lib/jellyfin-ffmpeg \
-    && rm -f /tmp/jellyfin-ffmpeg.tar.xz \
-    && test -x /usr/lib/jellyfin-ffmpeg/ffmpeg \
-    && test -x /usr/lib/jellyfin-ffmpeg/ffprobe \
-    && ln -sf /usr/lib/jellyfin-ffmpeg/ffmpeg /usr/local/bin/ffmpeg \
-    && ln -sf /usr/lib/jellyfin-ffmpeg/ffprobe /usr/local/bin/ffprobe \
     && ln -snf "/usr/share/zoneinfo/${TZ}" /etc/localtime \
     && echo "${TZ}" > /etc/timezone \
-    && rm -rf /var/lib/apt/lists/* \
+    && fc-cache -f \
     && wget -qO /usr/local/bin/yt-dlp https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
-    && chmod +x /usr/local/bin/yt-dlp
+    && chmod +x /usr/local/bin/yt-dlp \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY --from=build /app/publish .
 
 ENV CHANNELFLOW_CONFIG=/config \
     FINTV_CONFIG=/config \
-    FFMPEG_PATH=/usr/lib/jellyfin-ffmpeg/ffmpeg \
+    FFMPEG_PATH=/usr/local/bin/ffmpeg \
     CHANNELFLOW_YTDLP_PATH=/usr/local/bin/yt-dlp \
     FINTV_YTDLP_PATH=/usr/local/bin/yt-dlp \
     FFMPEG_HWACCEL=vaapi \
@@ -87,4 +69,4 @@ EXPOSE 8097
 VOLUME ["/config"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
     CMD wget -qO- http://127.0.0.1:8097/health >/dev/null || exit 1
-ENTRYPOINT ["dotnet", "ChannelFlow.Server.dll"]
+ENTRYPOINT ["/usr/share/dotnet/dotnet", "ChannelFlow.Server.dll"]

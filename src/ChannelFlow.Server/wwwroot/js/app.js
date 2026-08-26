@@ -5580,16 +5580,33 @@
         el.textContent = lines.join('\n');
     }
 
+    function hardwareAccelOptions() {
+        const fromGpu = gpuCapabilities?.accelerations || [];
+        const byValue = {};
+        fromGpu.forEach((item) => {
+            if (item && item.value) {
+                byValue[item.value] = item;
+            }
+        });
+        const options = [
+            { value: 'none', label: byValue.none?.label || 'Software' },
+            { value: 'vaapi', label: byValue.vaapi?.label || 'Intel / AMD VAAPI' },
+            { value: 'qsv', label: byValue.qsv?.label || 'Intel Quick Sync (QSV)' }
+        ];
+        if (byValue.nvenc) {
+            options.push({ value: 'nvenc', label: byValue.nvenc.label || 'NVIDIA NVENC' });
+        }
+        return options;
+    }
+
     function applyTranscodeForm(settings) {
         gpuCapabilities = settings.capabilities || gpuCapabilities;
-        if (gpuCapabilities?.accelerations) {
+        if ($('transcode-hwaccel')) {
             replaceSelectOptions(
                 'transcode-hwaccel',
-                gpuCapabilities.accelerations.map((item) => ({ value: item.value, label: item.label })),
+                hardwareAccelOptions(),
                 settings.hardwareAcceleration || 'none'
             );
-        } else if ($('transcode-hwaccel')) {
-            $('transcode-hwaccel').value = settings.hardwareAcceleration || 'none';
         }
         syncTranscodeUi();
         if ($('transcode-vaapi-device')) {

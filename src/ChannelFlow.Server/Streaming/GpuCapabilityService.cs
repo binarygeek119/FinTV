@@ -122,10 +122,15 @@ public sealed class GpuCapabilityService
     public string ClampAcceleration(string? acceleration, string? encoder)
     {
         var requested = FfmpegEncodingService.NormalizeAcceleration(acceleration, encoder);
-        var caps = _cached;
-        if (caps is null || requested == "none")
+        if (requested is "none" or "vaapi" or "qsv" or "nvenc")
         {
-            return requested is "nvenc" or "vaapi" or "qsv" ? requested : "none";
+            return requested;
+        }
+
+        var caps = _cached;
+        if (caps is null)
+        {
+            return "none";
         }
 
         return caps.Accelerations.Any(item => item.Id == requested)
@@ -434,7 +439,7 @@ public sealed class GpuCapabilityService
                     _ffmpeg.EncoderPath);
             }
 
-            if (_encodeQsvDevices.Count > 0)
+            if (discovered.Count > 0 || hasH264Qsv)
             {
                 if (!formats.ContainsKey("qsv"))
                 {
@@ -448,10 +453,11 @@ public sealed class GpuCapabilityService
                     FilterEncoders(["auto", "h264_qsv"]),
                     vaapiDevices));
             }
-            else if (discovered.Count > 0)
+
+            if (_encodeQsvDevices.Count == 0 && discovered.Count > 0)
             {
                 _logger.LogInformation(
-                    "No device encoded a QSV H.264 test frame (h264_qsv listed={Listed}). Encoder={Path}",
+                    "QSV is listed for Transcode even though no device encoded a test frame (h264_qsv listed={Listed}). Encoder={Path}",
                     hasH264Qsv,
                     _ffmpeg.EncoderPath);
             }
