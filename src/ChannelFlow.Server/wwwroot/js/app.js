@@ -8020,6 +8020,7 @@
         click('btn-remove-ebs-usa', () => removeEbsSlate('usa'));
         click('btn-remove-ebs-international', () => removeEbsSlate('international'));
         click('btn-save-weather', () => saveWeatherSettings());
+        click('btn-save-weather-location', () => saveWeatherSettings('Weather location saved.'));
         click('btn-save-weather-source', () => saveWeatherSettings());
         click('btn-save-weather-alerts', () => saveWeatherSettings('Emergency Broadcast System settings saved.'));
         click('btn-test-weather-alerts', () => { void testWeatherAlerts(); });

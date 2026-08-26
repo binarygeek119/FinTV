@@ -12,7 +12,7 @@ namespace FinTv.Auth;
 public sealed class QuickPinService
 {
     public const string HttpClientName = nameof(QuickPinService);
-    public const string PinServerUrl = "http://channelflow.duckdns.org";
+    public const string PinServerUrl = "https://channelflow.duckdns.org";
     public const int PinLength = 8;
     public const int LifetimeSeconds = 600;
 
