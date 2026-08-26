@@ -857,7 +857,11 @@ public class StreamService : IDisposable
                 error = error[^2000..];
             }
 
-            _logger.LogWarning("ffmpeg exited {ExitCode}: {Error}", result.ExitCode, error);
+            _logger.LogWarning(
+                "ffmpeg exited {ExitCode}: {Error}\nffmpeg {Args}",
+                result.ExitCode,
+                error,
+                string.Join(' ', args.Select(static arg => arg.Contains(' ', StringComparison.Ordinal) ? $"\"{arg}\"" : arg)));
             throw new InvalidOperationException(
                 string.IsNullOrWhiteSpace(error)
                     ? $"ffmpeg exited {result.ExitCode}"

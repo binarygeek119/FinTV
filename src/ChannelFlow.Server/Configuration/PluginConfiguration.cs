@@ -138,17 +138,17 @@ public class PluginConfiguration
 public class TranscodeSettings
 {
     /// <summary>
-    /// <c>none</c>, <c>vaapi</c>, or <c>nvenc</c>. Empty means follow <c>FFMPEG_HWACCEL</c>.
+    /// <c>none</c>, <c>vaapi</c>, <c>qsv</c>, or <c>nvenc</c>. Empty means follow <c>FFMPEG_HWACCEL</c>.
     /// </summary>
     public string? HardwareAcceleration { get; set; }
 
     /// <summary>
-    /// Encoder name such as <c>libx264</c>, <c>h264_vaapi</c>, or <c>h264_nvenc</c>. Empty means auto.
+    /// Encoder name such as <c>libx264</c>, <c>h264_vaapi</c>, <c>h264_qsv</c>, or <c>h264_nvenc</c>. Empty means auto.
     /// </summary>
     public string? VideoEncoder { get; set; }
 
     /// <summary>
-    /// VAAPI render node, typically <c>/dev/dri/renderD128</c>. Empty means follow <c>FFMPEG_VAAPI_DEVICE</c>.
+    /// VAAPI/QSV render node, typically <c>/dev/dri/renderD128</c>. Empty means follow <c>FFMPEG_VAAPI_DEVICE</c>.
     /// </summary>
     public string? VaapiDevice { get; set; }
 

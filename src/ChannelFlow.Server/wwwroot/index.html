@@ -109,11 +109,6 @@
                         <label class="field"><span>Audio language</span><input id="deep-ch-audio" value="eng" class="emby-input"></label>
                         <label class="field"><span>Logo set</span><select id="deep-ch-logo-set" class="emby-select"><option value="">None</option></select></label>
                         <label class="field"><span>Channel logo</span><select id="deep-ch-logo-file" class="emby-select"><option value="">Default</option></select></label>
-                        <label class="field checkbox-field">
-                            <input id="deep-ch-scanlines" type="checkbox">
-                            <span class="channelflow-check-box" aria-hidden="true"></span>
-                            <span>Scanlines (4:3 CRT look)</span>
-                        </label>
                     </div>
                 </section>
                 <section class="card section-card">
@@ -216,11 +211,6 @@
                                     <option value="0">16:9</option>
                                     <option value="1">4:3</option>
                                 </select>
-                            </label>
-                            <label class="field checkbox-field">
-                                <input id="ch-scanlines" type="checkbox">
-                                <span class="channelflow-check-box" aria-hidden="true"></span>
-                                <span>Scanlines (4:3 CRT look)</span>
                             </label>
                             <label class="field">
                                 <span>Bug Placement</span>
@@ -1058,24 +1048,25 @@
 
                 <div class="card section-card">
                     <h2>Transcode</h2>
-                    <p class="hint">How FFmpeg encodes that format. The encoder name is chosen from the codec above plus this acceleration — there is no separate encoder list. Saved settings override <code>FFMPEG_HWACCEL</code> and <code>FFMPEG_VAAPI_DEVICE</code> without restarting the container.</p>
+                    <p class="hint">How FFmpeg encodes that format. The encoder name is chosen from the codec above plus this acceleration — there is no separate encoder list. Saved settings override <code>FFMPEG_HWACCEL</code> and <code>FFMPEG_VAAPI_DEVICE</code> without restarting the container. Intel Quick Sync (QSV) can hardware-decode AV1; VAAPI cannot on this Intel iHD path.</p>
                     <div id="transcode-status" class="status-card hidden" hidden></div>
                     <label class="field">
                         <span>Hardware acceleration</span>
                         <select id="transcode-hwaccel" class="emby-select">
                             <option value="none">Software</option>
                             <option value="vaapi">Intel / AMD VAAPI</option>
+                            <option value="qsv">Intel Quick Sync (QSV)</option>
                             <option value="nvenc">NVIDIA NVENC</option>
                         </select>
                     </label>
                     <label class="field" id="transcode-vaapi-field">
-                        <span>VAAPI device</span>
+                        <span id="transcode-device-label">GPU device</span>
                         <select id="transcode-vaapi-device" class="emby-select">
                             <option value="/dev/dri/renderD128">/dev/dri/renderD128</option>
                             <option value="/dev/dri/renderD129">/dev/dri/renderD129</option>
                         </select>
                     </label>
-                    <p class="hint" id="transcode-vaapi-hint">Pick a render node under <code>/dev/dri</code> (renderD128, renderD129, and any others the container can see). Intel Quick Sync is often D128; a second GPU may be D129 and still listed even if a probe says it cannot encode. Pass the whole <code>/dev/dri</code> folder into the container.</p>
+                    <p class="hint" id="transcode-vaapi-hint">Pick a render node under <code>/dev/dri</code> (renderD128, renderD129, and any others the container can see). Intel Quick Sync is often D128; a second GPU may be D129 and still listed even if a probe says it cannot encode. Pass the whole <code>/dev/dri</code> folder into the container. QSV uses the same device as VAAPI, through oneVPL instead of libva decode.</p>
                     <p class="hint" id="stream-encoder-hint">Encoder: matching the Normalization codec to this acceleration.</p>
                     <label class="field">
                         <span>Run-ahead buffer (seconds)</span>
@@ -1209,7 +1200,7 @@
                         <li><a href="https://github.com/binarygeek119" target="_blank" rel="noopener">binarygeek119</a> — author of <a href="https://github.com/FlowMeadow01/ChannelFlow" target="_blank" rel="noopener">ChannelFlow</a></li>
                         <li><a href="https://github.com/netbymatt" target="_blank" rel="noopener">netbymatt</a> — <a href="https://github.com/netbymatt/ws4kp" target="_blank" rel="noopener">WeatherStar 4000+</a> and <a href="https://github.com/netbymatt/ws3kp" target="_blank" rel="noopener">WeatherStar 3000+</a></li>
                         <li><a href="https://github.com/liam8888999" target="_blank" rel="noopener">liam8888999</a> — <a href="https://github.com/liam8888999/ErsatzTV-Filler" target="_blank" rel="noopener">ErsatzTV-Filler</a></li>
-                        <li><a href="https://github.com/jasongdove" target="_blank" rel="noopener">jasongdove</a> — <a href="https://ersatztv.org" target="_blank" rel="noopener">ErsatzTV</a></li>
+                        <li><a href="https://github.com/jasongdove" target="_blank" rel="noopener">jasongdove</a> — <a href="https://ersatztv.org" target="_blank" rel="noopener">ErsatzTV</a>, <a href="https://github.com/ErsatzTV/next" target="_blank" rel="noopener">ErsatzTV/next</a>, and <a href="https://github.com/ErsatzTV/legacy" target="_blank" rel="noopener">ErsatzTV/legacy</a></li>
                     </ul>
                 </div>
                 <div class="card section-card">
@@ -1231,6 +1222,7 @@
                     <h3>Jellyfin</h3>
                     <ul class="credits-list">
                         <li><a href="https://jellyfin.org" target="_blank" rel="noopener">Jellyfin</a> — media server, library, and Live TV plugin host</li>
+                        <li><a href="https://github.com/jellyfin/jellyfin-ffmpeg" target="_blank" rel="noopener">jellyfin-ffmpeg</a> — FFmpeg build used for live encode (VAAPI, QSV, NVENC)</li>
                     </ul>
                 </div>
                 <div class="card section-card">
@@ -1247,6 +1239,8 @@
                     <h3>ErsatzTV</h3>
                     <ul class="credits-list">
                         <li><a href="https://ersatztv.org" target="_blank" rel="noopener">ErsatzTV</a> by <a href="https://github.com/jasongdove" target="_blank" rel="noopener">jasongdove</a> — live custom TV channels from a personal library</li>
+                        <li><a href="https://github.com/ErsatzTV/next" target="_blank" rel="noopener">ErsatzTV/next</a> by <a href="https://github.com/jasongdove" target="_blank" rel="noopener">jasongdove</a> — ffpipeline capability-driven decoder selection</li>
+                        <li><a href="https://github.com/ErsatzTV/legacy" target="_blank" rel="noopener">ErsatzTV/legacy</a> by <a href="https://github.com/jasongdove" target="_blank" rel="noopener">jasongdove</a> — original ErsatzTV server</li>
                         <li><a href="https://github.com/liam8888999/ErsatzTV-Filler" target="_blank" rel="noopener">ErsatzTV-Filler</a> by <a href="https://github.com/liam8888999" target="_blank" rel="noopener">liam8888999</a> — weather, news, and offline filler</li>
                     </ul>
                 </div>
@@ -1254,6 +1248,7 @@
                     <h3>Playback and graphics</h3>
                     <ul class="credits-list">
                         <li><a href="https://ffmpeg.org" target="_blank" rel="noopener">FFmpeg</a> — live MPEG-TS encode, overlays, and TTS mux</li>
+                        <li><a href="https://github.com/jellyfin/jellyfin-ffmpeg" target="_blank" rel="noopener">jellyfin-ffmpeg</a> by <a href="https://jellyfin.org" target="_blank" rel="noopener">Jellyfin</a> — FFmpeg build shipped in the ChannelFlow Docker image</li>
                         <li><a href="https://github.com/mono/SkiaSharp" target="_blank" rel="noopener">SkiaSharp</a> — in-process WeatherStar rendering</li>
                     </ul>
                 </div>
@@ -1367,7 +1362,7 @@
       </div>
     </div>
   </div>
-  <script src="js/app.js?v=norm2"></script>
+  <script src="js/app.js?v=qsv1"></script>
   <script src="js/shell.js"></script>
 </body>
 </html>

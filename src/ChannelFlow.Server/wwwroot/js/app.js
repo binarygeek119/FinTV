@@ -301,7 +301,7 @@
             Name: form.name,
             ContentType: form.contentType,
             AspectRatio: form.aspectRatio,
-            ScanlinesEnabled: form.scanlinesEnabled,
+            ScanlinesEnabled: false,
             BugPlacement: form.bugPlacement,
             AudioLanguage: form.audioLanguage,
             LogoSetId: form.logoSetId,
@@ -1171,7 +1171,6 @@
         $('ch-name').value = c.name;
         setSelectEnum('ch-content-type', CONTENT_TYPE_VALUES, c.contentType, 0);
         setSelectEnum('ch-aspect', ASPECT_RATIO_VALUES, c.aspectRatio, 0);
-        $('ch-scanlines').checked = c.scanlinesEnabled;
         setSelectEnum('ch-bug', BUG_PLACEMENT_VALUES, c.bugPlacement, DEFAULT_BUG_PLACEMENT);
         $('ch-audio').value = c.audioLanguage || 'eng';
         if ($('ch-weather-location')) {
@@ -1224,7 +1223,6 @@
             name: nameEl.value.trim(),
             contentType: readSelectEnum('ch-content-type', CONTENT_TYPE_VALUES, 0),
             aspectRatio: readSelectEnum('ch-aspect', ASPECT_RATIO_VALUES, 0),
-            scanlinesEnabled: !!$('ch-scanlines')?.checked,
             bugPlacement: readSelectEnum('ch-bug', BUG_PLACEMENT_VALUES, DEFAULT_BUG_PLACEMENT),
             audioLanguage: $('ch-audio')?.value.trim() || 'eng',
             logoSetId: $('ch-logo-set')?.value ? $('ch-logo-set').value : null,
@@ -1600,7 +1598,6 @@
             name: channel.name,
             contentType: channel.contentType,
             aspectRatio: channel.aspectRatio,
-            scanlinesEnabled: !!channel.scanlinesEnabled,
             bugPlacement: channel.bugPlacement,
             audioLanguage: channel.audioLanguage || 'eng',
             logoSetId: channel.logoSetId || null,
@@ -1673,7 +1670,6 @@
         $('deep-ch-name').value = channel.name;
         setSelectEnum('deep-ch-content-type', CONTENT_TYPE_VALUES, channel.contentType, 0);
         setSelectEnum('deep-ch-aspect', ASPECT_RATIO_VALUES, channel.aspectRatio, 0);
-        $('deep-ch-scanlines').checked = !!channel.scanlinesEnabled;
         setSelectEnum('deep-ch-bug', BUG_PLACEMENT_VALUES, channel.bugPlacement, DEFAULT_BUG_PLACEMENT);
         $('deep-ch-audio').value = channel.audioLanguage || 'eng';
         if ($('deep-ch-weather-location')) {
@@ -1774,7 +1770,6 @@
             name,
             contentType: readSelectEnum('deep-ch-content-type', CONTENT_TYPE_VALUES, 0),
             aspectRatio: readSelectEnum('deep-ch-aspect', ASPECT_RATIO_VALUES, 0),
-            scanlinesEnabled: !!$('deep-ch-scanlines')?.checked,
             bugPlacement: readSelectEnum('deep-ch-bug', BUG_PLACEMENT_VALUES, DEFAULT_BUG_PLACEMENT),
             audioLanguage: $('deep-ch-audio')?.value.trim() || 'eng',
             logoSetId: $('deep-ch-logo-set')?.value ? $('deep-ch-logo-set').value : null,
@@ -5418,7 +5413,7 @@
                 ['PostgreSQL host', system.postgresHost],
                 ['Active viewers', system.activeViewers]
             ]);
-            const vaapi = transcode.useVaapi
+            const vaapi = transcode.useVaapi || transcode.useQsv
                 ? `Available (${transcode.vaapiDevice})`
                 : (transcode.vaapiDeviceExists ? transcode.vaapiDevice : `Missing (${transcode.vaapiDevice || 'none'})`);
             const pipeline = info.pipeline || transcode.pipeline || {};
@@ -5428,7 +5423,7 @@
                 ['Encoder', pipeline.encoder || transcode.encoder],
                 ['Hardware acceleration', pipeline.acceleration || transcode.hardwareAcceleration],
                 ['Source', transcode.source === 'saved' ? 'Saved on Transcode' : 'Container / environment default'],
-                ['VAAPI device', vaapi],
+                ['GPU device', vaapi],
                 ['GPU', transcode.gpuSummary],
                 ['Target', normalization.summary],
                 ['Resolution', normalization.resolution],
@@ -5500,19 +5495,23 @@
         const accel = $('transcode-hwaccel')?.value || 'none';
         const vaapiField = $('transcode-vaapi-field');
         const vaapiHint = $('transcode-vaapi-hint');
-        const showVaapi = accel === 'vaapi';
+        const showDevice = accel === 'vaapi' || accel === 'qsv';
         if (vaapiField) {
-            vaapiField.classList.toggle('hidden', !showVaapi);
+            vaapiField.classList.toggle('hidden', !showDevice);
         }
         if (vaapiHint) {
-            vaapiHint.classList.toggle('hidden', !showVaapi);
+            vaapiHint.classList.toggle('hidden', !showDevice);
+        }
+        const deviceLabel = $('transcode-device-label');
+        if (deviceLabel) {
+            deviceLabel.textContent = accel === 'qsv' ? 'QSV device' : 'VAAPI device';
         }
 
         const selected = selectedAccelOption();
-        const devices = (showVaapi && selected?.devices?.length)
+        const devices = (showDevice && selected?.devices?.length)
             ? selected.devices
             : (gpuCapabilities?.vaapiDevices || []);
-        if (showVaapi && devices.length) {
+        if (showDevice && devices.length) {
             replaceSelectOptions('transcode-vaapi-device', devices, $('transcode-vaapi-device')?.value);
         }
 
@@ -5533,14 +5532,22 @@
         const accel = $('transcode-hwaccel')?.value || 'none';
         const codec = $('norm-video-codec')?.value || 'h264';
         if (codec === 'mpeg2') {
-            el.textContent = accel === 'vaapi'
-                ? 'Encoder: mpeg2_vaapi when this GPU can encode MPEG-2, otherwise mpeg2video.'
-                : 'Encoder: mpeg2video (software). NVIDIA NVENC does not encode MPEG-2.';
+            if (accel === 'vaapi') {
+                el.textContent = 'Encoder: mpeg2_vaapi when this GPU can encode MPEG-2, otherwise mpeg2video.';
+            } else if (accel === 'qsv') {
+                el.textContent = 'Encoder: mpeg2_qsv when this GPU can encode MPEG-2, otherwise mpeg2video.';
+            } else {
+                el.textContent = 'Encoder: mpeg2video (software). NVIDIA NVENC does not encode MPEG-2.';
+            }
             return;
         }
 
         if (accel === 'vaapi') {
             el.textContent = 'Encoder: h264_vaapi with the H.264 profile selected above.';
+            return;
+        }
+        if (accel === 'qsv') {
+            el.textContent = 'Encoder: h264_qsv. AV1 sources decode with av1_qsv (VAAPI AV1 decode is skipped).';
             return;
         }
         if (accel === 'nvenc') {

@@ -53,7 +53,8 @@ public class FfmpegCommandBuilder
         string? sourceVideoCodec = null)
     {
         var (width, height) = GetResolution(channel);
-        var context = CreateEncodingContext(width, height, inputPath, sourceVideoCodec);
+        var gpuFilters = CanUseGpuVideoFilters(channel, overlayHeadline, alertTickerPath);
+        var context = CreateEncodingContext(width, height, inputPath, sourceVideoCodec, gpuFilters);
         var encodeSeconds = alertTones is { HasTones: true }
             ? alertTones.TotalSeconds
             : durationSeconds;
@@ -111,10 +112,11 @@ public class FfmpegCommandBuilder
         string? sourceVideoCodec = null)
     {
         var (width, height) = GetResolution(channel);
-        var context = CreateEncodingContext(width, height, inputPath, sourceVideoCodec);
+        var skipExpr = FfmpegSkipCuts.BuildSelectExpression(skipRanges ?? []);
+        var gpuFilters = CanUseGpuVideoFilters(channel, overlayHeadline: null, alertTickerPath: null, skipExpr);
+        var context = CreateEncodingContext(width, height, inputPath, sourceVideoCodec, gpuFilters);
         var isRemoteInput = inputPath.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
             || inputPath.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
-        var skipExpr = FfmpegSkipCuts.BuildSelectExpression(skipRanges ?? []);
 
         var args = new List<string>
         {
@@ -213,7 +215,7 @@ public class FfmpegCommandBuilder
             ? ResolveBugPath(channel)
             : null;
         var filter = _encoding.AdaptFilterComplexForEncoder(
-            BuildMusicFilter(width, height, logo, albumArtPath, channel.ScanlinesEnabled && channel.AspectRatio == AspectRatioMode.FourThree, alertTickerPath),
+            BuildMusicFilter(width, height, logo, albumArtPath, alertTickerPath),
             context.Encoder);
         var encodeSeconds = alertTones is { HasTones: true }
             ? alertTones.TotalSeconds
@@ -707,6 +709,7 @@ public class FfmpegCommandBuilder
             status.HardwareAcceleration == "none" ? "software" : status.HardwareAcceleration,
             status.VaapiDevice,
             encoder.Contains("vaapi", StringComparison.OrdinalIgnoreCase),
+            encoder.Contains("qsv", StringComparison.OrdinalIgnoreCase),
             _normalization.Describe());
     }
 
@@ -743,48 +746,84 @@ public class FfmpegCommandBuilder
     private readonly record struct EncodingContext(
         string Encoder,
         IReadOnlyList<string> HardwareDeviceArgs,
-        IReadOnlyList<string> HardwareDecodeArgs);
+        IReadOnlyList<string> HardwareDecodeArgs,
+        string? GpuFilters);
 
     private EncodingContext CreateEncodingContext(
         int width,
         int height,
         string? mediaPath = null,
-        string? sourceVideoCodec = null)
+        string? sourceVideoCodec = null,
+        bool gpuFilters = false)
     {
         _ = width;
         _ = height;
         var encoder = _encoding.ResolveVideoEncoder(_normalization.Current.IsMpeg2);
         var hardware = encoder.Contains("vaapi", StringComparison.OrdinalIgnoreCase)
+            || encoder.Contains("qsv", StringComparison.OrdinalIgnoreCase)
             || encoder.Contains("nvenc", StringComparison.OrdinalIgnoreCase);
         if (!hardware)
         {
-            return new EncodingContext(encoder, [], []);
+            return new EncodingContext(encoder, [], [], null);
         }
 
+        var filterKind = !gpuFilters
+            ? null
+            : encoder.Contains("qsv", StringComparison.OrdinalIgnoreCase) ? "qsv"
+            : encoder.Contains("vaapi", StringComparison.OrdinalIgnoreCase) ? "vaapi"
+            : null;
         var codec = ResolveSourceVideoCodec(mediaPath, sourceVideoCodec);
-        var decodeArgs = _encoding.DecodeArgsForSource(codec);
-        if (_encoding.UseVaapi
+        var decodeArgs = _encoding.DecodeArgsForSource(codec, stayOnGpu: filterKind is not null);
+        if ((_encoding.UseVaapi || _encoding.UseQsv)
             && _encoding.HardwareDecodeArgs.Count > 0
             && decodeArgs.Count == 0
             && WarnedSoftwareDecodePaths.TryAdd($"{mediaPath}|{codec}", 0))
         {
-            var reason = FfmpegEncodingService.IsUnsafeVaapiDecodeCodec(codec)
-                ? "AV1 VAAPI decode is unsafe on Intel iHD"
-                : "render node has no VAAPI VLD profile";
+            var reason = _encoding.UseQsv
+                ? "no QSV decoder or render node VLD profile"
+                : FfmpegEncodingService.IsUnsafeVaapiDecodeCodec(codec)
+                    ? "AV1 VAAPI decode is unsafe on Intel iHD"
+                    : "render node has no VAAPI VLD profile";
             _logger.LogWarning(
-                "Skipping VAAPI decode for {Codec} source {Path} ({Reason}); software-decoding then encoding with {Encoder}",
+                "Skipping {Accel} decode for {Codec} source {Path} ({Reason}); software-decoding then encoding with {Encoder}",
+                _encoding.UseQsv ? "QSV" : "VAAPI",
                 FfmpegEncodingService.NormalizeVideoCodec(codec) ?? "unknown",
                 mediaPath,
                 reason,
                 encoder);
         }
 
-        return new EncodingContext(encoder, _encoding.HardwareDeviceArgs, decodeArgs);
+        return new EncodingContext(encoder, _encoding.HardwareDeviceArgs, decodeArgs, filterKind);
+    }
+
+    private static bool CanUseGpuVideoFilters(
+        Channel channel,
+        string? overlayHeadline,
+        string? alertTickerPath,
+        string? skipExpr = null)
+    {
+        if (!string.IsNullOrEmpty(skipExpr))
+        {
+            return false;
+        }
+
+        if (PastTenseNewsCatalog.IsPastTenseNewsChannel(channel))
+        {
+            return false;
+        }
+
+        if (HasAlertTicker(alertTickerPath))
+        {
+            return false;
+        }
+
+        _ = overlayHeadline;
+        return true;
     }
 
     private string? ResolveSourceVideoCodec(string? mediaPath, string? hintedCodec)
     {
-        if (!_encoding.UseVaapi || !LooksLikeLocalVideo(mediaPath))
+        if ((!_encoding.UseVaapi && !_encoding.UseQsv) || !LooksLikeLocalVideo(mediaPath))
         {
             return hintedCodec;
         }
@@ -924,7 +963,8 @@ public class FfmpegCommandBuilder
                     "-g", (stillImage ? Math.Min(12, target.Gop) : target.Gop).ToString(),
                     "-bf", "0"
                 };
-            if (!context.Encoder.Contains("vaapi", StringComparison.OrdinalIgnoreCase))
+            if (!context.Encoder.Contains("vaapi", StringComparison.OrdinalIgnoreCase)
+                && !context.Encoder.Contains("qsv", StringComparison.OrdinalIgnoreCase))
             {
                 mpeg2.InsertRange(0, ["-q:v", "4"]);
                 mpeg2.Add("-pix_fmt");
@@ -963,18 +1003,26 @@ public class FfmpegCommandBuilder
         bool fadeBugOut = false,
         WeatherAlertToneSandwich? alertTones = null)
     {
-        var linear = BuildLinearVideoFilters(channel, width, height, overlayHeadline, alertTickerPath);
-        if (!string.IsNullOrEmpty(skipExpr))
+        var bug = overlayBug ? ResolveBugFile(channel, bugImagePath) : null;
+        var sandwich = alertTones is { HasTones: true } ? alertTones : null;
+        var gpuFilters = context.GpuFilters;
+        var uploadFirst = gpuFilters is not null && context.HardwareDecodeArgs.Count == 0;
+        var linear = gpuFilters == "qsv"
+            ? BuildQsvScalePad(width, height, uploadFirst, sourceWidth, sourceHeight)
+            : gpuFilters == "vaapi"
+                ? BuildVaapiScalePad(width, height, uploadFirst)
+                : BuildLinearVideoFilters(channel, width, height, overlayHeadline, alertTickerPath);
+        if (!string.IsNullOrEmpty(skipExpr) && gpuFilters is null)
         {
             linear = $"select='{skipExpr}',setpts=N/FRAME_RATE/TB,{linear}";
         }
 
-        var bug = overlayBug ? ResolveBugFile(channel, bugImagePath) : null;
-        var sandwich = alertTones is { HasTones: true } ? alertTones : null;
         if (string.IsNullOrWhiteSpace(bug) && sandwich is null)
         {
             args.Add("-vf");
-            args.Add(_encoding.AdaptVideoFilterForEncoder(linear, context.Encoder));
+            args.Add(gpuFilters is not null
+                ? linear
+                : _encoding.AdaptVideoFilterForEncoder(linear, context.Encoder));
             args.AddRange(["-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn"]);
             return;
         }
@@ -999,6 +1047,21 @@ public class FfmpegCommandBuilder
         if (string.IsNullOrWhiteSpace(bug))
         {
             graph = $"[0:v]{linear}[vout]";
+        }
+        else if (gpuFilters is not null)
+        {
+            var bugWidth = Math.Clamp(width / 8, 140, 260);
+            var position = GetBugOverlay(channel, width, height, sourceAspectRatio, sourceWidth, sourceHeight);
+            var alpha = ChannelBugLayout.AlphaFilters(fadeBugIn, fadeBugOut, durationSeconds);
+            var (overlayX, overlayY) = SplitOverlayXy(position);
+            var overlay = gpuFilters == "qsv" ? "overlay_qsv" : "overlay_vaapi";
+            var bugUpload = gpuFilters == "qsv"
+                ? $"{alpha},hwupload=extra_hw_frames=64,format=qsv"
+                : $"{alpha},hwupload=extra_hw_frames=64";
+            graph =
+                $"[0:v]{linear}[base];" +
+                $"[1:v]format=bgra,scale={bugWidth}:-1:force_original_aspect_ratio=decrease,{bugUpload}[bug];" +
+                $"[base][bug]{overlay}=x={overlayX}:y={overlayY}[vout]";
         }
         else
         {
@@ -1025,13 +1088,88 @@ public class FfmpegCommandBuilder
             : "0:a:0?";
         args.AddRange(
         [
-            "-filter_complex", _encoding.AdaptFilterComplexForEncoder(graph, context.Encoder),
+            "-filter_complex",
+            gpuFilters is not null ? graph : _encoding.AdaptFilterComplexForEncoder(graph, context.Encoder),
             "-map", "[vout]",
             "-map", audioMap,
             "-sn",
             "-dn",
             "-shortest"
         ]);
+    }
+
+    private static string BuildVaapiScalePad(int width, int height, bool uploadFirst)
+    {
+        var filters = new List<string>();
+        if (uploadFirst)
+        {
+            filters.Add("format=nv12");
+            filters.Add("hwupload=extra_hw_frames=64");
+        }
+
+        filters.Add(
+            $"scale_vaapi={width}:{height}:force_original_aspect_ratio=decrease:force_divisible_by=2:format=nv12");
+        filters.Add($"pad_vaapi={width}:{height}:-1:-1:color=black");
+        return string.Join(',', filters);
+    }
+
+    private static string BuildQsvScalePad(
+        int width,
+        int height,
+        bool uploadFirst,
+        int? sourceWidth,
+        int? sourceHeight)
+    {
+        var filters = new List<string>();
+        if (uploadFirst)
+        {
+            filters.Add("format=nv12");
+            filters.Add("hwupload=extra_hw_frames=64");
+            filters.Add("format=qsv");
+        }
+
+        var (scaleW, scaleH) = FitInside(sourceWidth, sourceHeight, width, height);
+        filters.Add($"scale_qsv=w={scaleW}:h={scaleH}:format=nv12");
+        if (scaleW != width || scaleH != height)
+        {
+            filters.Add($"pad_qsv=w={width}:h={height}:x=-1:y=-1");
+        }
+
+        return string.Join(',', filters);
+    }
+
+    private static (int Width, int Height) FitInside(int? sourceWidth, int? sourceHeight, int destWidth, int destHeight)
+    {
+        if (sourceWidth is not > 0 || sourceHeight is not > 0)
+        {
+            return (destWidth, destHeight);
+        }
+
+        var scale = Math.Min(destWidth / (double)sourceWidth.Value, destHeight / (double)sourceHeight.Value);
+        var width = Math.Max(2, (int)Math.Round(sourceWidth.Value * scale / 2.0) * 2);
+        var height = Math.Max(2, (int)Math.Round(sourceHeight.Value * scale / 2.0) * 2);
+        if (width > destWidth)
+        {
+            width = destWidth - (destWidth % 2);
+        }
+
+        if (height > destHeight)
+        {
+            height = destHeight - (destHeight % 2);
+        }
+
+        return (width, height);
+    }
+
+    private static (string X, string Y) SplitOverlayXy(string position)
+    {
+        var colon = position.IndexOf(':');
+        if (colon <= 0 || colon >= position.Length - 1)
+        {
+            return ("W-w-24", "H-h-24");
+        }
+
+        return (position[..colon], position[(colon + 1)..]);
     }
 
     private static string? ResolveBugFile(Channel channel, string? bugImagePath)
@@ -1063,11 +1201,6 @@ public class FfmpegCommandBuilder
             $"scale={width}:{height}:force_original_aspect_ratio=decrease",
             $"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black"
         };
-
-        if (channel.ScanlinesEnabled && channel.AspectRatio == AspectRatioMode.FourThree)
-        {
-            filters.Add("format=yuv420p,geq=lum='if(not(mod(Y,4)),lum(X,Y)*0.82,lum(X,Y))'");
-        }
 
         if (PastTenseNewsCatalog.IsPastTenseNewsChannel(channel))
         {
@@ -1128,7 +1261,7 @@ public class FfmpegCommandBuilder
         return trimmed[..Math.Max(1, maxChars - 1)].TrimEnd() + "…";
     }
 
-    private static string BuildMusicFilter(int width, int height, string? logoPath, string? albumArtPath, bool scanlines, string? alertTickerPath)
+    private static string BuildMusicFilter(int width, int height, string? logoPath, string? albumArtPath, string? alertTickerPath)
     {
         var baseFilter = $"color=c=0x111111:s={width}x{height}:r=30[base]";
         var current = "[base]";
@@ -1147,11 +1280,6 @@ public class FfmpegCommandBuilder
         else
         {
             baseFilter += $";{current}null[vout]";
-        }
-
-        if (scanlines)
-        {
-            baseFilter = baseFilter.Replace("[vout]", "[vtmp];[vtmp]format=yuv420p,geq=lum='if(not(mod(Y,4)),lum(X,Y)*0.82,lum(X,Y))'[vout]");
         }
 
         if (HasAlertTicker(alertTickerPath))
@@ -1343,4 +1471,5 @@ public sealed record StreamPipelineInfo(
     string Hardware,
     string? VaapiDevice,
     bool UseVaapi,
+    bool UseQsv,
     object Target);

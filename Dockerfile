@@ -28,10 +28,10 @@ RUN dotnet publish src/ChannelFlow.Server/ChannelFlow.Server.csproj -c Release -
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 ARG CHANNELFLOW_VERSION=1.0.0
 ARG CHANNELFLOW_REVISION=dev
+ARG JELLYFIN_FFMPEG_VERSION=7.1.4-3
 ENV TZ=America/Chicago
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         tzdata \
-        ffmpeg \
         ca-certificates \
         python3 \
         wget \
@@ -43,6 +43,27 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
         libva2 \
         vainfo \
         libfontconfig1 \
+        libfreetype6 \
+        libdrm2 \
+    && . /etc/os-release \
+    && arch="$$(dpkg --print-architecture)" \
+    && installed= \
+    && for suite in "$${VERSION_CODENAME:-}" trixie bookworm noble jammy; do \
+            [ -n "$$suite" ] || continue; \
+            deb="jellyfin-ffmpeg7_${JELLYFIN_FFMPEG_VERSION}-$${suite}_$${arch}.deb"; \
+            url="https://github.com/jellyfin/jellyfin-ffmpeg/releases/download/v${JELLYFIN_FFMPEG_VERSION}/$${deb}"; \
+            echo "Trying $${url}"; \
+            if wget -qO /tmp/jellyfin-ffmpeg.deb "$${url}"; then \
+                DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends /tmp/jellyfin-ffmpeg.deb; \
+                installed=1; \
+                break; \
+            fi; \
+       done \
+    && rm -f /tmp/jellyfin-ffmpeg.deb \
+    && test -n "$$installed" \
+    && test -x /usr/lib/jellyfin-ffmpeg/ffmpeg \
+    && ln -sf /usr/lib/jellyfin-ffmpeg/ffmpeg /usr/local/bin/ffmpeg \
+    && ln -sf /usr/lib/jellyfin-ffmpeg/ffprobe /usr/local/bin/ffprobe \
     && ln -snf "/usr/share/zoneinfo/${TZ}" /etc/localtime \
     && echo "${TZ}" > /etc/timezone \
     && rm -rf /var/lib/apt/lists/* \
@@ -54,7 +75,7 @@ COPY --from=build /app/publish .
 
 ENV CHANNELFLOW_CONFIG=/config \
     FINTV_CONFIG=/config \
-    FFMPEG_PATH=/usr/bin/ffmpeg \
+    FFMPEG_PATH=/usr/lib/jellyfin-ffmpeg/ffmpeg \
     CHANNELFLOW_YTDLP_PATH=/usr/local/bin/yt-dlp \
     FINTV_YTDLP_PATH=/usr/local/bin/yt-dlp \
     FFMPEG_HWACCEL=vaapi \

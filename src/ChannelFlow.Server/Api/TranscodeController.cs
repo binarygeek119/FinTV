@@ -78,7 +78,7 @@ public class TranscodeController : ControllerBase
                 var accel = _gpu.ClampAcceleration(request.HardwareAcceleration, request.VideoEncoder);
                 plugin.Configuration.Transcode.HardwareAcceleration = accel;
                 plugin.Configuration.Transcode.VideoEncoder = NormalizeEncoder(_gpu.ClampEncoder(request.VideoEncoder, accel));
-                plugin.Configuration.Transcode.VaapiDevice = accel == "vaapi"
+                plugin.Configuration.Transcode.VaapiDevice = accel is "vaapi" or "qsv"
                     ? _gpu.ClampVaapiDevice(request.VaapiDevice)
                     : string.IsNullOrWhiteSpace(request.VaapiDevice) ? null : request.VaapiDevice.Trim();
                 if (request.RunAheadSeconds.HasValue)
@@ -168,7 +168,7 @@ public class TranscodeController : ControllerBase
         var encoder = usingSaved
             ? _gpu.ClampEncoder(string.IsNullOrWhiteSpace(saved.VideoEncoder) ? "auto" : saved.VideoEncoder, accel)
             : "auto";
-        var vaapiDevice = accel == "vaapi"
+        var vaapiDevice = accel is "vaapi" or "qsv"
             ? _gpu.ClampVaapiDevice(FirstNonEmpty(saved.VaapiDevice, status.VaapiDevice, _encoding.EnvironmentVaapiDevice))
             : FirstNonEmpty(saved.VaapiDevice, status.VaapiDevice, _encoding.EnvironmentVaapiDevice);
         return new
@@ -180,6 +180,7 @@ public class TranscodeController : ControllerBase
             effectiveEncoder = _encoding.ResolveVideoEncoder(_normalization.Current.IsMpeg2),
             pipeline = _commands.DescribePipeline(),
             useVaapi = status.UseVaapi,
+            useQsv = status.UseQsv,
             vaapiRequested = status.VaapiRequested,
             vaapiDeviceExists = status.VaapiDeviceExists,
             ffmpegPath = _ffmpeg.EncoderPath,

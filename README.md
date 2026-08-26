@@ -27,7 +27,7 @@ Playback reads **local files**. Configure **path remaps** in Settings (Jellyfin 
 
 - .NET 10 SDK to build, or a self-contained publish from `scripts/publish-native.sh`
 - PostgreSQL (your own instance)
-- FFmpeg on PATH (or set `FFMPEG_PATH`)
+- FFmpeg on PATH (or set `FFMPEG_PATH`). The Docker image uses [jellyfin-ffmpeg](https://github.com/jellyfin/jellyfin-ffmpeg) at `/usr/lib/jellyfin-ffmpeg/ffmpeg`.
 - Jellyfin 12 + the ChannelFlow plugin
 - The same media paths readable by Jellyfin and ChannelFlow-Server
 
@@ -51,7 +51,7 @@ Then:
 
 Items removed from Jellyfin, or whose remapped local file is gone, are marked missing, then deleted by **Tasks → Catalog cleanup** after the grace period (default 7 days). **Scan Local Files** checks each catalog path after remap.
 
-Set `FFMPEG_HWACCEL=vaapi` and pass `/dev/dri` access for Intel VAAPI encode/decode.
+Set `FFMPEG_HWACCEL=vaapi` or `qsv` and pass `/dev/dri` access for Intel VAAPI / Quick Sync. The container ships jellyfin-ffmpeg (VAAPI, QSV, NVENC built in).
 
 The plugin registers the Live TV tuner and XMLTV guide automatically when you set the ChannelFlow-Server URL and API key.
 

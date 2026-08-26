@@ -3,7 +3,7 @@ using FinTv.Configuration;
 namespace FinTv.Streaming;
 
 /// <summary>
-/// Software or Intel VAAPI H.264 encoding/decoding for MPEG-TS output.
+/// Software, Intel VAAPI, Intel QSV, or NVENC encoding/decoding for MPEG-TS output.
 /// </summary>
 public class FfmpegEncodingService
 {
@@ -29,6 +29,11 @@ public class FfmpegEncodingService
         get { lock (_gate) return _current.UseVaapi; }
     }
 
+    public bool UseQsv
+    {
+        get { lock (_gate) return _current.UseQsv; }
+    }
+
     /// <summary>
     /// Global VAAPI device for the encoder (must appear before inputs).
     /// </summary>
@@ -39,7 +44,9 @@ public class FfmpegEncodingService
 
     /// <summary>
     /// Hardware decode flags placed immediately before a real video <c>-i</c>.
-    /// Frames are downloaded to NV12 so existing software filters (overlay, scanlines) still work.
+    /// Output format is left unset so ffmpeg downloads to system memory when
+    /// CPU filters still run. VAAPI scale/pad/overlay uses a separate decode
+    /// arg list that keeps frames on the GPU.
     /// </summary>
     public IReadOnlyList<string> HardwareDecodeArgs
     {
@@ -49,10 +56,22 @@ public class FfmpegEncodingService
     /// <summary>
     /// Hardware decode flags for this source. VAAPI decode is skipped when the
     /// codec is known-unsafe (AV1 on Intel iHD) or the render node has no VLD
-    /// profile for it. The encoder still uses <see cref="HardwareDeviceArgs"/>.
+    /// profile for it. QSV decode is allowed for AV1 (<c>av1_qsv</c>). When
+    /// <paramref name="stayOnGpu"/> is true, frames stay on the GPU for
+    /// scale/pad/overlay; otherwise ffmpeg downloads for CPU filters.
     /// </summary>
-    public IReadOnlyList<string> DecodeArgsForSource(string? sourceVideoCodec)
+    public IReadOnlyList<string> DecodeArgsForSource(string? sourceVideoCodec, bool stayOnGpu = false)
     {
+        if (UseQsv)
+        {
+            if (!_gpu.CanQsvDecode(VaapiDevice, sourceVideoCodec))
+            {
+                return [];
+            }
+
+            return BuildQsvDecodeArgs(sourceVideoCodec, stayOnGpu);
+        }
+
         if (!UseVaapi)
         {
             return HardwareDecodeArgs;
@@ -64,7 +83,43 @@ public class FfmpegEncodingService
             return [];
         }
 
+        if (stayOnGpu)
+        {
+            return ["-hwaccel", "vaapi", "-hwaccel_device", "va", "-hwaccel_output_format", "vaapi"];
+        }
+
         return HardwareDecodeArgs;
+    }
+
+    public static string? QsvDecoderFor(string? sourceVideoCodec)
+        => NormalizeVideoCodec(sourceVideoCodec) switch
+        {
+            "h264" => "h264_qsv",
+            "hevc" => "hevc_qsv",
+            "mpeg2video" => "mpeg2_qsv",
+            "vc1" => "vc1_qsv",
+            "vp9" => "vp9_qsv",
+            "vp8" => "vp8_qsv",
+            "av1" => "av1_qsv",
+            "mjpeg" => "mjpeg_qsv",
+            _ => null
+        };
+
+    private static IReadOnlyList<string> BuildQsvDecodeArgs(string? sourceVideoCodec, bool stayOnGpu)
+    {
+        var args = new List<string> { "-hwaccel", "qsv", "-extra_hw_frames", "64" };
+        if (stayOnGpu)
+        {
+            args.AddRange(["-hwaccel_output_format", "qsv"]);
+        }
+
+        var decoder = QsvDecoderFor(sourceVideoCodec);
+        if (decoder is not null)
+        {
+            args.AddRange(["-c:v", decoder]);
+        }
+
+        return args;
     }
 
     public static string? NormalizeVideoCodec(string? sourceVideoCodec)
@@ -157,6 +212,7 @@ public class FfmpegEncodingService
                 _current.Encoder,
                 _current.VaapiDevice,
                 _current.UseVaapi,
+                _current.UseQsv,
                 _current.VaapiDeviceExists,
                 _current.VaapiRequested);
         }
@@ -177,15 +233,24 @@ public class FfmpegEncodingService
 
         var adapted = filter.Replace("yuv420p", "nv12", StringComparison.OrdinalIgnoreCase);
         var tail = new List<string>();
-        if (!ContainsFilterStep(adapted, "format=nv12") && !ContainsFilterStep(adapted, "format=vaapi"))
+        if (!ContainsFilterStep(adapted, "format=nv12")
+            && !ContainsFilterStep(adapted, "format=vaapi")
+            && !ContainsFilterStep(adapted, "format=qsv"))
         {
             tail.Add("format=nv12");
         }
 
-        if (videoEncoder.Contains("vaapi", StringComparison.OrdinalIgnoreCase)
-            && !ContainsFilterStep(adapted, "hwupload"))
+        if (!ContainsFilterStep(adapted, "hwupload"))
         {
-            tail.Add("hwupload=extra_hw_frames=64");
+            if (videoEncoder.Contains("vaapi", StringComparison.OrdinalIgnoreCase))
+            {
+                tail.Add("hwupload=extra_hw_frames=64");
+            }
+            else if (videoEncoder.Contains("qsv", StringComparison.OrdinalIgnoreCase))
+            {
+                tail.Add("hwupload=extra_hw_frames=64");
+                tail.Add("format=qsv");
+            }
         }
 
         if (tail.Count == 0)
@@ -226,20 +291,28 @@ public class FfmpegEncodingService
             ? (stillImage ? "4000k" : "10000k")
             : DoubleBitrate(bitrate);
 
-        if (Encoder.Contains("vaapi", StringComparison.OrdinalIgnoreCase))
+        if (Encoder.Contains("vaapi", StringComparison.OrdinalIgnoreCase)
+            || Encoder.Contains("qsv", StringComparison.OrdinalIgnoreCase))
         {
             // Do not force -profile:v. Intel iHD often rejects an explicit Main/High
             // profile on real overlay/hwupload surfaces even when a lavfi probe of
             // the same profile succeeds.
-            return
-            [
-                "-b:v", bitrate ?? (stillImage ? "1500k" : "4000k"),
-                "-maxrate", bitrate ?? (stillImage ? "2500k" : "5000k"),
-                "-bufsize", bufsize,
-                "-r", safeRate,
-                "-g", keyint.ToString(),
-                "-bf", "0"
-            ];
+            var intel =
+                new List<string>
+                {
+                    "-b:v", bitrate ?? (stillImage ? "1500k" : "4000k"),
+                    "-maxrate", bitrate ?? (stillImage ? "2500k" : "5000k"),
+                    "-bufsize", bufsize,
+                    "-r", safeRate,
+                    "-g", keyint.ToString(),
+                    "-bf", "0"
+                };
+            if (Encoder.Contains("qsv", StringComparison.OrdinalIgnoreCase))
+            {
+                intel.InsertRange(0, ["-preset", stillImage ? "fast" : "veryfast", "-look_ahead", "0"]);
+            }
+
+            return intel;
         }
 
         if (Encoder.Contains("nvenc", StringComparison.OrdinalIgnoreCase))
@@ -304,6 +377,11 @@ public class FfmpegEncodingService
             return Encoder;
         }
 
+        if (UseQsv && _gpu.SupportsMpeg2Qsv())
+        {
+            return "mpeg2_qsv";
+        }
+
         return UseVaapi && _gpu.SupportsMpeg2Vaapi() ? "mpeg2_vaapi" : "mpeg2video";
     }
 
@@ -318,11 +396,36 @@ public class FfmpegEncodingService
     {
         var wantVaapi = hardwareAcceleration == "vaapi"
             || requestedEncoder.Contains("vaapi", StringComparison.OrdinalIgnoreCase);
+        var wantQsv = hardwareAcceleration == "qsv"
+            || requestedEncoder.Contains("qsv", StringComparison.OrdinalIgnoreCase);
         var wantNvenc = hardwareAcceleration == "nvenc"
             || requestedEncoder.Contains("nvenc", StringComparison.OrdinalIgnoreCase);
         var encodeDevice = _gpu.ClampVaapiDevice(vaapiDevice);
         var deviceExists = !string.IsNullOrWhiteSpace(encodeDevice) && File.Exists(encodeDevice);
-        var useVaapi = wantVaapi && deviceExists;
+        var useVaapi = wantVaapi && !wantQsv && deviceExists;
+        var useQsv = wantQsv && deviceExists;
+
+        if (useQsv)
+        {
+            var encoder = requestedEncoder == "libx264" || string.IsNullOrWhiteSpace(requestedEncoder)
+                || requestedEncoder.Equals("auto", StringComparison.OrdinalIgnoreCase)
+                ? "h264_qsv"
+                : requestedEncoder;
+            return new Snapshot(
+                "qsv",
+                encoder,
+                encodeDevice,
+                false,
+                true,
+                true,
+                wantVaapi,
+                [
+                    "-init_hw_device", $"vaapi=va:{encodeDevice}",
+                    "-init_hw_device", "qsv=hw@va",
+                    "-filter_hw_device", "hw"
+                ],
+                ["-hwaccel", "qsv", "-extra_hw_frames", "64"]);
+        }
 
         if (useVaapi)
         {
@@ -335,10 +438,11 @@ public class FfmpegEncodingService
                 encoder,
                 encodeDevice,
                 true,
+                false,
                 true,
                 true,
                 ["-init_hw_device", $"vaapi=va:{encodeDevice}", "-filter_hw_device", "va"],
-                ["-hwaccel", "vaapi", "-hwaccel_device", "va", "-hwaccel_output_format", "nv12"]);
+                ["-hwaccel", "vaapi", "-hwaccel_device", "va"]);
         }
 
         if (wantNvenc)
@@ -352,6 +456,7 @@ public class FfmpegEncodingService
                 encoder,
                 encodeDevice,
                 false,
+                false,
                 deviceExists,
                 wantVaapi,
                 ["-hwaccel", "cuda"],
@@ -361,6 +466,7 @@ public class FfmpegEncodingService
         var softwareEncoder = string.IsNullOrWhiteSpace(requestedEncoder)
             || requestedEncoder.Equals("auto", StringComparison.OrdinalIgnoreCase)
             || requestedEncoder.Contains("vaapi", StringComparison.OrdinalIgnoreCase)
+            || requestedEncoder.Contains("qsv", StringComparison.OrdinalIgnoreCase)
             || requestedEncoder.Contains("nvenc", StringComparison.OrdinalIgnoreCase)
             ? "libx264"
             : requestedEncoder;
@@ -369,8 +475,9 @@ public class FfmpegEncodingService
             softwareEncoder,
             encodeDevice,
             false,
+            false,
             deviceExists,
-            wantVaapi,
+            wantVaapi || wantQsv,
             [],
             []);
     }
@@ -378,9 +485,18 @@ public class FfmpegEncodingService
     internal static string NormalizeAcceleration(string? hardwareAcceleration, string? videoEncoder)
     {
         var value = (hardwareAcceleration ?? string.Empty).Trim().ToLowerInvariant();
-        if (value is "vaapi" or "nvenc" or "none" or "off" or "software" or "libx264")
+        if (value is "vaapi" or "qsv" or "nvenc" or "none" or "off" or "software" or "libx264"
+            or "quicksync")
         {
-            return value is "off" or "software" or "libx264" ? "none" : value;
+            return value is "off" or "software" or "libx264"
+                ? "none"
+                : value is "quicksync" ? "qsv" : value;
+        }
+
+        if (!string.IsNullOrWhiteSpace(videoEncoder)
+            && videoEncoder.Contains("qsv", StringComparison.OrdinalIgnoreCase))
+        {
+            return "qsv";
         }
 
         if (!string.IsNullOrWhiteSpace(videoEncoder)
@@ -414,6 +530,7 @@ public class FfmpegEncodingService
     private static bool IsHardware(string encoder)
         => !string.IsNullOrWhiteSpace(encoder)
            && (encoder.Contains("vaapi", StringComparison.OrdinalIgnoreCase)
+               || encoder.Contains("qsv", StringComparison.OrdinalIgnoreCase)
                || encoder.Contains("nvenc", StringComparison.OrdinalIgnoreCase));
 
     public sealed record EncodingStatus(
@@ -421,6 +538,7 @@ public class FfmpegEncodingService
         string Encoder,
         string? VaapiDevice,
         bool UseVaapi,
+        bool UseQsv,
         bool VaapiDeviceExists,
         bool VaapiRequested);
 
@@ -429,6 +547,7 @@ public class FfmpegEncodingService
         string Encoder,
         string? VaapiDevice,
         bool UseVaapi,
+        bool UseQsv,
         bool VaapiDeviceExists,
         bool VaapiRequested,
         IReadOnlyList<string> HardwareDeviceArgs,

@@ -118,6 +118,7 @@ public class AboutController : ControllerBase
                 vaapiDevice = encoding.VaapiDevice,
                 vaapiDeviceExists = encoding.VaapiDeviceExists,
                 useVaapi = encoding.UseVaapi,
+                useQsv = encoding.UseQsv,
                 source = transcodeSource,
                 gpuSummary = gpu.Summary,
                 gpuDriver = gpu.Driver,

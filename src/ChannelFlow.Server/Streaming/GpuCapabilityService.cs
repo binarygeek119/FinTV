@@ -8,7 +8,7 @@ using FinTv.Domain;
 namespace FinTv.Streaming;
 
 /// <summary>
-/// Probes VAAPI/NVENC encode support and per-device VAAPI decode profiles (vainfo VLD).
+/// Probes VAAPI/QSV/NVENC encode support and per-device VAAPI decode profiles (vainfo VLD).
 /// </summary>
 public sealed class GpuCapabilityService
 {
@@ -53,6 +53,7 @@ public sealed class GpuCapabilityService
     private GpuCapabilities? _cached;
     private int _emptyHardwareProbes;
     private readonly HashSet<string> _encodeVaapiDevices = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _encodeQsvDevices = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, IReadOnlySet<string>> _vaapiDecodeCodecs = new(StringComparer.Ordinal);
 
     public GpuCapabilityService(IFfmpegLocator ffmpeg, ILogger<GpuCapabilityService> logger)
@@ -67,6 +68,7 @@ public sealed class GpuCapabilityService
     {
         _cached = null;
         _encodeVaapiDevices.Clear();
+        _encodeQsvDevices.Clear();
         _vaapiDecodeCodecs.Clear();
     }
 
@@ -123,7 +125,7 @@ public sealed class GpuCapabilityService
         var caps = _cached;
         if (caps is null || requested == "none")
         {
-            return requested == "nvenc" || requested == "vaapi" ? requested : "none";
+            return requested is "nvenc" or "vaapi" or "qsv" ? requested : "none";
         }
 
         return caps.Accelerations.Any(item => item.Id == requested)
@@ -165,7 +167,8 @@ public sealed class GpuCapabilityService
         }
 
         var caps = _cached;
-        var preferred = caps?.VaapiDevices.FirstOrDefault(item => CanEncodeOnVaapiDevice(item.Value))
+        var preferred = caps?.VaapiDevices.FirstOrDefault(item =>
+                CanEncodeOnVaapiDevice(item.Value) || CanEncodeOnQsvDevice(item.Value))
             ?? caps?.VaapiDevices.FirstOrDefault();
         if (preferred is not null)
         {
@@ -192,6 +195,21 @@ public sealed class GpuCapabilityService
         return _cached is null && File.Exists(device);
     }
 
+    public bool CanEncodeOnQsvDevice(string? device)
+    {
+        if (string.IsNullOrWhiteSpace(device))
+        {
+            return false;
+        }
+
+        if (_encodeQsvDevices.Contains(device))
+        {
+            return true;
+        }
+
+        return _cached is null && File.Exists(device);
+    }
+
     /// <summary>
     /// True when this render node reports a VAAPI VLD profile for the source codec,
     /// or when vainfo did not return decode data (unknown → keep current hwaccel).
@@ -206,6 +224,33 @@ public sealed class GpuCapabilityService
         }
 
         if (FfmpegEncodingService.IsUnsafeVaapiDecodeCodec(codec))
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(device)
+            || !_vaapiDecodeCodecs.TryGetValue(device, out var codecs)
+            || codecs.Count == 0)
+        {
+            return true;
+        }
+
+        return codecs.Contains(codec);
+    }
+
+    /// <summary>
+    /// QSV decode uses MediaSDK/oneVPL (<c>av1_qsv</c>, <c>h264_qsv</c>, …), not
+    /// VAAPI <c>-hwaccel vaapi</c>. AV1 is allowed when vainfo lists VLD.
+    /// </summary>
+    public bool CanQsvDecode(string? device, string? sourceVideoCodec)
+    {
+        var codec = FfmpegEncodingService.NormalizeVideoCodec(sourceVideoCodec);
+        if (codec is null)
+        {
+            return true;
+        }
+
+        if (FfmpegEncodingService.QsvDecoderFor(codec) is null)
         {
             return false;
         }
@@ -242,7 +287,7 @@ public sealed class GpuCapabilityService
            && DiscoverVaapiDevices().Any();
 
     private static bool HasHardwareEncode(GpuCapabilities caps)
-        => caps.Accelerations.Any(item => item.Id is "vaapi" or "nvenc");
+        => caps.Accelerations.Any(item => item.Id is "vaapi" or "qsv" or "nvenc");
 
     public NormalizationSettings ClampNormalization(NormalizationSettings settings, string acceleration)
     {
@@ -278,6 +323,9 @@ public sealed class GpuCapabilityService
     public bool SupportsMpeg2Vaapi()
         => FormatFor("vaapi").VideoCodecs.Any(item => item.Value == "mpeg2");
 
+    public bool SupportsMpeg2Qsv()
+        => FormatFor("qsv").VideoCodecs.Any(item => item.Value == "mpeg2");
+
     private async Task<GpuCapabilities> ProbeAsync(CancellationToken cancellationToken)
     {
         var encoders = await ReadEncoderNamesAsync(cancellationToken);
@@ -285,12 +333,15 @@ public sealed class GpuCapabilityService
         var hasMpeg2Video = encoders.Contains("mpeg2video");
         var hasH264Vaapi = encoders.Contains("h264_vaapi");
         var hasMpeg2Vaapi = encoders.Contains("mpeg2_vaapi");
+        var hasH264Qsv = encoders.Contains("h264_qsv");
+        var hasMpeg2Qsv = encoders.Contains("mpeg2_qsv");
         var hasH264Nvenc = encoders.Contains("h264_nvenc");
         _logger.LogInformation(
-            "ffmpeg at {Path} listed {Count} encoders (h264_vaapi={Vaapi}, mpeg2_vaapi={Mpeg2}, h264_nvenc={Nvenc}, libx264={X264})",
+            "ffmpeg at {Path} listed {Count} encoders (h264_vaapi={Vaapi}, h264_qsv={Qsv}, mpeg2_vaapi={Mpeg2}, h264_nvenc={Nvenc}, libx264={X264})",
             _ffmpeg.EncoderPath,
             encoders.Count,
             hasH264Vaapi,
+            hasH264Qsv,
             hasMpeg2Vaapi,
             hasH264Nvenc,
             hasLibx264);
@@ -318,10 +369,11 @@ public sealed class GpuCapabilityService
         var vaapiDevices = new List<GpuSelectOption>();
         var driverNotes = new List<string>();
         _encodeVaapiDevices.Clear();
+        _encodeQsvDevices.Clear();
         _vaapiDecodeCodecs.Clear();
 
         var discovered = DiscoverVaapiDevices().ToList();
-        if (hasH264Vaapi || discovered.Count > 0)
+        if (hasH264Vaapi || hasH264Qsv || discovered.Count > 0)
         {
             foreach (var path in discovered)
             {
@@ -342,14 +394,23 @@ public sealed class GpuCapabilityService
                     vaapiDevices.Add(new GpuSelectOption(path, vaapi.Label));
                     driverNotes.Add(vaapi.Driver);
                     formats["vaapi"] = vaapi.Format;
-                    continue;
+                }
+                else
+                {
+                    vaapiDevices.Add(new GpuSelectOption(
+                        path,
+                        string.IsNullOrWhiteSpace(vainfo?.Driver)
+                            ? $"{path} (no H.264 VAAPI encode)"
+                            : $"{path} ({vainfo.Driver}, no H.264 VAAPI encode)"));
                 }
 
-                vaapiDevices.Add(new GpuSelectOption(
-                    path,
-                    string.IsNullOrWhiteSpace(vainfo?.Driver)
-                        ? $"{path} (no H.264 encode)"
-                        : $"{path} ({vainfo.Driver}, no H.264 encode)"));
+                var qsv = await ProbeQsvDeviceAsync(path, hasMpeg2Qsv, cancellationToken);
+                if (qsv is not null)
+                {
+                    _encodeQsvDevices.Add(path);
+                    formats["qsv"] = qsv;
+                    _logger.LogInformation("QSV H.264 encode on {Device}", path);
+                }
             }
 
             if (vaapiDevices.Count > 0 && (_encodeVaapiDevices.Count > 0 || hasH264Vaapi))
@@ -366,10 +427,32 @@ public sealed class GpuCapabilityService
                     FilterEncoders(["auto", "h264_vaapi"]),
                     vaapiDevices));
             }
-            else if (discovered.Count > 0 && !hasH264Vaapi)
+            else if (discovered.Count > 0 && !hasH264Vaapi && _encodeVaapiDevices.Count == 0)
             {
                 _logger.LogWarning(
                     "Render nodes exist but ffmpeg did not list h264_vaapi and no device encoded a test frame. Encoder={Path}",
+                    _ffmpeg.EncoderPath);
+            }
+
+            if (_encodeQsvDevices.Count > 0)
+            {
+                if (!formats.ContainsKey("qsv"))
+                {
+                    formats["qsv"] = formats.GetValueOrDefault("vaapi") ?? software;
+                }
+
+                accelerations.Add(new GpuAccelOption(
+                    "qsv",
+                    "Intel Quick Sync (QSV)",
+                    true,
+                    FilterEncoders(["auto", "h264_qsv"]),
+                    vaapiDevices));
+            }
+            else if (discovered.Count > 0)
+            {
+                _logger.LogInformation(
+                    "No device encoded a QSV H.264 test frame (h264_qsv listed={Listed}). Encoder={Path}",
+                    hasH264Qsv,
                     _ffmpeg.EncoderPath);
             }
         }
@@ -498,6 +581,38 @@ public sealed class GpuCapabilityService
         return new VaapiProbe(driver, $"{device} ({driver})", format);
     }
 
+    private async Task<GpuFormatLimits?> ProbeQsvDeviceAsync(
+        string device,
+        bool hasMpeg2Qsv,
+        CancellationToken cancellationToken)
+    {
+        var deviceArgs = HardwareQsvArgs(device);
+        if (!await CanEncodeAsync(deviceArgs, "h264_qsv", null, 640, 360, "30", cancellationToken))
+        {
+            return null;
+        }
+
+        var allow1080 = await CanEncodeAsync(deviceArgs, "h264_qsv", null, 1920, 1080, "30", cancellationToken);
+        var allow720 = allow1080
+            || await CanEncodeAsync(deviceArgs, "h264_qsv", null, 1280, 720, "30", cancellationToken);
+        var allow60 = allow1080
+            && await CanEncodeAsync(deviceArgs, "h264_qsv", null, 1920, 1080, "60", cancellationToken);
+        var mpeg2 = hasMpeg2Qsv
+            && await CanEncodeAsync(deviceArgs, "mpeg2_qsv", null, 640, 360, "30", cancellationToken);
+
+        return new GpuFormatLimits(
+            Filter(AllVideoCodecs, mpeg2 ? ["h264", "mpeg2"] : ["h264"]),
+            AllH264Profiles,
+            Filter(AllResolutions, allow1080 ? ["match", "480p", "720p", "1080p"]
+                : allow720 ? ["480p", "720p"]
+                : ["480p"]),
+            Filter(
+                AllFrameRates,
+                allow60
+                    ? AllFrameRates.Select(item => item.Value)
+                    : AllFrameRates.Select(item => item.Value).Where(value => !HighFrameRates.Contains(value))));
+    }
+
     private async Task<NvencProbe?> ProbeNvencAsync(CancellationToken cancellationToken)
     {
         var gpuName = await ReadNvidiaNameAsync(cancellationToken) ?? "NVIDIA";
@@ -532,6 +647,14 @@ public sealed class GpuCapabilityService
     private static IReadOnlyList<string> HardwareVaapiArgs(string device)
         => ["-init_hw_device", $"vaapi=va:{device}", "-filter_hw_device", "va"];
 
+    private static IReadOnlyList<string> HardwareQsvArgs(string device)
+        =>
+        [
+            "-init_hw_device", $"vaapi=va:{device}",
+            "-init_hw_device", "qsv=hw@va",
+            "-filter_hw_device", "hw"
+        ];
+
     private async Task<bool> CanEncodeAsync(
         IReadOnlyList<string> deviceArgs,
         string encoder,
@@ -551,6 +674,10 @@ public sealed class GpuCapabilityService
         if (encoder.Contains("vaapi", StringComparison.OrdinalIgnoreCase))
         {
             args.AddRange(["-vf", "format=nv12,hwupload=extra_hw_frames=64"]);
+        }
+        else if (encoder.Contains("qsv", StringComparison.OrdinalIgnoreCase))
+        {
+            args.AddRange(["-vf", "format=nv12,hwupload=extra_hw_frames=64,format=qsv"]);
         }
         else if (encoder.Contains("nvenc", StringComparison.OrdinalIgnoreCase))
         {
@@ -598,8 +725,8 @@ public sealed class GpuCapabilityService
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var (_, text) = await RunAsync(
             _ffmpeg.EncoderPath,
-            ["-hide_banner", "-encoders"],
-            TimeSpan.FromSeconds(20),
+            ["-hide_banner", "-loglevel", "error", "-encoders"],
+            TimeSpan.FromSeconds(8),
             cancellationToken);
         foreach (var line in text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
         {
@@ -610,7 +737,7 @@ public sealed class GpuCapabilityService
             }
         }
 
-        foreach (var known in new[] { "h264_vaapi", "mpeg2_vaapi", "h264_nvenc", "libx264", "mpeg2video" })
+        foreach (var known in new[] { "h264_vaapi", "mpeg2_vaapi", "h264_qsv", "mpeg2_qsv", "h264_nvenc", "libx264", "mpeg2video" })
         {
             if (text.Contains(known, StringComparison.OrdinalIgnoreCase))
             {
@@ -853,6 +980,21 @@ public sealed class GpuCapabilityService
 
             parts.Add(vaapi.Resolutions.Any(item => item.Value == "1080p") ? "up to 1080p" : "up to 720p");
             parts.Add(vaapi.FrameRates.Any(item => item.Value == "60") ? "60 fps" : "30 fps");
+            if (formats.ContainsKey("qsv"))
+            {
+                parts.Add("QSV");
+            }
+        }
+        else if (formats.TryGetValue("qsv", out var qsv))
+        {
+            parts.Add("QSV H.264 " + string.Join("/", qsv.H264Profiles.Select(item => item.Label)));
+            if (qsv.VideoCodecs.Any(item => item.Value == "mpeg2"))
+            {
+                parts.Add("MPEG-2");
+            }
+
+            parts.Add(qsv.Resolutions.Any(item => item.Value == "1080p") ? "up to 1080p" : "up to 720p");
+            parts.Add(qsv.FrameRates.Any(item => item.Value == "60") ? "60 fps" : "30 fps");
         }
         else if (formats.TryGetValue("nvenc", out var nvenc))
         {

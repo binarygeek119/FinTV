@@ -107,7 +107,7 @@ public class WeatherStarChannelService
             permalinkQuery,
             skin,
             channel.AspectRatio != AspectRatioMode.FourThree && (config?.WeatherStarAutoWideForSixteenNine ?? true),
-            channel.ScanlinesEnabled,
+            false,
             hasAlerts: snap.Alerts.Count > 0,
             localForecastPages: Math.Clamp(snap.Periods.Count > 0 ? snap.Periods.Count : snap.Daily.Count, 1, 6));
 
@@ -234,7 +234,7 @@ public class WeatherStarChannelService
             var pumpTask = PumpHazardsFramesAsync(
                 snap,
                 skin,
-                channel.ScanlinesEnabled,
+                false,
                 width,
                 height,
                 frameStream,
