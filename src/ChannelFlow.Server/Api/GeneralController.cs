@@ -1,4 +1,3 @@
-using FinTv.Auth;
 using FinTv.Configuration;
 using FinTv.Domain;
 using FinTv.Services;
@@ -15,15 +14,6 @@ namespace FinTv.Api;
 [Authorize(Policy = "admin")]
 public class GeneralController : ControllerBase
 {
-    private readonly QuickPinService _quickPins;
-    private readonly IPublicBaseUrl _appHost;
-
-    public GeneralController(QuickPinService quickPins, IPublicBaseUrl appHost)
-    {
-        _quickPins = quickPins;
-        _appHost = appHost;
-    }
-
     /// <summary>
     /// Gets general settings.
     /// </summary>
@@ -143,36 +133,6 @@ public class GeneralController : ControllerBase
         {
             return BadRequest(new { message = $"Could not save general settings: {ex.Message}" });
         }
-    }
-
-    /// <summary>
-    /// Gets the active quick pin, if one has been created and has not expired.
-    /// </summary>
-    [HttpGet("quick-pin")]
-    public ActionResult<object> GetQuickPin()
-        => Ok(DescribeQuickPin(_quickPins.Snapshot(includePin: true)));
-
-    /// <summary>
-    /// Creates a new 5-minute quick pin for pairing another app.
-    /// </summary>
-    [HttpPost("quick-pin")]
-    public ActionResult<object> CreateQuickPin()
-        => Ok(DescribeQuickPin(_quickPins.Create()));
-
-    private object DescribeQuickPin(QuickPinSnapshot snapshot)
-    {
-        var baseUrl = EpgService.GetPublicBaseUrl(Request, _appHost);
-        return new
-        {
-            active = snapshot.Active,
-            pin = snapshot.Pin,
-            expiresAt = snapshot.ExpiresAt,
-            expiresInSeconds = snapshot.ExpiresInSeconds,
-            lifetimeSeconds = QuickPinService.LifetimeSeconds,
-            serverUrl = baseUrl,
-            pairUrl = $"{baseUrl}/api/setup/pair",
-            pairPageUrl = $"{baseUrl}/pair"
-        };
     }
 }
 

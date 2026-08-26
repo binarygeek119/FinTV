@@ -559,17 +559,16 @@ input, select, textarea {
 .credits-list li { margin: 0.4rem 0; line-height: 1.45; }
 .credits-list a { color: var(--accent-hover); }
 .section-card h3 { margin: 1.15rem 0 0.4rem; font-size: 1rem; }
-.quick-pin-panel { margin: 0.75rem 0 1rem; padding: 0.85rem; background: #141414; border: 1px solid var(--border); border-radius: var(--radius); }
-.quick-pin-code {
-    margin: 0 0 0.35rem;
+.quick-pin-input {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 2rem;
+    font-size: 1.85rem;
     letter-spacing: 0.18em;
     font-weight: 700;
     text-align: center;
-    color: var(--text);
+    text-transform: uppercase;
 }
-#quick-pin-server-url, #quick-pin-pair-url { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+#quick-pin-status { min-height: 1.2em; }
+#quick-pin-status.error { color: var(--accent-hover); }
 body.channel-editor-open {
     overflow: hidden;
 }

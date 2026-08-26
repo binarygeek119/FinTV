@@ -1,99 +1,90 @@
+using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace FinTv.Auth;
 
 /// <summary>
-/// Short-lived PIN so another app can fetch M3U/XMLTV links without copying the API key.
+/// Encrypts M3U/XMLTV URLs with a PIN-derived key and posts ciphertext to the pin server.
+/// ChannelFlow never mints pins. The pin server only routes the blob.
 /// </summary>
 public sealed class QuickPinService
 {
-    public const int LifetimeSeconds = 300;
-    public const int MaxFailedAttempts = 8;
-    public const int PinLength = 6;
+    public const string HttpClientName = nameof(QuickPinService);
+    public const string PinServerUrl = "http://channelflow.duckdns.org";
+    public const int PinLength = 8;
+    public const int LifetimeSeconds = 600;
 
-    private readonly object _gate = new();
-    private string? _pin;
-    private DateTimeOffset _expiresAt;
-    private int _failures;
+    private const string KeySeedPrefix = "ChannelFlow QuickPin v1";
+    private static readonly TimeSpan RateWindow = TimeSpan.FromMinutes(1);
+    private const int MaxAttemptsPerWindow = 20;
 
-    public QuickPinSnapshot Create()
+    private readonly IHttpClientFactory _http;
+    private readonly ILogger<QuickPinService> _logger;
+    private readonly object _rateGate = new();
+    private readonly Queue<DateTimeOffset> _attempts = new();
+
+    public QuickPinService(IHttpClientFactory http, ILogger<QuickPinService> logger)
     {
-        lock (_gate)
-        {
-            _pin = RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("D6");
-            _expiresAt = DateTimeOffset.UtcNow.AddSeconds(LifetimeSeconds);
-            _failures = 0;
-            return SnapshotUnlocked(includePin: true);
-        }
+        _http = http;
+        _logger = logger;
     }
 
-    public QuickPinSnapshot Snapshot(bool includePin)
+    public async Task<QuickPinDeliverResult> RedeemAsync(string? pin, string m3u, string xmltv, CancellationToken cancellationToken)
     {
-        lock (_gate)
+        if (!TryRateLimit())
         {
-            return SnapshotUnlocked(includePin);
+            return QuickPinDeliverResult.Fail(429, "Too many attempts. Wait a minute and try again.");
         }
-    }
 
-    public bool TryAccept(string? pin, out string error)
-    {
         var normalized = Normalize(pin);
-        lock (_gate)
+        if (normalized.Length != PinLength)
         {
-            if (!IsActiveUnlocked())
-            {
-                ClearUnlocked();
-                error = "expired";
-                return false;
-            }
-
-            if (normalized.Length != PinLength
-                || !CryptographicOperations.FixedTimeEquals(
-                    Encoding.ASCII.GetBytes(normalized),
-                    Encoding.ASCII.GetBytes(_pin!)))
-            {
-                _failures++;
-                if (_failures >= MaxFailedAttempts)
-                {
-                    ClearUnlocked();
-                    error = "expired";
-                    return false;
-                }
-
-                error = "invalid";
-                return false;
-            }
-
-            error = string.Empty;
-            return true;
-        }
-    }
-
-    private QuickPinSnapshot SnapshotUnlocked(bool includePin)
-    {
-        if (!IsActiveUnlocked())
-        {
-            ClearUnlocked();
-            return QuickPinSnapshot.Inactive();
+            return QuickPinDeliverResult.Fail(400, "Enter the 8-character pin from the app.");
         }
 
-        var remaining = (int)Math.Ceiling((_expiresAt - DateTimeOffset.UtcNow).TotalSeconds);
-        return new QuickPinSnapshot(
-            Active: true,
-            Pin: includePin ? _pin : null,
-            ExpiresAt: _expiresAt,
-            ExpiresInSeconds: Math.Max(0, remaining));
-    }
+        string ciphertext;
+        try
+        {
+            ciphertext = Encrypt(normalized, m3u, xmltv);
+        }
+        catch (Exception)
+        {
+            _logger.LogWarning("Quick pin encrypt failed.");
+            return QuickPinDeliverResult.Fail(500, "Could not encrypt connection info.");
+        }
 
-    private bool IsActiveUnlocked()
-        => !string.IsNullOrEmpty(_pin) && DateTimeOffset.UtcNow < _expiresAt;
+        try
+        {
+            var client = _http.CreateClient(HttpClientName);
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{PinServerUrl}/v1/pins/{normalized}/deliver")
+            {
+                Content = JsonContent.Create(new { ciphertext }),
+            };
+            using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode == System.Net.HttpStatusCode.NoContent
+                || response.StatusCode == System.Net.HttpStatusCode.OK)
+            {
+                return QuickPinDeliverResult.Success("Sent. The app should connect in a moment.");
+            }
 
-    private void ClearUnlocked()
-    {
-        _pin = null;
-        _expiresAt = default;
-        _failures = 0;
+            if ((int)response.StatusCode == 404)
+            {
+                return QuickPinDeliverResult.Fail(404, "That pin is unknown or expired. Open the app and try the pin it shows now.");
+            }
+
+            return QuickPinDeliverResult.Fail(502, "Pin server rejected the request.");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            _logger.LogWarning("Quick pin deliver failed.");
+            return QuickPinDeliverResult.Fail(502, "Could not reach the pin server.");
+        }
     }
 
     internal static string Normalize(string? pin)
@@ -103,17 +94,59 @@ public sealed class QuickPinService
             return string.Empty;
         }
 
-        var chars = pin.Where(char.IsDigit).ToArray();
+        var chars = pin
+            .Where(static c => (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))
+            .Select(char.ToUpperInvariant)
+            .ToArray();
         return new string(chars);
+    }
+
+    internal static string Encrypt(string pin, string m3u, string xmltv)
+    {
+        var plaintext = JsonSerializer.Serialize(new Dictionary<string, string>
+        {
+            ["m3u"] = m3u,
+            ["xmltv"] = xmltv,
+        });
+        var key = SHA256.HashData(Encoding.ASCII.GetBytes(KeySeedPrefix + pin));
+        var nonce = RandomNumberGenerator.GetBytes(12);
+        var plainBytes = Encoding.UTF8.GetBytes(plaintext);
+        var ciphertext = new byte[plainBytes.Length];
+        var tag = new byte[16];
+        using var gcm = new AesGcm(key, tag.Length);
+        gcm.Encrypt(nonce, plainBytes, ciphertext, tag);
+
+        var packed = new byte[nonce.Length + ciphertext.Length + tag.Length];
+        Buffer.BlockCopy(nonce, 0, packed, 0, nonce.Length);
+        Buffer.BlockCopy(ciphertext, 0, packed, nonce.Length, ciphertext.Length);
+        Buffer.BlockCopy(tag, 0, packed, nonce.Length + ciphertext.Length, tag.Length);
+        return Convert.ToBase64String(packed);
+    }
+
+    private bool TryRateLimit()
+    {
+        var now = DateTimeOffset.UtcNow;
+        lock (_rateGate)
+        {
+            while (_attempts.Count > 0 && now - _attempts.Peek() > RateWindow)
+            {
+                _attempts.Dequeue();
+            }
+
+            if (_attempts.Count >= MaxAttemptsPerWindow)
+            {
+                return false;
+            }
+
+            _attempts.Enqueue(now);
+            return true;
+        }
     }
 }
 
-public readonly record struct QuickPinSnapshot(
-    bool Active,
-    string? Pin,
-    DateTimeOffset? ExpiresAt,
-    int ExpiresInSeconds)
+public readonly record struct QuickPinDeliverResult(bool Ok, int StatusCode, string Message)
 {
-    public static QuickPinSnapshot Inactive()
-        => new(false, null, null, 0);
+    public static QuickPinDeliverResult Success(string message) => new(true, 200, message);
+
+    public static QuickPinDeliverResult Fail(int status, string message) => new(false, status, message);
 }

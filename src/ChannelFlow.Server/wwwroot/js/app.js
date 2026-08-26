@@ -5825,85 +5825,66 @@
         await loadStreamOutput();
     }
 
-    let quickPinTimer = null;
-    let quickPinExpiresAt = 0;
-    let quickPinValue = '';
+    function normalizeQuickPin(value) {
+        return String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+    }
 
     function formatQuickPin(pin) {
-        const digits = String(pin || '').replace(/\D/g, '');
-        return digits.length === 6 ? `${digits.slice(0, 3)} ${digits.slice(3)}` : digits;
+        const value = normalizeQuickPin(pin);
+        return value.length > 4 ? `${value.slice(0, 4)}-${value.slice(4)}` : value;
     }
 
-    function stopQuickPinTimer() {
-        if (quickPinTimer) {
-            clearInterval(quickPinTimer);
-            quickPinTimer = null;
+    function setQuickPinStatus(message, kind) {
+        const status = $('quick-pin-status');
+        if (!status) {
+            return;
         }
+        status.textContent = message || '';
+        status.classList.toggle('error', kind === 'error');
     }
 
-    function renderQuickPinExpiry() {
-        const label = $('quick-pin-expires');
-        if (!label) {
+    function onQuickPinInput() {
+        const input = $('quick-pin-input');
+        if (!input) {
+            return;
+        }
+        const formatted = formatQuickPin(input.value);
+        if (input.value !== formatted) {
+            input.value = formatted;
+        }
+        setQuickPinStatus('');
+    }
+
+    async function redeemQuickPin() {
+        const pin = normalizeQuickPin($('quick-pin-input')?.value);
+        if (pin.length !== 8) {
+            setQuickPinStatus('Enter the 8-character pin from the app.', 'error');
             return;
         }
 
-        const remaining = Math.max(0, Math.ceil((quickPinExpiresAt - Date.now()) / 1000));
-        if (remaining <= 0) {
-            stopQuickPinTimer();
-            showQuickPin(null);
-            return;
+        const button = $('btn-quick-pin-connect');
+        if (button) {
+            button.disabled = true;
         }
-
-        const minutes = Math.floor(remaining / 60);
-        const seconds = String(remaining % 60).padStart(2, '0');
-        label.textContent = `Expires in ${minutes}:${seconds}`;
-    }
-
-    function showQuickPin(data) {
-        const panel = $('quick-pin-panel');
-        if (!panel) {
-            return;
-        }
-
-        const active = !!(data && data.active && data.pin && Number(data.expiresInSeconds || 0) > 0);
-        panel.classList.toggle('hidden', !active);
-        if (!active) {
-            stopQuickPinTimer();
-            quickPinValue = '';
-            return;
-        }
-
-        quickPinValue = String(data.pin);
-        if ($('quick-pin-code')) {
-            $('quick-pin-code').textContent = formatQuickPin(data.pin);
-        }
-        if ($('quick-pin-server-url')) {
-            $('quick-pin-server-url').value = data.serverUrl || '';
-        }
-        if ($('quick-pin-pair-url')) {
-            $('quick-pin-pair-url').value = data.pairUrl || '';
-        }
-
-        quickPinExpiresAt = data.expiresAt ? Date.parse(data.expiresAt) : (Date.now() + (Number(data.expiresInSeconds) * 1000));
-        renderQuickPinExpiry();
-        stopQuickPinTimer();
-        quickPinTimer = setInterval(renderQuickPinExpiry, 1000);
-    }
-
-    async function loadQuickPin() {
+        setQuickPinStatus('Encrypting and sending…');
         try {
-            showQuickPin(await api('/general/quick-pin'));
-        } catch {
-            showQuickPin(null);
-        }
-    }
-
-    async function createQuickPin() {
-        try {
-            showQuickPin(await api('/general/quick-pin', { method: 'POST' }));
-            toast('Quick pin created. It expires in 5 minutes.', 'success');
+            const result = await api('/quick-pin/redeem', {
+                method: 'POST',
+                body: JSON.stringify({ pin })
+            });
+            setQuickPinStatus(result.message || 'Sent.');
+            toast(result.message || 'Sent.', 'success');
+            const input = $('quick-pin-input');
+            if (input) {
+                input.value = '';
+            }
         } catch (err) {
-            toast(err.message || 'Could not create a quick pin.', 'error');
+            setQuickPinStatus(err.message || 'Could not send to the pin server.', 'error');
+            toast(err.message || 'Could not send to the pin server.', 'error');
+        } finally {
+            if (button) {
+                button.disabled = false;
+            }
         }
     }
 
@@ -5957,7 +5938,6 @@
             if ($('general-public-url')) {
                 $('general-public-url').value = settings.publicBaseUrl || '';
             }
-            await loadQuickPin();
         } catch (err) {
             reportApiError(err, 'Could not load general settings.');
         }
@@ -7562,6 +7542,7 @@
         news: '/news',
         transcode: '/transcode',
         general: '/general',
+        quickpin: '/quick-pin',
         tasks: '/tasks',
         about: '/about',
         credits: '/credits'
@@ -7585,6 +7566,7 @@
         news: 'News',
         transcode: 'Transcode',
         general: 'General',
+        quickpin: 'Quick Pin',
         tasks: 'Tasks',
         about: 'About',
         credits: 'Credits'
@@ -7608,6 +7590,7 @@
         news: 'FlowWire News',
         transcode: 'Format and encoder for the live MPEG-TS pipeline',
         general: 'Server-wide ChannelFlow-Server settings',
+        quickpin: 'Connect ChannelFlow TV with the pin it shows',
         tasks: 'Rebuild playouts, clear the guide, and maintenance',
         about: 'Version, system, and transcode information',
         credits: 'People and projects ChannelFlow builds on'
@@ -7996,22 +7979,17 @@
         click('btn-copy-m3u', () => copySetupUrl('m3u'));
         click('btn-copy-xmltv', () => copySetupUrl('xmltv'));
         click('btn-save-general', saveGeneralSettings);
-        click('btn-create-quick-pin', () => createQuickPin().catch((e) => toast(e.message, 'error')));
-        click('btn-copy-quick-pin', () => {
-            if (!quickPinValue) {
-                toast('Create a quick pin first.', 'error');
-                return;
-            }
-            copyToClipboard(quickPinValue, 'Copied quick pin.');
-        });
-        click('btn-copy-quick-pin-url', () => {
-            const url = $('quick-pin-pair-url')?.value || '';
-            if (!url) {
-                toast('Create a quick pin first.', 'error');
-                return;
-            }
-            copyToClipboard(url, 'Copied pairing URL.');
-        });
+        click('btn-quick-pin-connect', () => redeemQuickPin().catch((e) => toast(e.message, 'error')));
+        const quickPinInput = $('quick-pin-input');
+        if (quickPinInput) {
+            quickPinInput.addEventListener('input', onQuickPinInput);
+            quickPinInput.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    redeemQuickPin().catch((e) => toast(e.message, 'error'));
+                }
+            });
+        }
         click('btn-save-ebs', () => saveEbsSettings().catch((e) => toast(e.message, 'error')));
         const musicPacks = $('ebs-music-packs');
         if (musicPacks) {

@@ -56,6 +56,7 @@ internal static class FileLogging
             .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
             .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
             .MinimumLevel.Override("System.Net.Http.HttpClient", LogEventLevel.Warning)
+            .MinimumLevel.Override("System.Net.Http.HttpClient." + FinTv.Auth.QuickPinService.HttpClientName, LogEventLevel.Fatal)
             .Enrich.FromLogContext()
             .WriteTo.Console(outputTemplate: OutputTemplate)
             .WriteTo.File(

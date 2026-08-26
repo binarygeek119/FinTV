@@ -20,16 +20,14 @@ public class SetupController : ControllerBase
 {
     private readonly IPublicBaseUrl _appHost;
     private readonly JellyfinCatalogService _catalog;
-    private readonly QuickPinService _quickPins;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SetupController"/> class.
     /// </summary>
-    public SetupController(IPublicBaseUrl appHost, JellyfinCatalogService catalog, QuickPinService quickPins)
+    public SetupController(IPublicBaseUrl appHost, JellyfinCatalogService catalog)
     {
         _appHost = appHost;
         _catalog = catalog;
-        _quickPins = quickPins;
     }
 
     /// <summary>
@@ -48,26 +46,6 @@ public class SetupController : ControllerBase
         {
             return StatusCode(500, new { message = $"Could not build setup URLs: {ex.Message}" });
         }
-    }
-
-    /// <summary>
-    /// Exchanges a quick pin for M3U and XMLTV URLs that already include access.
-    /// </summary>
-    [HttpPost("pair")]
-    [AllowAnonymous]
-    public ActionResult Pair([FromBody] QuickPinPairRequest? request)
-    {
-        if (!_quickPins.TryAccept(request?.Pin, out var error))
-        {
-            var message = error == "expired"
-                ? "This quick pin has expired. Create a new pin in ChannelFlow."
-                : "That quick pin is not valid.";
-            return StatusCode(error == "expired" ? StatusCodes.Status410Gone : StatusCodes.Status401Unauthorized, new { message });
-        }
-
-        var baseUrl = EpgService.GetPublicBaseUrl(Request, _appHost);
-        var (m3u, epg) = PluginApiKey.BuildLiveTvUrls(baseUrl);
-        return Ok(new { baseUrl, m3u, epg });
     }
 
     /// <summary>
@@ -249,11 +227,6 @@ public class SetupSettingsRequest
     /// Gets or sets whether weather capture auto-sets wide=true for 16:9 channels (and wide=false for 4:3).
     /// </summary>
     public bool? WeatherStarAutoWideForSixteenNine { get; set; }
-}
-
-public class QuickPinPairRequest
-{
-    public string? Pin { get; set; }
 }
 
 /// <summary>

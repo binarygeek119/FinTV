@@ -73,23 +73,7 @@ internal static class ReverseProxyHosting
 
         app.MapGet("/", WriteIndex);
         app.MapGet("/index.html", WriteIndex);
-        app.MapGet("/pair", WritePair);
         app.MapFallback(WriteIndex);
-
-        async Task WritePair(HttpContext context)
-        {
-            var file = Path.Combine(app.Environment.WebRootPath, "pair.html");
-            var html = await File.ReadAllTextAsync(file);
-            var prefix = context.Request.PathBase.HasValue
-                ? context.Request.PathBase.Value!.TrimEnd('/')
-                : "";
-            var href = string.IsNullOrEmpty(prefix) ? "/" : prefix + "/";
-            html = html.Replace("<base href=\"/\">", "<base href=\"" + href + "\">");
-            html = html.Replace("window.__CF_BASE__=\"\"", "window.__CF_BASE__=\"" + prefix + "\"");
-            context.Response.ContentType = "text/html; charset=utf-8";
-            context.Response.Headers.CacheControl = "no-store";
-            await context.Response.WriteAsync(html);
-        }
     }
 
     public static string PublicOrigin(HttpRequest request)

@@ -113,6 +113,11 @@ builder.Services.AddHttpClient(nameof(SponsorBlockClient), client =>
     client.Timeout = TimeSpan.FromSeconds(8);
     client.DefaultRequestHeaders.UserAgent.ParseAdd("ChannelFlow-Server/1.0 (SponsorBlock)");
 });
+builder.Services.AddHttpClient(QuickPinService.HttpClientName, client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(15);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("ChannelFlow-Server/1.0 (quick-pin)");
+});
 builder.Services.AddHttpClient(nameof(MusicPackService))
     .ConfigureHttpClient(client =>
     {

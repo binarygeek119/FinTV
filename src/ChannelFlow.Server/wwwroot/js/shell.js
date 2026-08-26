@@ -19,6 +19,7 @@
     const navIcons = {
         guide: svgIcon('<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/><path d="M8 14h3M8 17h8"/>'),
         general: svgIcon('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1.1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
+        quickpin: svgIcon('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/><circle cx="12" cy="16" r="1.2"/>'),
         channels: svgIcon('<rect x="2" y="8" width="20" height="12" rx="2"/><path d="M7 20h10M12 8V5M9 3.5L12 5l3-1.5"/>'),
         lineups: svgIcon('<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/><path d="M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01M16 18h.01"/>'),
         presets: svgIcon('<path d="M12 3l1.4 4.4L18 9l-4.6 1.6L12 15l-1.4-4.4L6 9l4.6-1.6L12 3z"/><path d="M19 14l.8 2.4L22 17.2l-2.2.8L19 20.4l-.8-2.4-2.2-.8 2.2-.8L19 14z"/>'),
@@ -65,6 +66,7 @@
         news: 'News',
         transcode: 'Transcode',
         general: 'General',
+        quickpin: 'Quick Pin',
         tasks: 'Tasks',
         about: 'About',
         credits: 'Credits'
@@ -88,6 +90,7 @@
         news: 'FlowWire News',
         transcode: 'Format and encoder for the live MPEG-TS pipeline',
         general: 'Server-wide ChannelFlow-Server settings',
+        quickpin: 'Connect ChannelFlow TV with the pin it shows',
         tasks: 'Rebuild playouts, clear the guide, and maintenance',
         about: 'Version, system, and transcode information',
         credits: 'People and projects ChannelFlow builds on'
