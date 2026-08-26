@@ -167,7 +167,6 @@
                 <a href="ai" class="tab" data-tab="ai" role="tab">AI</a>
                 <a href="weather" class="tab" data-tab="weather" role="tab">Weather</a>
                 <a href="news" class="tab" data-tab="news" role="tab">News</a>
-                <a href="normalization" class="tab" data-tab="normalization" role="tab">Normalization</a>
                 <a href="transcode" class="tab" data-tab="transcode" role="tab">Transcode</a>
                 <a href="general" class="tab" data-tab="general" role="tab">General</a>
                 <a href="tasks" class="tab" data-tab="tasks" role="tab">Tasks</a>
@@ -957,7 +956,7 @@
             <section id="tab-stream" class="tab-panel hidden" hidden>
                 <div class="card section-card">
                     <h2>Live stream</h2>
-                    <p class="hint">Normalization is the picture and sound tuners receive. Transcode is the encoder that produces that format. They are one pipeline: ChannelFlow probes the GPU and only offers combinations that work together. Save once; the next program on each channel picks it up.</p>
+                    <p class="hint">Picture, sound, and encoder for the live MPEG-TS tuners receive. ChannelFlow probes the GPU and only offers combinations that work together. Save once; the next program on each channel picks it up.</p>
                     <div id="stream-pipeline-status" class="status-card">Loading stream pipeline…</div>
                     <div class="actions">
                         <button type="button" id="btn-save-stream" class="raised button-submit emby-button">Save Stream Settings</button>
@@ -967,7 +966,7 @@
                 </div>
 
                 <div class="card section-card">
-                    <h2>Normalization</h2>
+                    <h2>Format</h2>
                     <p class="hint">Target video and audio. Codec, profile, size, and frame rate follow the encoder on the Transcode card below.</p>
                     <div id="normalization-status" class="status-card hidden" hidden></div>
                     <label class="field">
@@ -1194,7 +1193,7 @@
                 </div>
                 <div class="card section-card">
                     <h3>Live stream</h3>
-                    <p class="hint">Normalization format plus Transcode encoder. Change this on the Normalization or Transcode tab.</p>
+                    <p class="hint">Live stream format plus encoder. Change this on the Transcode tab.</p>
                     <dl id="about-stream" class="about-dl"></dl>
                 </div>
             </section>

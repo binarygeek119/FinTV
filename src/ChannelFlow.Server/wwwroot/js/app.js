@@ -6845,7 +6845,6 @@
         ai: '/ai',
         weather: '/weather',
         news: '/news',
-        normalization: '/normalization',
         transcode: '/transcode',
         general: '/general',
         tasks: '/tasks',
@@ -6869,7 +6868,6 @@
         ai: 'AI',
         weather: 'Weather',
         news: 'News',
-        normalization: 'Normalization',
         transcode: 'Transcode',
         general: 'General',
         tasks: 'Tasks',
@@ -6893,8 +6891,7 @@
         ai: 'AI lineup generation and tagging',
         weather: 'WeatherStar live channels',
         news: 'FlowWire News',
-        normalization: 'Target format for the live MPEG-TS pipeline',
-        transcode: 'Encoder for the live MPEG-TS pipeline',
+        transcode: 'Format and encoder for the live MPEG-TS pipeline',
         general: 'Server-wide ChannelFlow-Server settings',
         tasks: 'Rebuild playouts, clear the guide, and maintenance',
         about: 'Version, system, and transcode information',
@@ -6935,6 +6932,10 @@
 
         if (path === '/jellyfin' || path === '/library') {
             return 'jellyfin';
+        }
+
+        if (path === '/normalization') {
+            return 'transcode';
         }
 
         return 'channels';
@@ -6991,6 +6992,10 @@
 
     function switchTab(name, options) {
         options = options || {};
+        if (name === 'normalization') {
+            name = 'transcode';
+        }
+
         if (!TAB_PATHS[name]) {
             name = 'channels';
         }
@@ -7004,13 +7009,10 @@
         }
 
         qa('.channelflow-tabs .tab').forEach((t) => {
-            const stream = name === 'normalization' || name === 'transcode';
-            const on = t.dataset.tab === name
-                || (stream && (t.dataset.tab === 'normalization' || t.dataset.tab === 'transcode'));
-            t.classList.toggle('active', on);
+            t.classList.toggle('active', t.dataset.tab === name);
         });
         document.querySelectorAll('.tab-panel').forEach((p) => {
-            const panelId = (name === 'normalization' || name === 'transcode') ? 'tab-stream' : ('tab-' + name);
+            const panelId = name === 'transcode' ? 'tab-stream' : ('tab-' + name);
             const on = p.id === panelId;
             p.classList.toggle('active', on);
             p.classList.toggle('hidden', !on);
@@ -7029,7 +7031,7 @@
         if (name === 'ai') loadAi();
         if (name === 'weather') loadWeather();
         if (name === 'news') loadNews();
-        if (name === 'normalization' || name === 'transcode') loadStreamOutput();
+        if (name === 'transcode') loadStreamOutput();
         if (name === 'about') loadAbout();
         if (name === 'presets') loadPresets();
         if (name === 'lineups') loadLineups();
