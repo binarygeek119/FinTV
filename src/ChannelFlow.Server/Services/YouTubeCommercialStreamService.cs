@@ -398,7 +398,7 @@ public class YouTubeCommercialStreamService
         else if (_cookies.HasCookies() && Interlocked.Exchange(ref _loggedUnusableCookies, 1) == 0)
         {
             _logger.LogWarning(
-                "youtube-cookies.txt is not a Netscape cookies file; YouTube commercials will play without cookies until you paste a fresh export on the YouTube tab");
+                "Saved YouTube cookies are not a usable Netscape cookies.txt; commercials will play without cookies until you paste a fresh export");
         }
 
         if (settings.PreferPremium || cookiePath is not null)

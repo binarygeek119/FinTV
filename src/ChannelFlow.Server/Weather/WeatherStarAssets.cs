@@ -38,6 +38,20 @@ public sealed class WeatherStarAssets : IDisposable
             ?? Path.Combine(env.ContentRootPath, "wwwroot", "weatherstar", "ws3kp");
     }
 
+    public string? Star4000FontPath()
+    {
+        foreach (var name in new[] { "Star4000.ttf", "Star4000.woff" })
+        {
+            var path = FindFile(_ws4Root, name);
+            if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+            {
+                return path;
+            }
+        }
+
+        return null;
+    }
+
     public SKTypeface Font(WeatherStarDockerVariant skin, bool large = false)
         => Font(skin, large ? StarFontFace.Large : StarFontFace.Regular);
 

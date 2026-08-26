@@ -13,7 +13,7 @@
   <link rel="manifest" href="site.webmanifest?v=3d08b8f1">
   <meta name="theme-color" content="#101010">
   <link rel="stylesheet" href="css/legacy-admin.css">
-  <link rel="stylesheet" href="css/app.css?v=navbtns2">
+  <link rel="stylesheet" href="css/app.css?v=navscroll1">
 </head>
 <body>
   <div id="login-screen" class="auth-screen hidden">
@@ -549,7 +549,11 @@
                         <span>YouTube cookies.txt</span>
                         <textarea id="yt-cookies" class="emby-input cookie-textarea" rows="10" spellcheck="false" autocomplete="off" placeholder="# Netscape HTTP Cookie File&#10;.youtube.com	TRUE	/	TRUE	0	SID	…"></textarea>
                     </label>
-                    <p class="hint">Export with a cookies.txt browser extension while signed into YouTube, or <code>yt-dlp --cookies-from-browser chrome --cookies cookies.txt</code>. ChannelFlow never shows the saved cookie values again. Leave the box empty to keep the current file.</p>
+                    <label class="field">
+                        <span>Or choose a cookies.txt file</span>
+                        <input id="yt-cookies-file" type="file" accept=".txt,text/plain">
+                    </label>
+                    <p class="hint">Export with a cookies.txt browser extension while signed into YouTube, or <code>yt-dlp --cookies-from-browser chrome --cookies cookies.txt</code>. HttpOnly rows (<code>#HttpOnly_</code>) are kept. Cookies are written to <code>youtube-cookies.txt</code> in the ChannelFlow config folder (the host path mapped to <code>/config</code> in Docker). You can also drop a Netscape cookies.txt there from the host. Leave the box empty to keep the current file.</p>
                     <label class="field checkbox-field">
                         <input id="yt-prefer-premium" type="checkbox" checked>
                         <span class="channelflow-check-box" aria-hidden="true"></span>
@@ -692,7 +696,7 @@
             <section id="tab-emergency" class="tab-panel hidden" hidden>
                 <div class="card section-card">
                     <h3>Emergency Broadcast System</h3>
-                    <p class="hint">When NOAA has watches or warnings for the default Weather tab location, TV, movies, and music play <code>Weather/weather_alert.ogg</code> over the current picture (or the alerts screen), then the full-screen alerts or the bottom bar, then <code>Weather/weather_alert_single.mp3</code> at the end. The picture stays up — there is no black screen. Each alert dumps the run-ahead buffer down to 60 seconds so it reaches the tuner faster, then the buffer fills back to the Transcode setting. Another alert dumps it again. WeatherStar and FlowWire keep their own displays.</p>
+                    <p class="hint">When NOAA has watches or warnings for the default Weather tab location, TV, movies, and music splice an EBS graphic onto the current program (same show, same playhead — no black screen or Off Air slate). <strong>Scrolling text</strong> overlays a pre-rendered copy of <code>EBS/ebs_strip.png</code> with WeatherStar 4000 text. <strong>Alerts screen</strong> fills the frame with a pre-rendered copy of <code>EBS/ebs_fullscreen.png</code> and keeps the show audio at a lower volume under the attention/end tones. Each alert dumps every live run-ahead buffer down to 60 seconds so it reaches the tuner faster, then the buffer fills back to the Transcode setting. WeatherStar and FlowWire keep their own displays.</p>
                     <label class="field">
                         <span>Alert display</span>
                         <select id="weather-alert-overlay-mode" class="emby-select">
@@ -1363,7 +1367,7 @@
       </div>
     </div>
   </div>
-  <script src="js/app.js?v=qsv2"></script>
+  <script src="js/app.js?v=ytcookie2"></script>
   <script src="js/shell.js?v=navbtns3"></script>
 </body>
 </html>

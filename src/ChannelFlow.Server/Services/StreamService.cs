@@ -22,6 +22,8 @@ public class StreamService : IDisposable
     private readonly WeatherAlertOverlayService _weatherAlerts;
     private readonly ILogger<StreamService> _logger;
     private readonly IFfmpegLocator _mediaEncoder;
+    private readonly object _punchGate = new();
+    private DateTime _lastPunchInUtc = DateTime.MinValue;
     private int _disposed;
 
     public StreamService(
@@ -160,7 +162,7 @@ public class StreamService : IDisposable
             var started = DateTime.UtcNow;
             if (await _weatherAlerts.ShouldCutInNowAsync(channel, alertSession, cancellationToken))
             {
-                FlushBufferForWeatherAlert(channelId);
+                PunchInWeatherAlert();
                 using var itemCts = CreateItemCutCts(channelId);
                 using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, itemCts.Token);
                 try
@@ -188,7 +190,21 @@ public class StreamService : IDisposable
                     }
                     else
                     {
-                        await weather.StreamHazardsCutInAsync(channel, output, _weatherAlerts.CutInDurationForStream, linked.Token);
+                        var screenItem = await GetCurrentItemAsync(channelId, cancellationToken);
+                        if (screenItem is not null)
+                        {
+                            var tones = await weather.CreateToneSandwichAsync(
+                                _weatherAlerts.CutInDurationForStream.TotalSeconds,
+                                linked.Token);
+                            await StreamFullscreenAlertWindowAsync(
+                                channel,
+                                screenItem,
+                                catalog,
+                                ffmpegPath,
+                                output,
+                                tones,
+                                linked.Token);
+                        }
                     }
 
                     if (!linked.IsCancellationRequested)
@@ -429,6 +445,36 @@ public class StreamService : IDisposable
     }
 
     /// <summary>
+    /// Drops every live run-ahead ring to 60 seconds and cuts current encodes so the
+    /// EBS graphic can splice onto the same program without tearing down the session.
+    /// </summary>
+    public void PunchInWeatherAlert()
+    {
+        _weatherAlerts.BeginBackgroundPrerender();
+        var punch = false;
+        lock (_punchGate)
+        {
+            if (DateTime.UtcNow - _lastPunchInUtc > TimeSpan.FromSeconds(2))
+            {
+                _lastPunchInUtc = DateTime.UtcNow;
+                punch = true;
+            }
+        }
+
+        if (!punch)
+        {
+            return;
+        }
+
+        foreach (var id in _liveSessions.Keys.ToArray())
+        {
+            FlushBufferForWeatherAlert(id);
+        }
+
+        InterruptAllCurrentItems();
+    }
+
+    /// <summary>
     /// Drops the run-ahead ring to 60 seconds so an EBS alert is not stuck behind the full tuner buffer.
     /// Another alert while the buffer is refilling drops it again.
     /// </summary>
@@ -588,6 +634,58 @@ public class StreamService : IDisposable
         }
 
         await WriteEbsAsync(channel, ebs, ffmpegPath, output, duration.TotalSeconds, cancellationToken);
+    }
+
+    private async Task StreamFullscreenAlertWindowAsync(
+        Channel channel,
+        PlayoutItem item,
+        JellyfinCatalogService catalog,
+        string ffmpegPath,
+        Stream output,
+        WeatherAlertToneSandwich? alertTones,
+        CancellationToken cancellationToken)
+    {
+        var graphic = await _weatherAlerts.PrepareFullscreenFileAsync(channel, cancellationToken);
+        if (string.IsNullOrWhiteSpace(graphic) || !File.Exists(graphic))
+        {
+            _logger.LogWarning("EBS alert screen skipped for {Channel}; prerendered fullscreen PNG was not ready", channel.Name);
+            return;
+        }
+
+        if (item.IsVirtual && item.VirtualSource == VirtualContentSource.LogoBumper)
+        {
+            return;
+        }
+
+        using var scope = _scopeFactory.CreateScope();
+        var libraryManager = scope.ServiceProvider.GetRequiredService<ILibraryManager>();
+        string? inputPath = null;
+        if (item.JellyfinItemId.HasValue)
+        {
+            var mediaItem = libraryManager.GetItemById(item.JellyfinItemId.Value);
+            inputPath = mediaItem is null ? null : catalog.GetMediaPath(mediaItem);
+        }
+        else if (item.CommercialId.HasValue)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(inputPath) || !File.Exists(inputPath))
+        {
+            _logger.LogWarning("EBS alert screen skipped for {Channel}; current item has no local media", channel.Name);
+            return;
+        }
+
+        var offset = Math.Max(0, (DateTime.UtcNow - item.Start).TotalSeconds + item.InPoint.TotalSeconds);
+        var duration = _weatherAlerts.CutInDurationForStream.TotalSeconds;
+        var args = _ffmpeg.BuildFullscreenAlertCommand(
+            channel,
+            inputPath,
+            offset,
+            duration,
+            graphic,
+            alertTones);
+        await RunFfmpegToStreamAsync(ffmpegPath, args, output, cancellationToken);
     }
 
     private async Task StreamLogoBumperAsync(

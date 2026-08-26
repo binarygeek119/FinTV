@@ -1,20 +1,41 @@
 using System.Text;
+using CliWrap;
 using FinTv.Domain;
 using FinTv.Weather;
+using Microsoft.Extensions.Logging;
 
 namespace FinTv.Services;
 
 public sealed class WeatherAlertOverlayService
 {
+    private const int PrerenderWidth = 1920;
+    private const int PrerenderHeight = 1080;
+    private const double ShowDuckVolume = 0.2;
+
     private readonly WeatherDataClient _weather;
     private readonly WeatherStarCompositor _compositor;
+    private readonly WeatherStarAssets _assets;
+    private readonly IFfmpegLocator _ffmpeg;
+    private readonly ILogger<WeatherAlertOverlayService> _logger;
     private readonly object _gate = new();
     private AlertOverlaySimulation? _simulation;
+    private string? _prerenderKey;
+    private Task<string?>? _prerenderTask;
 
-    public WeatherAlertOverlayService(WeatherDataClient weather, WeatherStarCompositor compositor)
+    public const double DuckedShowVolume = ShowDuckVolume;
+
+    public WeatherAlertOverlayService(
+        WeatherDataClient weather,
+        WeatherStarCompositor compositor,
+        WeatherStarAssets assets,
+        IFfmpegLocator ffmpeg,
+        ILogger<WeatherAlertOverlayService> logger)
     {
         _weather = weather;
         _compositor = compositor;
+        _assets = assets;
+        _ffmpeg = ffmpeg;
+        _logger = logger;
     }
 
     public static WeatherAlertOverlayMode ParseMode(string? value)
@@ -128,10 +149,12 @@ public sealed class WeatherAlertOverlayService
         }
 
         var ticker = FormatTickerText(alerts);
-        if (mode == WeatherAlertOverlayMode.Ticker && !string.IsNullOrWhiteSpace(ticker))
+        if (!string.IsNullOrWhiteSpace(ticker))
         {
             await WriteTickerFileAsync(ticker, cancellationToken);
         }
+
+        BeginBackgroundPrerender();
 
         byte[] jpeg;
         try
@@ -158,6 +181,8 @@ public sealed class WeatherAlertOverlayService
             }
 
             _simulation = null;
+            _prerenderKey = null;
+            _prerenderTask = null;
             return true;
         }
     }
@@ -262,6 +287,54 @@ public sealed class WeatherAlertOverlayService
         }
     }
 
+    public void BeginBackgroundPrerender()
+    {
+        var mode = EffectiveMode;
+        if (mode is not WeatherAlertOverlayMode.Ticker and not WeatherAlertOverlayMode.CutIn)
+        {
+            return;
+        }
+
+        lock (_gate)
+        {
+            var simulation = _simulation;
+            var key = mode + "|" + (simulation?.Id.ToString("N") ?? "live");
+            if (_prerenderKey == key && _prerenderTask is not null && !_prerenderTask.IsFaulted)
+            {
+                return;
+            }
+
+            _prerenderKey = key;
+            var capturedMode = mode;
+            _prerenderTask = Task.Run(() => PrerenderActiveModeAsync(capturedMode, CancellationToken.None));
+        }
+    }
+
+    public async Task<string?> GetPrerenderedGraphicAsync(CancellationToken cancellationToken)
+    {
+        BeginBackgroundPrerender();
+        Task<string?>? task;
+        lock (_gate)
+        {
+            task = _prerenderTask;
+        }
+
+        if (task is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await task.WaitAsync(cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "EBS graphic prerender failed");
+            return null;
+        }
+    }
+
     public async Task<string?> PrepareTickerFileAsync(Channel channel, CancellationToken cancellationToken)
     {
         if (EffectiveMode != WeatherAlertOverlayMode.Ticker || !AllowsTicker(channel))
@@ -269,22 +342,17 @@ public sealed class WeatherAlertOverlayService
             return null;
         }
 
-        var text = await BuildTickerTextAsync(cancellationToken);
-        if (string.IsNullOrWhiteSpace(text))
+        return await GetPrerenderedGraphicAsync(cancellationToken);
+    }
+
+    public async Task<string?> PrepareFullscreenFileAsync(Channel channel, CancellationToken cancellationToken)
+    {
+        if (EffectiveMode != WeatherAlertOverlayMode.CutIn || !AppliesTo(channel))
         {
             return null;
         }
 
-        var folder = FinTvRuntime.Current?.WeatherStarFolder;
-        if (string.IsNullOrWhiteSpace(folder))
-        {
-            return null;
-        }
-
-        Directory.CreateDirectory(folder);
-        var path = Path.Combine(folder, "alert-ticker.txt");
-        await File.WriteAllTextAsync(path, text, Encoding.UTF8, cancellationToken);
-        return path;
+        return await GetPrerenderedGraphicAsync(cancellationToken);
     }
 
     private async Task WriteTickerFileAsync(string text, CancellationToken cancellationToken)
@@ -297,6 +365,180 @@ public sealed class WeatherAlertOverlayService
 
         Directory.CreateDirectory(folder);
         await File.WriteAllTextAsync(Path.Combine(folder, "alert-ticker.txt"), text, Encoding.UTF8, cancellationToken);
+    }
+
+    private async Task<string?> PrerenderActiveModeAsync(WeatherAlertOverlayMode mode, CancellationToken cancellationToken)
+    {
+        var alerts = await GetActiveAlertsAsync(cancellationToken);
+        var ticker = FormatTickerText(alerts);
+        if (string.IsNullOrWhiteSpace(ticker))
+        {
+            return null;
+        }
+
+        await WriteTickerFileAsync(ticker, cancellationToken);
+        var folder = FinTvRuntime.Current?.WeatherStarFolder;
+        var font = _assets.Star4000FontPath();
+        var ffmpeg = _ffmpeg.EncoderPath;
+        if (string.IsNullOrWhiteSpace(folder) || string.IsNullOrWhiteSpace(font) || string.IsNullOrWhiteSpace(ffmpeg))
+        {
+            _logger.LogWarning("EBS prerender skipped; missing weatherstar folder, Star4000.ttf, or ffmpeg");
+            return null;
+        }
+
+        Directory.CreateDirectory(folder);
+        if (mode == WeatherAlertOverlayMode.Ticker)
+        {
+            var strip = EbsService.ResolveGraphic(EbsService.StripFileName);
+            if (string.IsNullOrWhiteSpace(strip))
+            {
+                _logger.LogWarning("EBS ticker skipped; {File} was not found in the logo set", EbsService.StripFileName);
+                return null;
+            }
+
+            var textPath = Path.Combine(folder, "alert-ticker.txt");
+            var output = Path.Combine(folder, "alert-ticker.png");
+            var barH = TickerBarHeight(PrerenderHeight);
+            var fontSize = TickerFontSize(PrerenderHeight);
+            var canvasW = Even(Math.Max(PrerenderWidth, PrerenderWidth + (int)(ticker.Length * fontSize * 0.55)));
+            var vf =
+                $"scale=-2:{barH},pad={canvasW}:{barH}:0:(oh-ih)/2:color=0xc41e3a," +
+                $"drawtext=fontfile='{EscapeFilterPath(font)}':textfile='{EscapeFilterPath(textPath)}':expansion=none:" +
+                $"fontcolor=white:fontsize={fontSize}:x=48:y=(h-text_h)/2";
+            return await RunStillPrerenderAsync(ffmpeg, strip, vf, output, cancellationToken);
+        }
+
+        var fullscreen = EbsService.ResolveGraphic(EbsService.FullscreenFileName);
+        if (string.IsNullOrWhiteSpace(fullscreen))
+        {
+            _logger.LogWarning("EBS alert screen skipped; {File} was not found in the logo set", EbsService.FullscreenFileName);
+            return null;
+        }
+
+        var block = FormatFullscreenText(alerts);
+        var blockPath = Path.Combine(folder, "alert-fullscreen.txt");
+        await File.WriteAllTextAsync(blockPath, block, Encoding.UTF8, cancellationToken);
+        var fullOut = Path.Combine(folder, "alert-fullscreen.png");
+        var fullVf =
+            $"scale={PrerenderWidth}:{PrerenderHeight}:force_original_aspect_ratio=increase," +
+            $"crop={PrerenderWidth}:{PrerenderHeight}," +
+            $"drawtext=fontfile='{EscapeFilterPath(font)}':textfile='{EscapeFilterPath(blockPath)}':expansion=none:" +
+            $"fontcolor=white:fontsize=42:x=96:y=h*0.28:line_spacing=14";
+        return await RunStillPrerenderAsync(ffmpeg, fullscreen, fullVf, fullOut, cancellationToken);
+    }
+
+    private async Task<string?> RunStillPrerenderAsync(
+        string ffmpegPath,
+        string inputPath,
+        string videoFilter,
+        string outputPath,
+        CancellationToken cancellationToken)
+    {
+        var error = new StringBuilder();
+        var args = new[]
+        {
+            "-hide_banner",
+            "-loglevel", "error",
+            "-y",
+            "-loop", "1",
+            "-i", inputPath,
+            "-vf", videoFilter,
+            "-frames:v", "1",
+            "-an",
+            outputPath
+        };
+        try
+        {
+            var result = await Cli.Wrap(ffmpegPath)
+                .WithArguments(args)
+                .WithValidation(CommandResultValidation.None)
+                .WithStandardErrorPipe(PipeTarget.ToStringBuilder(error))
+                .ExecuteAsync(cancellationToken);
+            if (result.ExitCode != 0 || !File.Exists(outputPath) || new FileInfo(outputPath).Length == 0)
+            {
+                _logger.LogWarning(
+                    "EBS prerender ffmpeg exited {Code}: {Error}",
+                    result.ExitCode,
+                    error.ToString().Trim());
+                return null;
+            }
+
+            return outputPath;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "EBS prerender ffmpeg failed");
+            return null;
+        }
+    }
+
+    private static int TickerBarHeight(int height)
+    {
+        var barH = Math.Max(52, height / 18);
+        return barH + (barH & 1);
+    }
+
+    private static int TickerFontSize(int height)
+        => Math.Max(22, height / 42);
+
+    private static int Even(int value)
+        => value + (value & 1);
+
+    private static string EscapeFilterPath(string path)
+        => path.Replace('\\', '/').Replace(":", "\\:").Replace("'", "\\'");
+
+    private static string FormatFullscreenText(IReadOnlyList<WeatherAlert> alerts)
+    {
+        var lines = new List<string> { "WEATHER ALERT" };
+        foreach (var alert in alerts.Take(4))
+        {
+            var eventName = Compact(alert.Event);
+            if (!string.IsNullOrWhiteSpace(eventName))
+            {
+                lines.Add(eventName.ToUpperInvariant());
+            }
+
+            var detail = Compact(string.IsNullOrWhiteSpace(alert.Headline) ? alert.Description : alert.Headline);
+            if (!string.IsNullOrWhiteSpace(detail) && !detail.Equals(eventName, StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var wrap in WrapText(detail, 52).Take(4))
+                {
+                    lines.Add(wrap);
+                }
+            }
+        }
+
+        return string.Join('\n', lines);
+    }
+
+    private static IEnumerable<string> WrapText(string text, int width)
+    {
+        var words = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var line = new StringBuilder();
+        foreach (var word in words)
+        {
+            if (line.Length == 0)
+            {
+                line.Append(word);
+                continue;
+            }
+
+            if (line.Length + 1 + word.Length > width)
+            {
+                yield return line.ToString();
+                line.Clear();
+                line.Append(word);
+            }
+            else
+            {
+                line.Append(' ').Append(word);
+            }
+        }
+
+        if (line.Length > 0)
+        {
+            yield return line.ToString();
+        }
     }
 
     private async Task<string?> BuildTickerTextAsync(CancellationToken cancellationToken)

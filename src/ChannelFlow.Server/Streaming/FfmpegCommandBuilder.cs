@@ -274,6 +274,94 @@ public class FfmpegCommandBuilder
         return args;
     }
 
+    public IReadOnlyList<string> BuildFullscreenAlertCommand(
+        Channel channel,
+        string inputPath,
+        double startSeconds,
+        double durationSeconds,
+        string fullscreenPng,
+        WeatherAlertToneSandwich? alertTones = null)
+    {
+        var (width, height) = GetResolution(channel);
+        var context = CreateEncodingContext(width, height, fullscreenPng, sourceVideoCodec: null, gpuFilters: true);
+        var sandwich = alertTones is { HasTones: true } ? alertTones : null;
+        var encodeSeconds = sandwich is not null ? sandwich.TotalSeconds : durationSeconds;
+        var fps = _normalization.Current.FpsOutput;
+        var target = _normalization.Current;
+        var aformat = $"aformat=sample_rates={target.AudioSampleRate}:channel_layouts={target.AudioLayout}";
+        var duck = WeatherAlertOverlayService.DuckedShowVolume.ToString("F2", CultureInfo.InvariantCulture);
+
+        var args = new List<string>
+        {
+            "-hide_banner",
+            "-loglevel", "warning",
+            "-fflags", "+genpts+discardcorrupt"
+        };
+        args.AddRange(context.HardwareDeviceArgs);
+        args.AddRange(new[]
+        {
+            "-ss", startSeconds.ToString("F3", CultureInfo.InvariantCulture),
+            "-t", encodeSeconds.ToString("F3", CultureInfo.InvariantCulture),
+            "-i", inputPath,
+            "-loop", "1",
+            "-framerate", fps,
+            "-t", encodeSeconds.ToString("F3", CultureInfo.InvariantCulture),
+            "-i", fullscreenPng
+        });
+        if (sandwich is not null)
+        {
+            AppendAlertToneInputs(args, sandwich);
+        }
+
+        var video =
+            $"[1:v]fps={target.FpsFilter},scale={width}:{height}:force_original_aspect_ratio=increase," +
+            $"crop={width}:{height},setsar=1,format=nv12";
+        var graph = context.GpuFilters is not null
+            ? video + ",hwupload=extra_hw_frames=64" + GpuEncodeMap(context.GpuFilters) + "[vout]"
+            : _encoding.AdaptFilterComplexForEncoder(video + "[vout]", context.Encoder);
+
+        graph += $";[0:a]volume={duck},{aformat}[duck]";
+        if (sandwich is not null)
+        {
+            var mixLabels = new List<string> { "[duck]" };
+            var extra = 2;
+            if (sandwich.HasAttention)
+            {
+                var att = sandwich.AttentionSeconds.ToString("F3", CultureInfo.InvariantCulture);
+                graph += $";[{extra}:a]atrim=0:{att},asetpts=PTS-STARTPTS,{aformat},volume=1.0[att]";
+                mixLabels.Add("[att]");
+                extra++;
+            }
+
+            if (sandwich.HasEnd)
+            {
+                var end = sandwich.EndSeconds.ToString("F3", CultureInfo.InvariantCulture);
+                var delayMs = Math.Max(0, (int)Math.Round((encodeSeconds - sandwich.EndSeconds) * 1000));
+                graph += $";[{extra}:a]atrim=0:{end},asetpts=PTS-STARTPTS,{aformat},adelay={delayMs}|{delayMs}[end]";
+                mixLabels.Add("[end]");
+            }
+
+            graph += $";{string.Concat(mixLabels)}amix=inputs={mixLabels.Count}:duration=first:dropout_transition=0," +
+                "aresample=async=1:first_pts=0[aout]";
+        }
+        else
+        {
+            graph += ";[duck]aresample=async=1:first_pts=0[aout]";
+        }
+
+        args.AddRange(
+        [
+            "-filter_complex", graph,
+            "-map", "[vout]",
+            "-map", "[aout]",
+            "-t", encodeSeconds.ToString("F3", CultureInfo.InvariantCulture)
+        ]);
+        AppendVideoEncoderArgs(args, context, stillImage: true);
+        AppendAacStereo48k(args);
+        AppendMpegTsPipe(args);
+        return args;
+    }
+
     public IReadOnlyList<string> BuildEbsCommand(Channel channel, EbsPlaybackPlan plan)
     {
         var (width, height) = GetResolution(channel);
@@ -812,12 +900,10 @@ public class FfmpegCommandBuilder
             return false;
         }
 
-        if (HasAlertTicker(alertTickerPath))
-        {
-            return false;
-        }
-
+        // Alert ticker is CPU-drawn on a short strip, then overlay_vaapi.
+        // Keep GPU scale/pad/encode; do not feed QSV frames into drawtext.
         _ = overlayHeadline;
+        _ = alertTickerPath;
         return true;
     }
 
@@ -1006,22 +1092,24 @@ public class FfmpegCommandBuilder
         var bug = overlayBug ? ResolveBugFile(channel, bugImagePath) : null;
         var sandwich = alertTones is { HasTones: true } ? alertTones : null;
         var gpuFilters = context.GpuFilters;
+        var tickerPng = IsAlertGraphic(alertTickerPath);
+        var gpuTicker = gpuFilters is not null && tickerPng;
         var uploadFirst = gpuFilters is not null && context.HardwareDecodeArgs.Count == 0;
         var linear = gpuFilters == "qsv"
-            ? BuildQsvScalePad(width, height, uploadFirst, sourceWidth, sourceHeight)
+            ? BuildQsvScalePad(width, height, uploadFirst)
             : gpuFilters == "vaapi"
                 ? BuildVaapiScalePad(width, height, uploadFirst)
-                : BuildLinearVideoFilters(channel, width, height, overlayHeadline, alertTickerPath);
+                : BuildLinearVideoFilters(channel, width, height, overlayHeadline, tickerPng ? null : alertTickerPath);
         if (!string.IsNullOrEmpty(skipExpr) && gpuFilters is null)
         {
             linear = $"select='{skipExpr}',setpts=N/FRAME_RATE/TB,{linear}";
         }
 
-        if (string.IsNullOrWhiteSpace(bug) && sandwich is null)
+        if (string.IsNullOrWhiteSpace(bug) && sandwich is null && !tickerPng)
         {
             args.Add("-vf");
             args.Add(gpuFilters is not null
-                ? linear
+                ? FinishGpuVideoFilters(linear, gpuFilters)
                 : _encoding.AdaptVideoFilterForEncoder(linear, context.Encoder));
             args.AddRange(["-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn"]);
             return;
@@ -1044,24 +1132,36 @@ public class FfmpegCommandBuilder
 
         var firstToneIndex = string.IsNullOrWhiteSpace(bug) ? 1 : 2;
         string graph;
-        if (string.IsNullOrWhiteSpace(bug))
+        if (gpuFilters is not null)
+        {
+            var bugWidth = 0;
+            var overlayX = "0";
+            var overlayY = "0";
+            var alpha = string.Empty;
+            if (!string.IsNullOrWhiteSpace(bug))
+            {
+                bugWidth = Math.Clamp(width / 8, 140, 260);
+                var position = GetBugOverlay(channel, width, height, sourceAspectRatio, sourceWidth, sourceHeight);
+                alpha = ChannelBugLayout.AlphaFilters(fadeBugIn, fadeBugOut, durationSeconds);
+                (overlayX, overlayY) = SplitOverlayXy(position);
+            }
+
+            graph = BuildGpuVideoGraph(
+                linear,
+                gpuFilters,
+                hasBug: !string.IsNullOrWhiteSpace(bug),
+                bugWidth,
+                overlayX,
+                overlayY,
+                alpha,
+                gpuTicker,
+                width,
+                height,
+                alertTickerPath);
+        }
+        else if (string.IsNullOrWhiteSpace(bug))
         {
             graph = $"[0:v]{linear}[vout]";
-        }
-        else if (gpuFilters is not null)
-        {
-            var bugWidth = Math.Clamp(width / 8, 140, 260);
-            var position = GetBugOverlay(channel, width, height, sourceAspectRatio, sourceWidth, sourceHeight);
-            var alpha = ChannelBugLayout.AlphaFilters(fadeBugIn, fadeBugOut, durationSeconds);
-            var (overlayX, overlayY) = SplitOverlayXy(position);
-            var overlay = gpuFilters == "qsv" ? "overlay_qsv" : "overlay_vaapi";
-            var bugUpload = gpuFilters == "qsv"
-                ? $"{alpha},hwupload=extra_hw_frames=64,format=qsv"
-                : $"{alpha},hwupload=extra_hw_frames=64";
-            graph =
-                $"[0:v]{linear}[base];" +
-                $"[1:v]format=bgra,scale={bugWidth}:-1:force_original_aspect_ratio=decrease,{bugUpload}[bug];" +
-                $"[base][bug]{overlay}=x={overlayX}:y={overlayY}[vout]";
         }
         else
         {
@@ -1072,6 +1172,13 @@ public class FfmpegCommandBuilder
                 $"[0:v]{linear}[base];" +
                 $"[1:v]format=rgba,scale={bugWidth}:-1:force_original_aspect_ratio=decrease,{alpha}[bug];" +
                 $"[base][bug]overlay={position}:format=auto:eof_action=repeat:repeatlast=1[vout]";
+        }
+
+        if (tickerPng && gpuFilters is null)
+        {
+            graph = graph.Replace("[vout]", "[vpre]", StringComparison.Ordinal)
+                + $";{BuildCpuTickerMovie(alertTickerPath!)}[ticker]"
+                + $";[vpre][ticker]overlay=x='W-mod(t*90\\,W+w)':y=H-h:eof_action=repeat:repeatlast=1[vout]";
         }
 
         if (!string.IsNullOrEmpty(skipExpr) && sandwich is null)
@@ -1113,53 +1220,100 @@ public class FfmpegCommandBuilder
         return string.Join(',', filters);
     }
 
-    private static string BuildQsvScalePad(
-        int width,
-        int height,
-        bool uploadFirst,
-        int? sourceWidth,
-        int? sourceHeight)
+    private static string BuildQsvScalePad(int width, int height, bool uploadFirst)
     {
         var filters = new List<string>();
         if (uploadFirst)
         {
             filters.Add("format=nv12");
             filters.Add("hwupload=extra_hw_frames=64");
-            filters.Add("format=qsv");
         }
-
-        var (scaleW, scaleH) = FitInside(sourceWidth, sourceHeight, width, height);
-        filters.Add($"scale_qsv=w={scaleW}:h={scaleH}:format=nv12");
-        if (scaleW != width || scaleH != height)
+        else
         {
-            filters.Add($"pad_qsv=w={width}:h={height}:x=-1:y=-1");
+            filters.Add("hwmap=derive_device=vaapi");
         }
 
+        // Stock FFmpeg has no pad_qsv; hwupload/format=qsv ENOSYS on this driver
+        // for YouTube pipes. Filter on the parent VAAPI device, map to QSV only
+        // for h264_qsv.
+        filters.Add(
+            $"scale_vaapi={width}:{height}:force_original_aspect_ratio=decrease:force_divisible_by=2:format=nv12");
+        filters.Add($"pad_vaapi={width}:{height}:-1:-1:color=black");
         return string.Join(',', filters);
     }
 
-    private static (int Width, int Height) FitInside(int? sourceWidth, int? sourceHeight, int destWidth, int destHeight)
+    private static string FinishGpuVideoFilters(string linear, string? gpuFilters)
+        => gpuFilters == "qsv" ? linear + ",hwmap=derive_device=qsv" : linear;
+
+    private static string GpuEncodeMap(string? gpuFilters)
+        => gpuFilters == "qsv" ? ",hwmap=derive_device=qsv" : string.Empty;
+
+    private string BuildGpuVideoGraph(
+        string linear,
+        string gpuFilters,
+        bool hasBug,
+        int bugWidth,
+        string overlayX,
+        string overlayY,
+        string alpha,
+        bool gpuTicker,
+        int width,
+        int height,
+        string? alertTickerPath)
     {
-        if (sourceWidth is not > 0 || sourceHeight is not > 0)
+        if (!hasBug && !gpuTicker)
         {
-            return (destWidth, destHeight);
+            return $"[0:v]{FinishGpuVideoFilters(linear, gpuFilters)}[vout]";
         }
 
-        var scale = Math.Min(destWidth / (double)sourceWidth.Value, destHeight / (double)sourceHeight.Value);
-        var width = Math.Max(2, (int)Math.Round(sourceWidth.Value * scale / 2.0) * 2);
-        var height = Math.Max(2, (int)Math.Round(sourceHeight.Value * scale / 2.0) * 2);
-        if (width > destWidth)
+        var graph = $"[0:v]{linear}[base]";
+        var current = "base";
+        if (hasBug)
         {
-            width = destWidth - (destWidth % 2);
+            var next = gpuTicker ? "withbug" : "vout";
+            var encodeMap = gpuTicker ? string.Empty : GpuEncodeMap(gpuFilters);
+            graph +=
+                $";[1:v]format=bgra,scale={bugWidth}:-1:force_original_aspect_ratio=decrease,{alpha},format=nv12,hwupload=extra_hw_frames=64[bug]" +
+                $";[{current}][bug]overlay_vaapi=x={overlayX}:y={overlayY}{encodeMap}[{next}]";
+            current = next;
         }
 
-        if (height > destHeight)
+        if (gpuTicker)
         {
-            height = destHeight - (destHeight % 2);
+            graph += ";" + BuildGpuTickerSource(width, height, alertTickerPath!);
+            graph += $";[{current}][ticker]overlay_vaapi=x='W-mod(t*90\\,W+w)':y=H-h{GpuEncodeMap(gpuFilters)}[vout]";
         }
 
-        return (width, height);
+        return graph;
     }
+
+    private string BuildGpuTickerSource(int width, int height, string alertTickerPath)
+    {
+        _ = width;
+        _ = height;
+        var fps = _normalization.Current.FpsOutput;
+        var escaped = EscapeFilterPath(alertTickerPath);
+        return $"movie='{escaped}':loop=-1,fps={fps},format=nv12,hwupload=extra_hw_frames=64[ticker]";
+    }
+
+    private string BuildCpuTickerMovie(string alertTickerPath)
+    {
+        var fps = _normalization.Current.FpsOutput;
+        var escaped = EscapeFilterPath(alertTickerPath);
+        return $"movie='{escaped}':loop=-1,fps={fps}";
+    }
+
+    private static int TickerBarHeight(int height)
+    {
+        var barH = Math.Max(52, height / 18);
+        return barH + (barH & 1);
+    }
+
+    private static int TickerFontSize(int height)
+        => Math.Max(22, height / 42);
+
+    private static string TickerDrawTextFilter(string escapedPath, int font, string y)
+        => $"drawtext=textfile='{escapedPath}':expansion=none:fontcolor=white:fontsize={font}:x=w-mod(t*90\\,w+text_w):y={y}";
 
     private static (string X, string Y) SplitOverlayXy(string position)
     {
@@ -1236,6 +1390,20 @@ public class FfmpegCommandBuilder
     private static bool HasAlertTicker(string? alertTickerPath)
         => !string.IsNullOrWhiteSpace(alertTickerPath) && File.Exists(alertTickerPath);
 
+    private static bool IsAlertGraphic(string? path)
+    {
+        if (!HasAlertTicker(path))
+        {
+            return false;
+        }
+
+        var ext = Path.GetExtension(path!);
+        return ext.Equals(".png", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".jpg", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".jpeg", StringComparison.OrdinalIgnoreCase)
+            || ext.Equals(".webp", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static void AppendWeatherAlertTicker(List<string> filters, int height, string? alertTickerPath)
     {
         if (!HasAlertTicker(alertTickerPath))
@@ -1243,11 +1411,11 @@ public class FfmpegCommandBuilder
             return;
         }
 
-        var barH = Math.Max(52, height / 18);
-        var font = Math.Max(22, height / 42);
+        var barH = TickerBarHeight(height);
+        var font = TickerFontSize(height);
         var escaped = EscapeFilterPath(alertTickerPath!);
         filters.Add($"drawbox=x=0:y=ih-{barH}:w=iw:h={barH}:color=0xc41e3a@0.90:t=fill");
-        filters.Add($"drawtext=textfile='{escaped}':expansion=none:fontcolor=white:fontsize={font}:x=w-mod(t*90\\,w+text_w):y=h-{barH}+{(barH - font) / 2}");
+        filters.Add(TickerDrawTextFilter(escaped, font, $"h-{barH}+{(barH - font) / 2}"));
     }
 
     private static string TruncateForDrawText(string text, int maxChars)
@@ -1284,12 +1452,22 @@ public class FfmpegCommandBuilder
 
         if (HasAlertTicker(alertTickerPath))
         {
-            var barH = Math.Max(52, height / 18);
-            var font = Math.Max(22, height / 42);
-            var escaped = EscapeFilterPath(alertTickerPath!);
-            baseFilter = baseFilter.Replace("[vout]", "[vpre]")
-                + $";[vpre]drawbox=x=0:y=ih-{barH}:w=iw:h={barH}:color=0xc41e3a@0.90:t=fill[vbar]"
-                + $";[vbar]drawtext=textfile='{escaped}':expansion=none:fontcolor=white:fontsize={font}:x=w-mod(t*90\\,w+text_w):y=h-{barH}+{(barH - font) / 2}[vout]";
+            if (IsAlertGraphic(alertTickerPath))
+            {
+                var escaped = EscapeFilterPath(alertTickerPath!);
+                baseFilter = baseFilter.Replace("[vout]", "[vpre]")
+                    + $";movie='{escaped}':loop=-1,fps=30[ticker]"
+                    + $";[vpre][ticker]overlay=x='W-mod(t*90\\,W+w)':y=H-h:eof_action=repeat:repeatlast=1[vout]";
+            }
+            else
+            {
+                var barH = TickerBarHeight(height);
+                var font = TickerFontSize(height);
+                var escaped = EscapeFilterPath(alertTickerPath!);
+                baseFilter = baseFilter.Replace("[vout]", "[vpre]")
+                    + $";[vpre]drawbox=x=0:y=ih-{barH}:w=iw:h={barH}:color=0xc41e3a@0.90:t=fill[vbar]"
+                    + $";[vbar]{TickerDrawTextFilter(escaped, font, $"h-{barH}+{(barH - font) / 2}")}[vout]";
+            }
         }
 
         return baseFilter;
@@ -1322,7 +1500,7 @@ public class FfmpegCommandBuilder
 
     private void AppendBroadcastAudioFilter(List<string> args, string? skipExpr = null)
     {
-        if (args.Contains("-af"))
+        if (args.Contains("-af") || MapsFilterComplexAudio(args))
         {
             return;
         }
@@ -1331,6 +1509,19 @@ public class FfmpegCommandBuilder
             ? BuildBroadcastAudioFilter()
             : $"aselect='{skipExpr}',asetpts=N/SR/TB,{BuildBroadcastAudioFilter()}";
         args.AddRange(["-af", filter]);
+    }
+
+    private static bool MapsFilterComplexAudio(List<string> args)
+    {
+        for (var i = 0; i < args.Count - 1; i++)
+        {
+            if (args[i] == "-map" && string.Equals(args[i + 1], "[aout]", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void AppendAacStereo48k(List<string> args)

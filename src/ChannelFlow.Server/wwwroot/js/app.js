@@ -3168,11 +3168,12 @@
         }
 
         const ytDlp = settings.ytDlpAvailable ? 'yt-dlp found' : 'yt-dlp missing';
+        const cookiePath = settings.cookieFilePath ? ` at ${settings.cookieFilePath}` : '';
         const cookies = settings.hasCookies
             ? (settings.looksSignedIn
-                ? `cookies saved (${settings.cookieCount} rows, looks signed in)`
-                : `cookies saved (${settings.cookieCount} rows)`)
-            : 'no cookies saved';
+                ? `cookies saved (${settings.cookieCount} rows, looks signed in)${cookiePath}`
+                : `cookies saved (${settings.cookieCount} rows)${cookiePath}`)
+            : `no cookies saved${cookiePath}`;
         const premium = settings.preferPremium ? 'Premium formats on' : 'Premium formats off';
         const sb = settings.sponsorBlockEnabled ? 'SponsorBlock on' : 'SponsorBlock off';
         el.textContent = `${ytDlp} · ${cookies} · ${premium} · ${sb}`;
@@ -3211,6 +3212,10 @@
         if ($('yt-cookies')) {
             $('yt-cookies').value = '';
         }
+        const fileEl = $('yt-cookies-file');
+        if (fileEl) {
+            fileEl.value = '';
+        }
         renderSponsorBlockCategories(settings.knownCategories, settings.sponsorBlockCategories);
         renderYouTubeStatus(settings);
     }
@@ -3231,10 +3236,11 @@
         }
 
         try {
+            const pasted = ($('yt-cookies')?.value || '').trim();
             const saved = await api('/youtube/settings', {
                 method: 'PUT',
                 body: JSON.stringify({
-                    cookies: ($('yt-cookies')?.value || '').trim() || null,
+                    cookies: pasted || null,
                     preferPremium: !!$('yt-prefer-premium')?.checked,
                     sponsorBlockEnabled: !!$('yt-sponsorblock')?.checked,
                     sponsorBlockCategories: readSponsorBlockCategories()
@@ -3242,7 +3248,15 @@
             });
             applyYouTubeSettings(saved);
             if (!options.silent) {
-                toast('YouTube settings saved.', 'success');
+                if (saved.hasCookies) {
+                    toast(saved.looksSignedIn
+                        ? `YouTube cookies saved (${saved.cookieCount} rows, signed in).`
+                        : `YouTube cookies saved (${saved.cookieCount} rows).`, 'success');
+                } else if (pasted) {
+                    toast('YouTube settings saved, but cookies were not kept. Paste a Netscape cookies.txt export.', 'error');
+                } else {
+                    toast('YouTube settings saved.', 'success');
+                }
             }
         } catch (err) {
             reportApiError(err, 'Could not save YouTube settings.');
@@ -7212,6 +7226,21 @@
         click('btn-save-youtube', () => saveYouTubeSettings().catch((e) => toast(e.message, 'error')));
         click('btn-test-youtube', () => testYouTubeAccess().catch((e) => toast(e.message, 'error')));
         click('btn-clear-youtube-cookies', () => clearYouTubeCookies().catch((e) => toast(e.message, 'error')));
+        const ytCookieFile = $('yt-cookies-file');
+        if (ytCookieFile) {
+            ytCookieFile.addEventListener('change', () => {
+                const file = ytCookieFile.files && ytCookieFile.files[0];
+                const box = $('yt-cookies');
+                if (!file || !box) {
+                    return;
+                }
+
+                file.text().then((text) => {
+                    box.value = text || '';
+                    toast('Loaded ' + file.name + '. Click Save YouTube settings to keep it.', 'success');
+                }).catch((err) => toast(err.message || 'Could not read cookies file.', 'error'));
+            });
+        }
         click('btn-rebuild-all', () => api('/tasks/rebuild-all', { method: 'POST' })
             .then(() => {
                 toast('Rebuild all started in background. This may take several minutes.', 'success');

@@ -30,42 +30,20 @@ public sealed class YouTubeCookieStore
         _runtime = runtime;
     }
 
+    /// <summary>
+    /// Host-visible Netscape cookies.txt under the ChannelFlow config folder
+    /// (<c>/config/youtube-cookies.txt</c> in Docker, the Unraid appdata mount).
+    /// </summary>
     public string FilePath => Path.Combine(_runtime.DataFolder, FileName);
 
+    private YouTubeSettings Settings
+        => _runtime.Configuration.YouTube ??= new YouTubeSettings();
+
     public bool HasCookies()
-        => File.Exists(FilePath) && new FileInfo(FilePath).Length > 0;
-
-    public string? GetPathIfPresent()
-        => HasCookies() ? FilePath : null;
-
-    /// <summary>
-    /// Path for yt-dlp <c>--cookies</c>, or null when the file is missing or not Netscape format.
-    /// A bad cookies file makes yt-dlp fail even for public videos.
-    /// </summary>
-    public string? GetPathIfUsable()
     {
         lock (_gate)
         {
-            if (!HasCookies())
-            {
-                return null;
-            }
-
-            try
-            {
-                var lines = File.ReadAllLines(FilePath);
-                var text = string.Join('\n', lines).Trim().TrimStart('\uFEFF');
-                if (!LooksLikeNetscape(text) || ParseCookieNames(lines).Count == 0)
-                {
-                    return null;
-                }
-
-                return FilePath;
-            }
-            catch (IOException)
-            {
-                return null;
-            }
+            return ReadUsableText() is not null;
         }
     }
 
@@ -73,18 +51,19 @@ public sealed class YouTubeCookieStore
     {
         lock (_gate)
         {
-            if (!HasCookies())
+            var text = ReadUsableText();
+            if (text is null)
             {
-                return new YouTubeCookieStatus(false, 0, false, null);
+                return new YouTubeCookieStatus(false, 0, false, null, FilePath);
             }
 
-            var lines = File.ReadAllLines(FilePath);
-            var names = ParseCookieNames(lines);
+            var names = ParseCookieNames(text.Split('\n'));
             return new YouTubeCookieStatus(
                 true,
                 names.Count,
                 names.Overlaps(SignedInNames),
-                File.GetLastWriteTimeUtc(FilePath));
+                File.Exists(FilePath) ? File.GetLastWriteTimeUtc(FilePath) : Settings.CookiesSavedAtUtc,
+                FilePath);
         }
     }
 
@@ -93,24 +72,173 @@ public sealed class YouTubeCookieStore
         var netscape = NormalizeToNetscape(raw);
         lock (_gate)
         {
-            Directory.CreateDirectory(_runtime.DataFolder);
-            var temp = FilePath + ".tmp";
-            File.WriteAllText(temp, netscape, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-            File.Move(temp, FilePath, overwrite: true);
-            TryRestrictAccess(FilePath);
+            WriteHostFile(netscape);
+            Settings.NetscapeCookies = netscape;
+            Settings.CookiesSavedAtUtc = DateTime.UtcNow;
+            _runtime.SaveConfiguration();
         }
 
         return GetStatus();
+    }
+
+    public string? GetPathIfPresent()
+        => GetPathIfUsable();
+
+    /// <summary>
+    /// Path for yt-dlp <c>--cookies</c>. The host-mounted config file, or null when unset.
+    /// </summary>
+    public string? GetPathIfUsable()
+    {
+        lock (_gate)
+        {
+            var text = ReadUsableText();
+            if (text is null)
+            {
+                return null;
+            }
+
+            if (!FileLooksUsable(FilePath))
+            {
+                try
+                {
+                    WriteHostFile(text);
+                }
+                catch (Exception)
+                {
+                    return null;
+                }
+            }
+
+            return FileLooksUsable(FilePath) ? FilePath : null;
+        }
     }
 
     public void Clear()
     {
         lock (_gate)
         {
+            Settings.NetscapeCookies = null;
+            Settings.CookiesSavedAtUtc = null;
+            _runtime.SaveConfiguration();
+            TryDelete(FilePath);
+            TryDelete(FilePath + ".tmp");
+        }
+    }
+
+    /// <summary>
+    /// Prefer a host-dropped cookies.txt. Fall back to the database copy and rewrite the host file.
+    /// </summary>
+    private string? ReadUsableText()
+    {
+        var fromFile = TryReadHostFile();
+        if (IsUsableNetscape(fromFile))
+        {
+            if (!string.Equals(Settings.NetscapeCookies, fromFile, StringComparison.Ordinal))
+            {
+                Settings.NetscapeCookies = fromFile;
+                Settings.CookiesSavedAtUtc = File.GetLastWriteTimeUtc(FilePath);
+                _runtime.SaveConfiguration();
+            }
+
+            return fromFile;
+        }
+
+        var fromDb = Settings.NetscapeCookies;
+        if (fromDb is null || !IsUsableNetscape(fromDb))
+        {
+            return null;
+        }
+
+        try
+        {
+            WriteHostFile(fromDb);
+        }
+        catch (Exception)
+        {
+            // Host file may be root-owned; Save() reports that to the UI.
+        }
+
+        return fromDb;
+    }
+
+    private string? TryReadHostFile()
+    {
+        try
+        {
+            if (!File.Exists(FilePath) || new FileInfo(FilePath).Length == 0)
+            {
+                return null;
+            }
+
+            var text = File.ReadAllText(FilePath).Trim().TrimStart('\uFEFF');
+            return string.IsNullOrWhiteSpace(text) ? null : EnsureNetscapeHeader(text);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static bool FileLooksUsable(string path)
+    {
+        try
+        {
+            if (!File.Exists(path) || new FileInfo(path).Length == 0)
+            {
+                return false;
+            }
+
+            var text = File.ReadAllText(path);
+            return IsUsableNetscape(text);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsUsableNetscape(string? text)
+        => !string.IsNullOrWhiteSpace(text)
+            && LooksLikeNetscape(text)
+            && ParseCookieNames(text.Split('\n')).Count > 0;
+
+    private void WriteHostFile(string netscape)
+    {
+        Directory.CreateDirectory(_runtime.DataFolder);
+        var temp = FilePath + ".tmp";
+        File.WriteAllText(temp, netscape, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        try
+        {
+            File.Move(temp, FilePath, overwrite: true);
+        }
+        catch (Exception) when (File.Exists(FilePath))
+        {
+            TryDelete(FilePath);
             if (File.Exists(FilePath))
             {
-                File.Delete(FilePath);
+                TryDelete(temp);
+                throw new InvalidOperationException(
+                    $"Could not write {FilePath}. On the host, delete or chown {FileName} in the ChannelFlow appdata folder (it is likely root-owned) and save again, or drop a Netscape cookies.txt there.");
             }
+
+            File.Move(temp, FilePath, overwrite: true);
+        }
+
+        TryAllowHostWrite(FilePath);
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (Exception)
+        {
+            // Best-effort; Unraid may leave a root-owned empty cookies.txt.
         }
     }
 
@@ -253,7 +381,11 @@ public sealed class YouTubeCookieStore
         foreach (var raw in lines)
         {
             var line = raw.Trim();
-            if (line.Length == 0 || line.StartsWith('#') || line.StartsWith("//"))
+            if (line.StartsWith("#HttpOnly_", StringComparison.OrdinalIgnoreCase))
+            {
+                line = line["#HttpOnly_".Length..];
+            }
+            else if (line.Length == 0 || line.StartsWith('#') || line.StartsWith("//"))
             {
                 continue;
             }
@@ -278,7 +410,10 @@ public sealed class YouTubeCookieStore
             ? value.GetBoolean()
             : null;
 
-    private static void TryRestrictAccess(string path)
+    /// <summary>
+    /// 0660 so the Unraid/host user in the container group can replace the file.
+    /// </summary>
+    private static void TryAllowHostWrite(string path)
     {
         if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
         {
@@ -287,7 +422,9 @@ public sealed class YouTubeCookieStore
 
         try
         {
-            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            File.SetUnixFileMode(
+                path,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite);
         }
         catch (Exception)
         {
@@ -296,4 +433,9 @@ public sealed class YouTubeCookieStore
     }
 }
 
-public sealed record YouTubeCookieStatus(bool HasCookies, int CookieCount, bool LooksSignedIn, DateTime? SavedAtUtc);
+public sealed record YouTubeCookieStatus(
+    bool HasCookies,
+    int CookieCount,
+    bool LooksSignedIn,
+    DateTime? SavedAtUtc,
+    string FilePath);

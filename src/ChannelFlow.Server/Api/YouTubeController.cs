@@ -111,6 +111,7 @@ public class YouTubeController : ControllerBase
             cookieCount = cookies.CookieCount,
             looksSignedIn = cookies.LooksSignedIn,
             cookiesSavedAtUtc = cookies.SavedAtUtc,
+            cookieFilePath = cookies.FilePath,
             ytDlpAvailable = _ytDlp.Resolve() is not null
         };
     }

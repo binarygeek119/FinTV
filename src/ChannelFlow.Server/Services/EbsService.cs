@@ -13,6 +13,10 @@ public class EbsService
 
     public const string OfflineFolderName = "OFFLINE";
 
+    public const string StripFileName = "ebs_strip.png";
+
+    public const string FullscreenFileName = "ebs_fullscreen.png";
+
     private static readonly string UsaSlateFile = "offlineusa.jpg";
 
     private static readonly string InternationalSlateFile = "offline.jpg";
@@ -68,6 +72,36 @@ public class EbsService
             MusicPath = musicPath,
             DurationSeconds = durationSeconds
         };
+    }
+
+    public static string? ResolveGraphic(string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            return null;
+        }
+
+        foreach (var root in GetGraphicRoots())
+        {
+            if (!Directory.Exists(root))
+            {
+                continue;
+            }
+
+            var direct = Path.Combine(root, fileName);
+            if (File.Exists(direct))
+            {
+                return direct;
+            }
+
+            var found = Directory.EnumerateFiles(root, fileName, SearchOption.AllDirectories).FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(found))
+            {
+                return found;
+            }
+        }
+
+        return null;
     }
 
     public string? ResolveSlatePath()
@@ -299,6 +333,20 @@ public class EbsService
                 }
             }
         }
+    }
+
+    private static IEnumerable<string> GetGraphicRoots()
+    {
+        var plugin = FinTvRuntime.Current;
+        if (plugin is null)
+        {
+            yield break;
+        }
+
+        yield return Path.Combine(plugin.LogosFolder, "binarygeek119", EbsFolderName);
+        yield return Path.Combine(plugin.LogosFolder, "binarygeek119", "Weather");
+        yield return Path.Combine(plugin.BundledLogosFolder, EbsFolderName);
+        yield return Path.Combine(plugin.BundledLogosFolder, "Weather");
     }
 
     private static IEnumerable<string> GetStockSlateRoots()

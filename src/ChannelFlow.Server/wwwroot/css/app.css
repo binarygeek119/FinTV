@@ -48,6 +48,8 @@ html, body { margin: 0; height: 100%; background: var(--page-bg); color: var(--t
     overflow-y: auto;
     padding: 0.15rem 0.2rem 0.35rem 0;
     scrollbar-gutter: stable;
+    scrollbar-width: auto;
+    scrollbar-color: var(--accent) #161616;
 }
 .drawer-nav-gap {
     height: 0.35rem;
@@ -254,22 +256,27 @@ input, select, textarea {
     scrollbar-width: auto;
     scrollbar-color: var(--accent) #161616;
 }
-.tv-guide-scroll::-webkit-scrollbar {
+.tv-guide-scroll::-webkit-scrollbar,
+.drawer-nav::-webkit-scrollbar {
     width: 14px;
     height: 14px;
 }
-.tv-guide-scroll::-webkit-scrollbar-track {
+.tv-guide-scroll::-webkit-scrollbar-track,
+.drawer-nav::-webkit-scrollbar-track {
     background: #161616;
 }
-.tv-guide-scroll::-webkit-scrollbar-thumb {
+.tv-guide-scroll::-webkit-scrollbar-thumb,
+.drawer-nav::-webkit-scrollbar-thumb {
     background: var(--accent);
     border-radius: 8px;
     border: 3px solid #161616;
 }
-.tv-guide-scroll::-webkit-scrollbar-thumb:hover {
+.tv-guide-scroll::-webkit-scrollbar-thumb:hover,
+.drawer-nav::-webkit-scrollbar-thumb:hover {
     background: var(--accent-hover);
 }
-.tv-guide-scroll::-webkit-scrollbar-corner {
+.tv-guide-scroll::-webkit-scrollbar-corner,
+.drawer-nav::-webkit-scrollbar-corner {
     background: #161616;
 }
 .tv-guide-header, .tv-guide-row { display: flex; min-width: max-content; }

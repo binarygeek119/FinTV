@@ -35,6 +35,14 @@ public class YouTubeSettings
 
     public List<string> SponsorBlockCategories { get; set; } = new(DefaultCategories);
 
+    /// <summary>
+    /// Netscape cookies.txt backup in AppSettings JSON. The live file is
+    /// <c>youtube-cookies.txt</c> in the config folder. Never returned by the API.
+    /// </summary>
+    public string? NetscapeCookies { get; set; }
+
+    public DateTime? CookiesSavedAtUtc { get; set; }
+
     public static List<string> NormalizeCategories(IEnumerable<string>? categories)
     {
         var selected = (categories ?? [])

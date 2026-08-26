@@ -211,10 +211,11 @@ public class WeatherController : ControllerBase
         try
         {
             var preview = await _alerts.StartTestAsync(mode, TimeSpan.FromSeconds(seconds), cancellationToken);
+            _streams.PunchInWeatherAlert();
             var first = preview.Alerts.FirstOrDefault();
             var liveHint = mode == WeatherAlertOverlayMode.CutIn
-                ? "Live TV, movies, and music play the attention tone, then switch to this screen. Use Stop test to end it early."
-                : "Live TV, movies, and music show the scrolling bar. Use Stop test to end it early.";
+                ? "Live TV, movies, and music switch to ebs_fullscreen.png and keep the show audio ducked underneath. Use Stop test to end it early."
+                : "Live TV, movies, and music show the scrolling ebs_strip.png bar. Use Stop test to end it early.";
             return Ok(new
             {
                 mode = WeatherAlertOverlayService.FormatMode(preview.Mode),

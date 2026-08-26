@@ -235,7 +235,8 @@ public class FfmpegEncodingService
         var tail = new List<string>();
         if (!ContainsFilterStep(adapted, "format=nv12")
             && !ContainsFilterStep(adapted, "format=vaapi")
-            && !ContainsFilterStep(adapted, "format=qsv"))
+            && !ContainsFilterStep(adapted, "format=qsv")
+            && !ContainsFilterStep(adapted, "hwmap=derive_device=qsv"))
         {
             tail.Add("format=nv12");
         }
@@ -249,7 +250,7 @@ public class FfmpegEncodingService
             else if (videoEncoder.Contains("qsv", StringComparison.OrdinalIgnoreCase))
             {
                 tail.Add("hwupload=extra_hw_frames=64");
-                tail.Add("format=qsv");
+                tail.Add("hwmap=derive_device=qsv");
             }
         }
 
@@ -422,7 +423,7 @@ public class FfmpegEncodingService
                 [
                     "-init_hw_device", $"vaapi=va:{encodeDevice}",
                     "-init_hw_device", "qsv=hw@va",
-                    "-filter_hw_device", "hw"
+                    "-filter_hw_device", "va"
                 ],
                 ["-hwaccel", "qsv", "-extra_hw_frames", "64"]);
         }
