@@ -1,17 +1,38 @@
 using FinTv.Domain;
 using FinTv.Services;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
+using System.Text;
+using Microsoft.Extensions.Logging;
+
 namespace FinTv.Streaming;
 
 public class FfmpegCommandBuilder
 {
+    private static readonly ConcurrentDictionary<string, CachedVideoCodec> CodecCache = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, byte> WarnedSoftwareDecodePaths = new(StringComparer.Ordinal);
+    private static readonly HashSet<string> NonVideoExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".svg",
+        ".mp3", ".flac", ".m4a", ".wav", ".aac", ".ogg", ".opus", ".wma"
+    };
+
     private readonly FfmpegEncodingService _encoding;
     private readonly StreamNormalizationService _normalization;
+    private readonly IFfmpegLocator _ffmpeg;
+    private readonly ILogger<FfmpegCommandBuilder> _logger;
 
-    public FfmpegCommandBuilder(FfmpegEncodingService encoding, StreamNormalizationService normalization)
+    public FfmpegCommandBuilder(
+        FfmpegEncodingService encoding,
+        StreamNormalizationService normalization,
+        IFfmpegLocator ffmpeg,
+        ILogger<FfmpegCommandBuilder> logger)
     {
         _encoding = encoding;
         _normalization = normalization;
+        _ffmpeg = ffmpeg;
+        _logger = logger;
     }
 
     public IReadOnlyList<string> BuildMediaCommand(
@@ -28,10 +49,11 @@ public class FfmpegCommandBuilder
         bool overlayBug = true,
         bool fadeBugIn = false,
         bool fadeBugOut = false,
-        WeatherAlertToneSandwich? alertTones = null)
+        WeatherAlertToneSandwich? alertTones = null,
+        string? sourceVideoCodec = null)
     {
         var (width, height) = GetResolution(channel);
-        var context = CreateEncodingContext(width, height, inputPath);
+        var context = CreateEncodingContext(width, height, inputPath, sourceVideoCodec);
         var encodeSeconds = alertTones is { HasTones: true }
             ? alertTones.TotalSeconds
             : durationSeconds;
@@ -85,10 +107,11 @@ public class FfmpegCommandBuilder
         string? sourceAspectRatio = null,
         int? sourceWidth = null,
         int? sourceHeight = null,
-        bool overlayBug = true)
+        bool overlayBug = true,
+        string? sourceVideoCodec = null)
     {
         var (width, height) = GetResolution(channel);
-        var context = CreateEncodingContext(width, height, inputPath);
+        var context = CreateEncodingContext(width, height, inputPath, sourceVideoCodec);
         var isRemoteInput = inputPath.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
             || inputPath.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
         var skipExpr = FfmpegSkipCuts.BuildSelectExpression(skipRanges ?? []);
@@ -652,14 +675,15 @@ public class FfmpegCommandBuilder
         return args;
     }
 
-    public IReadOnlyList<string> BuildBlackdetectCommand(string inputPath)
+    public IReadOnlyList<string> BuildBlackdetectCommand(string inputPath, string? sourceVideoCodec = null)
     {
+        var context = CreateEncodingContext(0, 0, inputPath, sourceVideoCodec);
         var args = new List<string>
         {
             "-hide_banner"
         };
-        args.AddRange(_encoding.HardwareDeviceArgs);
-        args.AddRange(_encoding.HardwareDecodeArgs);
+        args.AddRange(context.HardwareDeviceArgs);
+        args.AddRange(context.HardwareDecodeArgs);
         args.AddRange(new[]
         {
             "-i", inputPath,
@@ -721,18 +745,164 @@ public class FfmpegCommandBuilder
         IReadOnlyList<string> HardwareDeviceArgs,
         IReadOnlyList<string> HardwareDecodeArgs);
 
-    private EncodingContext CreateEncodingContext(int width, int height, string? mediaPath = null)
+    private EncodingContext CreateEncodingContext(
+        int width,
+        int height,
+        string? mediaPath = null,
+        string? sourceVideoCodec = null)
     {
         _ = width;
         _ = height;
-        _ = mediaPath;
         var encoder = _encoding.ResolveVideoEncoder(_normalization.Current.IsMpeg2);
         var hardware = encoder.Contains("vaapi", StringComparison.OrdinalIgnoreCase)
             || encoder.Contains("nvenc", StringComparison.OrdinalIgnoreCase);
-        return hardware
-            ? new EncodingContext(encoder, _encoding.HardwareDeviceArgs, _encoding.HardwareDecodeArgs)
-            : new EncodingContext(encoder, [], []);
+        if (!hardware)
+        {
+            return new EncodingContext(encoder, [], []);
+        }
+
+        var codec = ResolveSourceVideoCodec(mediaPath, sourceVideoCodec);
+        var decodeArgs = _encoding.DecodeArgsForSource(codec);
+        if (_encoding.UseVaapi
+            && _encoding.HardwareDecodeArgs.Count > 0
+            && decodeArgs.Count == 0
+            && WarnedSoftwareDecodePaths.TryAdd($"{mediaPath}|{codec}", 0))
+        {
+            var reason = FfmpegEncodingService.IsUnsafeVaapiDecodeCodec(codec)
+                ? "AV1 VAAPI decode is unsafe on Intel iHD"
+                : "render node has no VAAPI VLD profile";
+            _logger.LogWarning(
+                "Skipping VAAPI decode for {Codec} source {Path} ({Reason}); software-decoding then encoding with {Encoder}",
+                FfmpegEncodingService.NormalizeVideoCodec(codec) ?? "unknown",
+                mediaPath,
+                reason,
+                encoder);
+        }
+
+        return new EncodingContext(encoder, _encoding.HardwareDeviceArgs, decodeArgs);
     }
+
+    private string? ResolveSourceVideoCodec(string? mediaPath, string? hintedCodec)
+    {
+        if (!_encoding.UseVaapi || !LooksLikeLocalVideo(mediaPath))
+        {
+            return hintedCodec;
+        }
+
+        var probed = ProbeVideoCodec(mediaPath!);
+        return string.IsNullOrWhiteSpace(probed) ? hintedCodec : probed;
+    }
+
+    private static bool LooksLikeLocalVideo(string? mediaPath)
+    {
+        if (string.IsNullOrWhiteSpace(mediaPath)
+            || mediaPath.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            || mediaPath.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(mediaPath, "pipe:0", StringComparison.Ordinal)
+            || !File.Exists(mediaPath))
+        {
+            return false;
+        }
+
+        var extension = Path.GetExtension(mediaPath);
+        return string.IsNullOrEmpty(extension) || !NonVideoExtensions.Contains(extension);
+    }
+
+    private string? ProbeVideoCodec(string mediaPath)
+    {
+        try
+        {
+            var mtime = File.GetLastWriteTimeUtc(mediaPath);
+            if (CodecCache.TryGetValue(mediaPath, out var cached) && cached.WriteTimeUtc == mtime)
+            {
+                return cached.Codec;
+            }
+
+            var probe = ResolveFfprobe();
+            var start = new ProcessStartInfo
+            {
+                FileName = probe,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            start.ArgumentList.Add("-v");
+            start.ArgumentList.Add("error");
+            start.ArgumentList.Add("-select_streams");
+            start.ArgumentList.Add("v:0");
+            start.ArgumentList.Add("-show_entries");
+            start.ArgumentList.Add("stream=codec_name");
+            start.ArgumentList.Add("-of");
+            start.ArgumentList.Add("csv=p=0");
+            start.ArgumentList.Add(mediaPath);
+
+            using var process = Process.Start(start);
+            if (process is null)
+            {
+                return null;
+            }
+
+            var stdout = new StringBuilder();
+            process.OutputDataReceived += (_, e) =>
+            {
+                if (!string.IsNullOrEmpty(e.Data))
+                {
+                    stdout.AppendLine(e.Data);
+                }
+            };
+            process.BeginOutputReadLine();
+            process.ErrorDataReceived += (_, _) => { };
+            process.BeginErrorReadLine();
+            if (!process.WaitForExit(4000))
+            {
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+                catch
+                {
+                    // ignored
+                }
+
+                return null;
+            }
+
+            process.WaitForExit();
+
+            var codec = stdout.ToString()
+                .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(codec))
+            {
+                CodecCache[mediaPath] = new CachedVideoCodec(mtime, codec);
+            }
+
+            return codec;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not probe video codec for {Path}", mediaPath);
+            return null;
+        }
+    }
+
+    private string ResolveFfprobe()
+    {
+        var dir = Path.GetDirectoryName(_ffmpeg.EncoderPath);
+        if (!string.IsNullOrWhiteSpace(dir))
+        {
+            var sibling = Path.Combine(dir, OperatingSystem.IsWindows() ? "ffprobe.exe" : "ffprobe");
+            if (File.Exists(sibling))
+            {
+                return sibling;
+            }
+        }
+
+        return "ffprobe";
+    }
+
+    private readonly record struct CachedVideoCodec(DateTime WriteTimeUtc, string Codec);
 
     private void AppendVideoEncoderArgs(List<string> args, EncodingContext context, bool stillImage = false)
     {

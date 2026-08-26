@@ -418,6 +418,7 @@ public sealed class CatalogLibraryManager : ILibraryManager, IChapterManager
         item.PrimaryImagePath = _remap.ResolveExistingPath(row.PrimaryImagePath) ?? row.PrimaryImagePath;
         item.Width = row.Width;
         item.Height = row.Height;
+        item.VideoCodec = row.VideoCodec;
         item.AspectRatio = row.AspectRatio;
         item.Tags = ReadStringArray(row.TagsJson);
         item.Genres = ReadStringArray(row.GenresJson);

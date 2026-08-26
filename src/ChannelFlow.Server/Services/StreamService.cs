@@ -674,7 +674,8 @@ public class StreamService : IDisposable
             overlayBug: overlayBug,
             fadeBugIn: fadeBugIn,
             fadeBugOut: fadeBugOut,
-            alertTones: alertTones);
+            alertTones: alertTones,
+            sourceVideoCodec: mediaItem.VideoCodec);
 
         await RunFfmpegToStreamAsync(ffmpegPath, args, output, cancellationToken);
     }
@@ -724,7 +725,8 @@ public class StreamService : IDisposable
                 sourceAspectRatio: mediaItem.AspectRatio,
                 sourceWidth: mediaItem.Width,
                 sourceHeight: mediaItem.Height,
-                overlayBug: false);
+                overlayBug: false,
+                sourceVideoCodec: mediaItem.VideoCodec);
             await RunFfmpegToStreamAsync(ffmpegPath, args, output, cancellationToken);
             return;
         }

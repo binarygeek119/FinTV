@@ -46,6 +46,62 @@ public class FfmpegEncodingService
         get { lock (_gate) return _current.HardwareDecodeArgs; }
     }
 
+    /// <summary>
+    /// Hardware decode flags for this source. VAAPI decode is skipped when the
+    /// codec is known-unsafe (AV1 on Intel iHD) or the render node has no VLD
+    /// profile for it. The encoder still uses <see cref="HardwareDeviceArgs"/>.
+    /// </summary>
+    public IReadOnlyList<string> DecodeArgsForSource(string? sourceVideoCodec)
+    {
+        if (!UseVaapi)
+        {
+            return HardwareDecodeArgs;
+        }
+
+        if (IsUnsafeVaapiDecodeCodec(sourceVideoCodec)
+            || !_gpu.CanVaapiDecode(VaapiDevice, sourceVideoCodec))
+        {
+            return [];
+        }
+
+        return HardwareDecodeArgs;
+    }
+
+    public static string? NormalizeVideoCodec(string? sourceVideoCodec)
+    {
+        if (string.IsNullOrWhiteSpace(sourceVideoCodec))
+        {
+            return null;
+        }
+
+        var codec = sourceVideoCodec.Trim();
+        var slash = codec.IndexOf('/');
+        if (slash > 0)
+        {
+            codec = codec[..slash];
+        }
+
+        codec = codec.Trim().ToLowerInvariant();
+        return codec switch
+        {
+            "avc" or "avc1" or "h264" or "h.264" => "h264",
+            "hevc" or "h265" or "h.265" or "hev1" or "hvc1" => "hevc",
+            "mpeg2" or "mpeg2video" or "mp2v" => "mpeg2video",
+            "mpeg1" or "mpeg1video" => "mpeg1video",
+            "mpeg4" or "mp4v" or "xvid" => "mpeg4",
+            "vp9" or "vp9.0" or "libvpx-vp9" => "vp9",
+            "vp8" or "libvpx" => "vp8",
+            "av1" or "av01" or "libaom-av1" or "libdav1d" or "av1_qsv" or "av1_cuvid" => "av1",
+            "vc1" or "wmv3" => "vc1",
+            "mjpeg" or "mjpeg_vaapi" => "mjpeg",
+            "h263" => "h263",
+            _ => codec
+        };
+    }
+
+    public static bool IsUnsafeVaapiDecodeCodec(string? sourceVideoCodec)
+        => NormalizeVideoCodec(sourceVideoCodec) == "av1";
+
     public string EnvironmentHardwareAcceleration => _envHardwareAcceleration;
 
     public string EnvironmentVideoEncoder => _envVideoEncoder;

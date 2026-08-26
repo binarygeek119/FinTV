@@ -45,6 +45,8 @@ public class BaseItem
 
     public int? Height { get; set; }
 
+    public string? VideoCodec { get; set; }
+
     /// <summary>
     /// Normalized picture format: <c>16:9</c>, <c>4:3</c>, or <c>other</c>.
     /// </summary>

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text;
 using System.Text.RegularExpressions;
 using CliWrap;
@@ -7,7 +8,7 @@ using FinTv.Domain;
 namespace FinTv.Streaming;
 
 /// <summary>
-/// Probes VAAPI/NVENC encode support and exposes only the formats this machine can actually encode.
+/// Probes VAAPI/NVENC encode support and per-device VAAPI decode profiles (vainfo VLD).
 /// </summary>
 public sealed class GpuCapabilityService
 {
@@ -52,6 +53,7 @@ public sealed class GpuCapabilityService
     private GpuCapabilities? _cached;
     private int _emptyHardwareProbes;
     private readonly HashSet<string> _encodeVaapiDevices = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, IReadOnlySet<string>> _vaapiDecodeCodecs = new(StringComparer.Ordinal);
 
     public GpuCapabilityService(IFfmpegLocator ffmpeg, ILogger<GpuCapabilityService> logger)
     {
@@ -65,6 +67,7 @@ public sealed class GpuCapabilityService
     {
         _cached = null;
         _encodeVaapiDevices.Clear();
+        _vaapiDecodeCodecs.Clear();
     }
 
     public async Task<GpuCapabilities> GetAsync(CancellationToken cancellationToken = default)
@@ -189,6 +192,34 @@ public sealed class GpuCapabilityService
         return _cached is null && File.Exists(device);
     }
 
+    /// <summary>
+    /// True when this render node reports a VAAPI VLD profile for the source codec,
+    /// or when vainfo did not return decode data (unknown → keep current hwaccel).
+    /// AV1 is never hardware-decoded; Intel iHD advertises it and then SIGSEGVs.
+    /// </summary>
+    public bool CanVaapiDecode(string? device, string? sourceVideoCodec)
+    {
+        var codec = FfmpegEncodingService.NormalizeVideoCodec(sourceVideoCodec);
+        if (codec is null)
+        {
+            return true;
+        }
+
+        if (FfmpegEncodingService.IsUnsafeVaapiDecodeCodec(codec))
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(device)
+            || !_vaapiDecodeCodecs.TryGetValue(device, out var codecs)
+            || codecs.Count == 0)
+        {
+            return true;
+        }
+
+        return codecs.Contains(codec);
+    }
+
     private bool IsSelectableRenderNode(string? path)
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -279,14 +310,25 @@ public sealed class GpuCapabilityService
         var vaapiDevices = new List<GpuSelectOption>();
         var driverNotes = new List<string>();
         _encodeVaapiDevices.Clear();
+        _vaapiDecodeCodecs.Clear();
 
         var discovered = DiscoverVaapiDevices().ToList();
         if (hasH264Vaapi || discovered.Count > 0)
         {
             foreach (var path in discovered)
             {
+                var vainfo = await ReadVainfoAsync(path, cancellationToken);
+                if (vainfo is { DecodeCodecs.Count: > 0 })
+                {
+                    _vaapiDecodeCodecs[path] = vainfo.DecodeCodecs;
+                    _logger.LogInformation(
+                        "VAAPI decode on {Device}: {Codecs}",
+                        path,
+                        string.Join(", ", vainfo.DecodeCodecs.OrderBy(item => item, StringComparer.OrdinalIgnoreCase)));
+                }
+
                 var vaapi = hasH264Vaapi
-                    ? await ProbeVaapiDeviceAsync(path, hasMpeg2Vaapi, cancellationToken)
+                    ? await ProbeVaapiDeviceAsync(path, hasMpeg2Vaapi, vainfo, cancellationToken)
                     : null;
                 if (vaapi is not null)
                 {
@@ -297,12 +339,11 @@ public sealed class GpuCapabilityService
                     continue;
                 }
 
-                var driver = (await ReadVainfoAsync(path, cancellationToken))?.Driver;
                 vaapiDevices.Add(new GpuSelectOption(
                     path,
-                    string.IsNullOrWhiteSpace(driver)
+                    string.IsNullOrWhiteSpace(vainfo?.Driver)
                         ? $"{path} (no H.264 encode)"
-                        : $"{path} ({driver}, no H.264 encode)"));
+                        : $"{path} ({vainfo.Driver}, no H.264 encode)"));
             }
 
             if (vaapiDevices.Count > 0 && hasH264Vaapi)
@@ -338,12 +379,22 @@ public sealed class GpuCapabilityService
         }
 
         var summary = BuildSummary(accelerations, formats, driverNotes, vaapiDevices);
-        return new GpuCapabilities(summary, string.Join("; ", driverNotes.Distinct()), vaapiDevices, accelerations, formats);
+        return new GpuCapabilities(
+            summary,
+            string.Join("; ", driverNotes.Distinct()),
+            vaapiDevices,
+            accelerations,
+            formats,
+            SnapshotDecodeCodecs());
     }
 
-    private async Task<VaapiProbe?> ProbeVaapiDeviceAsync(string device, bool hasMpeg2Vaapi, CancellationToken cancellationToken)
+    private async Task<VaapiProbe?> ProbeVaapiDeviceAsync(
+        string device,
+        bool hasMpeg2Vaapi,
+        VainfoResult? vainfo,
+        CancellationToken cancellationToken)
     {
-        var vainfo = await ReadVainfoAsync(device, cancellationToken);
+        vainfo ??= await ReadVainfoAsync(device, cancellationToken);
         var h264 = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var mpeg2 = false;
         if (vainfo is not null)
@@ -592,21 +643,39 @@ public sealed class GpuCapabilityService
         }
 
         var encode = new List<string>();
+        var decode = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var line in text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
         {
-            if (!line.Contains("VAEntrypointEnc", StringComparison.OrdinalIgnoreCase))
+            var trimmed = line.Trim();
+            var isEncode = trimmed.Contains("VAEntrypointEnc", StringComparison.OrdinalIgnoreCase);
+            var isDecode = trimmed.Contains("VAEntrypointVLD", StringComparison.OrdinalIgnoreCase);
+            if (!isEncode && !isDecode)
             {
                 continue;
             }
 
-            var profile = line.Split(':', 2)[0].Trim();
-            if (!string.IsNullOrWhiteSpace(profile))
+            var profile = trimmed.Split(':', 2)[0].Trim();
+            if (string.IsNullOrWhiteSpace(profile))
+            {
+                continue;
+            }
+
+            if (isEncode)
             {
                 encode.Add(profile);
             }
+
+            if (isDecode)
+            {
+                var codec = MapVaapiProfileToCodec(profile);
+                if (!string.IsNullOrWhiteSpace(codec))
+                {
+                    decode.Add(codec);
+                }
+            }
         }
 
-        return new VainfoResult(driver, encode);
+        return new VainfoResult(driver, encode, decode);
     }
 
     private static async Task<string?> ReadNvidiaNameAsync(CancellationToken cancellationToken)
@@ -765,6 +834,75 @@ public sealed class GpuCapabilityService
         return string.Join(" · ", parts);
     }
 
+    private IReadOnlyDictionary<string, IReadOnlyList<string>> SnapshotDecodeCodecs()
+        => _vaapiDecodeCodecs.ToDictionary(
+            pair => pair.Key,
+            pair => (IReadOnlyList<string>)pair.Value.OrderBy(item => item, StringComparer.OrdinalIgnoreCase).ToArray(),
+            StringComparer.Ordinal);
+
+    private static string? MapVaapiProfileToCodec(string profile)
+    {
+        if (profile.Contains("H264", StringComparison.OrdinalIgnoreCase)
+            || profile.Contains("AVC", StringComparison.OrdinalIgnoreCase))
+        {
+            return "h264";
+        }
+
+        if (profile.Contains("HEVC", StringComparison.OrdinalIgnoreCase)
+            || profile.Contains("H265", StringComparison.OrdinalIgnoreCase))
+        {
+            return "hevc";
+        }
+
+        if (profile.Contains("MPEG2", StringComparison.OrdinalIgnoreCase))
+        {
+            return "mpeg2video";
+        }
+
+        if (profile.Contains("MPEG4", StringComparison.OrdinalIgnoreCase))
+        {
+            return "mpeg4";
+        }
+
+        if (profile.Contains("VP9", StringComparison.OrdinalIgnoreCase))
+        {
+            return "vp9";
+        }
+
+        if (profile.Contains("VP8", StringComparison.OrdinalIgnoreCase))
+        {
+            return "vp8";
+        }
+
+        if (profile.Contains("AV1", StringComparison.OrdinalIgnoreCase))
+        {
+            return "av1";
+        }
+
+        if (profile.Contains("VC1", StringComparison.OrdinalIgnoreCase)
+            || profile.Contains("VC-1", StringComparison.OrdinalIgnoreCase))
+        {
+            return "vc1";
+        }
+
+        if (profile.Contains("JPEG", StringComparison.OrdinalIgnoreCase))
+        {
+            return "mjpeg";
+        }
+
+        if (profile.Contains("H263", StringComparison.OrdinalIgnoreCase))
+        {
+            return "h263";
+        }
+
+        if (profile.Contains("MPEG1", StringComparison.OrdinalIgnoreCase))
+        {
+            return "mpeg1video";
+        }
+
+        return null;
+    }
+
     private static string TrimError(string text)
     {
         var line = text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
@@ -777,7 +915,10 @@ public sealed class GpuCapabilityService
 
     private sealed record NvencProbe(string Driver, GpuFormatLimits Format);
 
-    private sealed record VainfoResult(string Driver, IReadOnlyList<string> EncodeProfiles);
+    private sealed record VainfoResult(
+        string Driver,
+        IReadOnlyList<string> EncodeProfiles,
+        IReadOnlySet<string> DecodeCodecs);
 }
 
 public sealed record GpuSelectOption(string Value, string Label);
@@ -800,7 +941,8 @@ public sealed record GpuCapabilities(
     string Driver,
     IReadOnlyList<GpuSelectOption> VaapiDevices,
     IReadOnlyList<GpuAccelOption> Accelerations,
-    IReadOnlyDictionary<string, GpuFormatLimits> Formats)
+    IReadOnlyDictionary<string, GpuFormatLimits> Formats,
+    IReadOnlyDictionary<string, IReadOnlyList<string>> VaapiDecodeCodecs)
 {
     public static GpuCapabilities SoftwareOnly { get; } = new(
         "Software libx264",
@@ -828,5 +970,6 @@ public sealed record GpuCapabilities(
                     new("59.94", "59.94"),
                     new("60", "60")
                 ])
-        });
+        },
+        new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal));
 }

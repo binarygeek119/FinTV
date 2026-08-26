@@ -202,7 +202,8 @@ public class TranscodeController : ControllerBase
                     encoders = item.Encoders,
                     devices = item.Devices.Count > 0 ? item.Devices : caps.VaapiDevices
                 }),
-                formats = caps.Formats
+                formats = caps.Formats,
+                vaapiDecodeCodecs = caps.VaapiDecodeCodecs
             }
         };
     }
