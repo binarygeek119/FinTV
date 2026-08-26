@@ -72,8 +72,10 @@ public abstract class CatalogMediaRow
 
     public DateTime SyncedAt { get; set; } = DateTime.UtcNow;
 
+    public Guid? SourceConnectionId { get; set; }
+
     /// <summary>
-    /// True when the item was not present in the latest Jellyfin catalog sync.
+    /// True when the item was not present in the latest catalog sync for its server.
     /// </summary>
     public bool IsMissing { get; set; }
 

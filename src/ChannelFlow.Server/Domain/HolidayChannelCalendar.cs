@@ -8,7 +8,9 @@ public static class HolidayChannelCalendar
 {
     public const string LibraryTag = "channelflow-holiday";
 
-    public const string OffSeasonLogoRelativePath = "The Holiday Channel/The Holiday Channel-plane.png";
+    public const string OffSeasonLogoRelativePath = "The_Holiday_Channel/The Holiday Channel-plane.png";
+
+    public const string OffSeasonVideoRelativePath = "The_Holiday_Channel/The Holiday Channel.mkv";
 
     public const string OffSeasonMediaTitle = "The Holiday Channel";
 
@@ -22,7 +24,7 @@ public static class HolidayChannelCalendar
             observanceMonth: 2,
             observanceDay: 14,
             daysBefore: 30,
-            logoPath: "The Holiday Channel/The Holiday Channel-Valentine's Day.png",
+            logoPath: "The_Holiday_Channel/The Holiday Channel-Valentine's Day.png",
             matchKeywords: ["valentine", "valentines", "sweetheart", "cupid"],
             seasonMonths: [2]),
         new(
@@ -30,7 +32,7 @@ public static class HolidayChannelCalendar
             "Easter",
             dateKind: HolidayDateKind.EasterSunday,
             daysBefore: 30,
-            logoPath: "The Holiday Channel/easter.png",
+            logoPath: "The_Holiday_Channel/easter.png",
             matchKeywords: ["easter", "bunny", "rabbit", "egg hunt", "resurrection", "paschal"],
             seasonMonths: [3, 4]),
         new(
@@ -40,7 +42,7 @@ public static class HolidayChannelCalendar
             observanceDay: 4,
             daysBefore: 30,
             bleedIntoPriorMonth: true,
-            logoPath: "The Holiday Channel/The Holiday Channel - Independence Day.png",
+            logoPath: "The_Holiday_Channel/The Holiday Channel - Independence Day.png",
             matchKeywords: ["independence day", "july 4", "july fourth", "fourth of july", "4th of july", "fireworks", "patriotic"],
             seasonMonths: [6, 7]),
         new(
@@ -49,8 +51,8 @@ public static class HolidayChannelCalendar
             observanceMonth: 10,
             observanceDay: 31,
             daysBefore: 30,
-            logoPath: "The Holiday Channel/halloween_alt-happy.png",
-            earlySeasonLogoPath: "The Holiday Channel/October.png",
+            logoPath: "The_Holiday_Channel/halloween_alt-happy.png",
+            earlySeasonLogoPath: "The_Holiday_Channel/October.png",
             earlySeasonLogoUntilDay: 15,
             matchKeywords: ["halloween", "spooky", "ghost", "witch", "pumpkin", "haunted", "october", "trick or treat", "horror"],
             seasonMonths: [10]),
@@ -59,7 +61,7 @@ public static class HolidayChannelCalendar
             "Thanksgiving",
             dateKind: HolidayDateKind.UsThanksgiving,
             daysBefore: 30,
-            logoPath: "The Holiday Channel/The Holiday Channel -Thanksgiving Day.png",
+            logoPath: "The_Holiday_Channel/The Holiday Channel -Thanksgiving Day.png",
             matchKeywords: ["thanksgiving", "turkey", "pilgrim", "harvest feast"],
             seasonMonths: [11]),
         new(
@@ -69,7 +71,7 @@ public static class HolidayChannelCalendar
             observanceDay: 25,
             daysBefore: 54,
             bleedIntoPriorMonth: true,
-            logoPath: "The Holiday Channel/christmas-marry.png",
+            logoPath: "The_Holiday_Channel/christmas-marry.png",
             matchKeywords: ["christmas", "xmas", "santa", "nutcracker", "grinch", "snowman", "krampus", "noel", "nativity"],
             seasonMonths: [11, 12])
     ];

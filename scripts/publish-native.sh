@@ -17,7 +17,6 @@ publish_rid() {
     -r "$target" \
     --self-contained true \
     -o "$out" \
-    /p:SkipLogoFetch=true \
     /p:Version="$version" \
     /p:InformationalVersion="$version+$target.$revision" \
     /p:PublishReadyToRun=false

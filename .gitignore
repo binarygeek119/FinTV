@@ -49,19 +49,32 @@ msbuild.wrn
 *.db-shm
 *.db-wal
 
-# Bundled logos fetched at build time
-Jellyfin.Plugin.FinTV/Assets/logos/
-src/ChannelFlow.Server/wwwroot/logos/
 vendor/**/node_modules/
+__pycache__/
 
-# Bundled yt-dlp fetched at build time
-Jellyfin.Plugin.FinTV/Assets/tools/yt-dlp/
+# Leftover Jellyfin plugin (not built)
+legacy/Jellyfin.Plugin.FinTV/Assets/logos/
+legacy/Jellyfin.Plugin.FinTV/Assets/tools/yt-dlp/
+
 release-artifact/
 artifacts/
+tools/ffmpeg
+tools/ffprobe
+tools/ffplay
 .env
+
+# Runtime data next to the app (bundled assets live in wwwroot)
+config/database.json
 config/youtube-cookies.txt
 **/youtube-cookies.txt
 config/logs/
+config/dataprotection/
+config/ebs/
+config/logos/
+config/music/
+config/news/
+config/weatherstar/
+config/weather-guide-cache.json
 media/*
 !media/.gitkeep
 

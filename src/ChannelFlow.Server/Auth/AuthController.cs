@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace FinTv.Auth;
 
@@ -14,29 +15,107 @@ namespace FinTv.Auth;
 public class AuthController : ControllerBase
 {
     private readonly FinTvDbContext _db;
+    private readonly PostgresConnectionStore _postgres;
+    private readonly DatabaseInitializer _database;
+    private readonly IServiceScopeFactory _scopes;
 
-    public AuthController(FinTvDbContext db)
+    public AuthController(
+        FinTvDbContext db,
+        PostgresConnectionStore postgres,
+        DatabaseInitializer database,
+        IServiceScopeFactory scopes)
     {
         _db = db;
+        _postgres = postgres;
+        _database = database;
+        _scopes = scopes;
     }
 
     [HttpGet("status")]
     [AllowAnonymous]
     public async Task<ActionResult<object>> Status(CancellationToken cancellationToken)
     {
-        var hasUser = await _db.AdminUsers.AnyAsync(cancellationToken);
-        return Ok(new
+        if (!_postgres.IsConfigured)
         {
-            needsSetup = !hasUser,
-            authenticated = User.Identity?.IsAuthenticated == true,
-            userName = User.Identity?.Name
-        });
+            return Ok(new
+            {
+                needsDatabase = true,
+                needsSetup = true,
+                authenticated = false,
+                database = (object?)null
+            });
+        }
+
+        try
+        {
+            var hasUser = await _db.AdminUsers.AnyAsync(cancellationToken);
+            return Ok(new
+            {
+                needsDatabase = false,
+                needsSetup = !hasUser,
+                authenticated = User.Identity?.IsAuthenticated == true,
+                userName = User.Identity?.Name,
+                database = _postgres.GetPublicSettings(),
+                databaseFromEnvironment = _postgres.FromEnvironment
+            });
+        }
+        catch (Exception ex)
+        {
+            return Ok(new
+            {
+                needsDatabase = true,
+                needsSetup = true,
+                authenticated = false,
+                database = _postgres.GetPublicSettings(),
+                databaseError = "Could not connect to PostgreSQL. " + ex.Message
+            });
+        }
+    }
+
+    [HttpPost("database")]
+    [AllowAnonymous]
+    public async Task<IActionResult> SaveDatabase(
+        [FromBody] PostgresSettings? request,
+        CancellationToken cancellationToken)
+    {
+        if (_database.IsReady && await HasAdminAsync(cancellationToken) && User.Identity?.IsAuthenticated != true)
+        {
+            return Conflict(new { message = "PostgreSQL is already configured." });
+        }
+
+        try
+        {
+            await _postgres.SaveAndVerifyAsync(request ?? new PostgresSettings(), cancellationToken);
+            if (!await _database.TryInitializeAsync(cancellationToken))
+            {
+                return BadRequest(new { message = "Saved the connection, but ChannelFlow could not initialize the database." });
+            }
+
+            using var scope = _scopes.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
+            var hasUser = await db.AdminUsers.AnyAsync(cancellationToken);
+            return Ok(new
+            {
+                needsDatabase = false,
+                needsSetup = !hasUser,
+                database = _postgres.GetPublicSettings()
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpPost("setup")]
     [AllowAnonymous]
     public async Task<IActionResult> Setup([FromBody] LoginRequest request, CancellationToken cancellationToken)
     {
+        if (!_database.IsReady)
+        {
+            return BadRequest(new { message = "Configure PostgreSQL first." });
+        }
+
         if (await _db.AdminUsers.AnyAsync(cancellationToken))
         {
             return Conflict(new { message = "Admin user already exists." });
@@ -127,6 +206,20 @@ public class AuthController : ControllerBase
             CookieAuthenticationDefaults.AuthenticationScheme,
             new ClaimsPrincipal(identity),
             props);
+    }
+
+    private async Task<bool> HasAdminAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var scope = _scopes.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
+            return await db.AdminUsers.AnyAsync(cancellationToken);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 }
 

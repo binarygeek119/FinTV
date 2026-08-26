@@ -14,7 +14,7 @@ namespace FinTv.Api;
 [Authorize(Policy = "admin")]
 public class AboutController : ControllerBase
 {
-    private const string Homepage = "https://github.com/FlowMeadow01/ChannelFlow";
+    private const string Homepage = "https://github.com/binarygeek119/ChannelFlow";
     private const string Author = "binarygeek119";
     private const string AuthorUrl = "https://github.com/binarygeek119";
 

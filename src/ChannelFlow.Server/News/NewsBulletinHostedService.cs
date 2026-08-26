@@ -1,3 +1,4 @@
+using FinTv.Data;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -6,16 +7,30 @@ namespace FinTv.News;
 public sealed class NewsBulletinHostedService : BackgroundService
 {
     private readonly NewsBulletinService _bulletins;
+    private readonly DatabaseInitializer _database;
     private readonly ILogger<NewsBulletinHostedService> _logger;
 
-    public NewsBulletinHostedService(NewsBulletinService bulletins, ILogger<NewsBulletinHostedService> logger)
+    public NewsBulletinHostedService(
+        NewsBulletinService bulletins,
+        DatabaseInitializer database,
+        ILogger<NewsBulletinHostedService> logger)
     {
         _bulletins = bulletins;
+        _database = database;
         _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        try
+        {
+            await _database.WaitUntilReadyAsync(stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            return;
+        }
+
         try
         {
             _bulletins.SweepNow();

@@ -82,7 +82,12 @@ public class MediaItem
     public DateTime SyncedAt { get; set; } = DateTime.UtcNow;
 
     /// <summary>
-    /// True when the item was not present in the latest Jellyfin catalog sync.
+    /// Media server connection this row was imported from. Null for legacy plugin sync.
+    /// </summary>
+    public Guid? SourceConnectionId { get; set; }
+
+    /// <summary>
+    /// True when the item was not present in the latest catalog sync for its server.
     /// </summary>
     public bool IsMissing { get; set; }
 
@@ -110,6 +115,11 @@ public class MediaChapter
 public class PathMapping
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+
+    /// <summary>
+    /// When set, this remap applies to that media server. Null is a legacy global mapping.
+    /// </summary>
+    public Guid? ConnectionId { get; set; }
 
     public string JellyfinPrefix { get; set; } = string.Empty;
 

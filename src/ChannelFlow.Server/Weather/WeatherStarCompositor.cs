@@ -19,7 +19,6 @@ public sealed class WeatherStarCompositor
         WeatherStarDockerVariant skin,
         int width,
         int height,
-        bool scanlines,
         int radarIndex,
         int screenRepeat = 0,
         TimeSpan elapsed = default)
@@ -95,15 +94,6 @@ public sealed class WeatherStarCompositor
         if (snap.Alerts.Count > 0 && screen != WeatherStarScreen.Hazards)
         {
             DrawText(canvas, snap.Alerts[0].Event.ToUpperInvariant(), font, 14, 10, height - 18, yellow);
-        }
-
-        if (scanlines)
-        {
-            using var line = new SKPaint { Color = new SKColor(0, 0, 0, 50) };
-            for (var y = 0; y < height; y += 2)
-            {
-                canvas.DrawRect(0, y, width, 1, line);
-            }
         }
 
         using var image = surface.Snapshot();

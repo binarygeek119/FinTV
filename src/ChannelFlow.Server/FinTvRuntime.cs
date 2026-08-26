@@ -26,7 +26,11 @@ public sealed class FinTvRuntime
         WeatherStarFolder = Path.Combine(configDir, "weatherstar");
         NewsFolder = Path.Combine(configDir, "news");
         LogsFolder = FileLogging.ResolveDirectory(env.ContentRootPath);
-        BundledLogosFolder = Path.Combine(env.ContentRootPath, "wwwroot", "logos", "binarygeek119");
+        var wwwroot = Path.Combine(env.ContentRootPath, "wwwroot");
+        BundledLogosFolder = Path.Combine(wwwroot, "images", "logos");
+        BundledMediaImagesFolder = Path.Combine(wwwroot, "images", "media");
+        BundledAudioFolder = Path.Combine(wwwroot, "audio");
+        BundledVideosFolder = Path.Combine(wwwroot, "videos");
         Directory.CreateDirectory(DataFolder);
         Directory.CreateDirectory(LogosFolder);
         Directory.CreateDirectory(EbsCustomSlatesFolder);
@@ -56,6 +60,32 @@ public sealed class FinTvRuntime
 
     public string BundledLogosFolder { get; }
 
+    public string BundledMediaImagesFolder { get; }
+
+    public string BundledAudioFolder { get; }
+
+    public string BundledVideosFolder { get; }
+
+    public IEnumerable<string> BundledAssetRoots()
+    {
+        yield return Path.Combine(LogosFolder, "binarygeek119");
+        yield return BundledLogosFolder;
+        yield return BundledMediaImagesFolder;
+        yield return BundledAudioFolder;
+        yield return BundledVideosFolder;
+    }
+
+    public IEnumerable<string> ExistingBundledAssetRoots()
+    {
+        foreach (var root in BundledAssetRoots())
+        {
+            if (!string.IsNullOrWhiteSpace(root) && Directory.Exists(root))
+            {
+                yield return root;
+            }
+        }
+    }
+
     public PluginConfiguration Configuration => _configuration;
 
     public async Task LoadAsync(CancellationToken cancellationToken = default)
@@ -73,10 +103,34 @@ public sealed class FinTvRuntime
         }
 
         EnsureApiKey();
+        EnsureLocalPackMusicDefault();
         _configuration.Transcode ??= new TranscodeSettings();
         _configuration.Normalization ??= new NormalizationSettings();
         _configuration.YouTube ??= new YouTubeSettings();
         ScheduleTimeZoneHelper.ApplyAsProcessTimeZone();
+    }
+
+    private void EnsureLocalPackMusicDefault()
+    {
+        var dirty = false;
+        if (_configuration.EbsBackgroundMusicSource == EbsBackgroundMusicSource.NamedLibrary
+            && string.IsNullOrWhiteSpace(_configuration.EbsBackgroundMusicLibraryId))
+        {
+            _configuration.EbsBackgroundMusicSource = EbsBackgroundMusicSource.LocalPacks;
+            dirty = true;
+        }
+
+        if (string.Equals(_configuration.WeatherMusicLibraryName, "Background Music", StringComparison.OrdinalIgnoreCase)
+            && string.IsNullOrWhiteSpace(_configuration.WeatherMusicLibraryId))
+        {
+            _configuration.WeatherMusicLibraryName = "";
+            dirty = true;
+        }
+
+        if (dirty)
+        {
+            SaveConfiguration();
+        }
     }
 
     private void EnsureApiKey()

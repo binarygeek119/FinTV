@@ -916,6 +916,16 @@ public sealed class NewsChannelService
         {
             yield return Path.Combine(runtime.BundledLogosFolder, "News");
         }
+
+        if (!string.IsNullOrWhiteSpace(runtime.BundledAudioFolder))
+        {
+            yield return Path.Combine(runtime.BundledAudioFolder, "FlowWire_News");
+        }
+
+        if (!string.IsNullOrWhiteSpace(runtime.BundledMediaImagesFolder))
+        {
+            yield return Path.Combine(runtime.BundledMediaImagesFolder, "FlowWire_News");
+        }
     }
 
     private static string? FindBumperFileInDir(string newsDir, string stem)
@@ -957,16 +967,15 @@ public sealed class NewsChannelService
         }
 
         var runtime = FinTvRuntime.Current;
-        foreach (var root in new[]
-                 {
-                     runtime?.LogosFolder is { Length: > 0 } logos ? Path.Combine(logos, "binarygeek119") : null,
-                     runtime?.BundledLogosFolder
-                 }.Where(path => !string.IsNullOrWhiteSpace(path) && Directory.Exists(path)))
+        if (runtime is not null)
         {
-            var found = Directory.EnumerateFiles(root!, "FlowWire.png", SearchOption.AllDirectories).FirstOrDefault();
-            if (HasImageFile(found))
+            foreach (var root in runtime.ExistingBundledAssetRoots())
             {
-                return found;
+                var found = Directory.EnumerateFiles(root, "FlowWire.png", SearchOption.AllDirectories).FirstOrDefault();
+                if (HasImageFile(found))
+                {
+                    return found;
+                }
             }
         }
 
@@ -996,17 +1005,16 @@ public sealed class NewsChannelService
         }
 
         var runtime = FinTvRuntime.Current;
-        foreach (var root in new[]
-                 {
-                     runtime?.LogosFolder is { Length: > 0 } logos ? Path.Combine(logos, "binarygeek119") : null,
-                     runtime?.BundledLogosFolder
-                 }.Where(path => !string.IsNullOrWhiteSpace(path) && Directory.Exists(path)))
+        if (runtime is not null)
         {
-            var found = Directory.EnumerateFiles(root!, "Catherine_Wolfe.jpg", SearchOption.AllDirectories)
-                .FirstOrDefault();
-            if (HasImageFile(found))
+            foreach (var root in runtime.ExistingBundledAssetRoots())
             {
-                return found;
+                var found = Directory.EnumerateFiles(root, "Catherine_Wolfe.jpg", SearchOption.AllDirectories)
+                    .FirstOrDefault();
+                if (HasImageFile(found))
+                {
+                    return found;
+                }
             }
         }
 

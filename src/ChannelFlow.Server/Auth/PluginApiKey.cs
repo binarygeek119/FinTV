@@ -31,6 +31,12 @@ public static class PluginApiKey
         return url + separator + "apiKey=" + Uri.EscapeDataString(key);
     }
 
+    public static (string M3u, string Epg) BuildLiveTvUrls(string baseUrl)
+    {
+        var root = (baseUrl ?? string.Empty).TrimEnd('/');
+        return (AppendQuery($"{root}/iptv/channels.m3u"), AppendQuery($"{root}/iptv/epg.xml"));
+    }
+
     public static bool Matches(string? provided)
     {
         var expected = Resolve();

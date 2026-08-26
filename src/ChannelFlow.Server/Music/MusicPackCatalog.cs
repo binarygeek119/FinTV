@@ -48,6 +48,8 @@ public sealed class MusicPackStatus
     public bool HasDriveFile { get; set; }
 
     public bool IsActive { get; set; }
+
+    public bool AutoDownloadSkipped { get; set; }
 }
 
 public static class MusicPackVersions

@@ -5,21 +5,27 @@ using FinTv.Data;
 using FinTv.Domain;
 using FinTv.News;
 using FinTv.Services;
+using FinTv.Services.MediaServers;
 using FinTv.Streaming;
 using FinTv.Weather;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 
+LoadDotEnv();
+Environment.SetEnvironmentVariable("DOTNET_hostBuilder__reloadConfigOnChange", "false");
+
 var builder = WebApplication.CreateBuilder(args);
 FileLogging.Configure(builder);
 
-var connectionString = builder.Configuration.GetConnectionString("ChannelFlow")
-    ?? builder.Configuration.GetConnectionString("FinTV")
-    ?? BuildPostgresConnectionString();
-
+builder.Services.AddSingleton<PostgresConnectionStore>();
 builder.AddReverseProxySupport();
-builder.Services.AddDbContext<FinTvDbContext>(options => options.UseNpgsql(connectionString));
+builder.Services.AddDbContext<FinTvDbContext>((sp, options) =>
+{
+    var connectionString = sp.GetRequiredService<PostgresConnectionStore>().GetConnectionString()
+        ?? "Host=127.0.0.1;Port=1;Database=channelflow;Username=channelflow;Password=unset;Timeout=1;Command Timeout=1";
+    options.UseNpgsql(connectionString);
+});
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
@@ -85,7 +91,7 @@ builder.Services.AddHttpClient(nameof(CommercialBrainzClient))
 builder.Services.AddHttpClient("Weather", client =>
 {
     client.Timeout = TimeSpan.FromSeconds(25);
-    client.DefaultRequestHeaders.UserAgent.ParseAdd("ChannelFlow-Server/1.0 (https://github.com/FlowMeadow01/ChannelFlow)");
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("ChannelFlow-Server/1.0 (https://github.com/binarygeek119/ChannelFlow)");
 });
 builder.Services.AddHttpClient("News", client =>
 {
@@ -96,6 +102,11 @@ builder.Services.AddHttpClient("JellyfinPlugin", client =>
 {
     client.Timeout = TimeSpan.FromSeconds(15);
     client.DefaultRequestHeaders.UserAgent.ParseAdd("ChannelFlow-Server/1.0 (guide-refresh)");
+});
+builder.Services.AddHttpClient("MediaServer", client =>
+{
+    client.Timeout = TimeSpan.FromMinutes(5);
+    client.DefaultRequestHeaders.UserAgent.ParseAdd("ChannelFlow-Server/1.0 (media-server)");
 });
 builder.Services.AddHttpClient(nameof(SponsorBlockClient), client =>
 {
@@ -168,6 +179,7 @@ builder.Services.AddScoped<WeatherGuideMetadataService>();
 builder.Services.AddScoped<LogoSetService>();
 builder.Services.AddScoped<LogoBumperService>();
 builder.Services.AddScoped<HolidayChannelService>();
+builder.Services.AddScoped<CatalogIngestService>();
 builder.Services.AddScoped<JellyfinCatalogService>();
 builder.Services.AddScoped<OriginalBroadcastSimulator>();
 builder.Services.AddScoped<AiCatalogManifestBuilder>();
@@ -182,8 +194,19 @@ builder.Services.AddSingleton<NewsBulletinService>();
 builder.Services.AddSingleton<NewsBulletinTask>();
 builder.Services.AddScoped<WeatherStarChannelService>();
 builder.Services.AddScoped<NewsChannelService>();
+builder.Services.AddSingleton<CatalogSyncProgress>();
+builder.Services.AddSingleton<QuickPinService>();
+builder.Services.AddSingleton<JellyfinMediaServerProvider>();
+builder.Services.AddSingleton<SidecarMediaServerProvider>();
+builder.Services.AddSingleton<IMediaServerProvider>(sp => sp.GetRequiredService<JellyfinMediaServerProvider>());
+builder.Services.AddSingleton<IMediaServerProvider>(sp => sp.GetRequiredService<SidecarMediaServerProvider>());
+builder.Services.AddSingleton<IMediaServerProvider>(_ => new PlaceholderMediaServerProvider(MediaServerKind.Emby));
+builder.Services.AddSingleton<IMediaServerProvider>(_ => new PlaceholderMediaServerProvider(MediaServerKind.Plex));
+builder.Services.AddSingleton<IMediaServerProvider>(_ => new PlaceholderMediaServerProvider(MediaServerKind.Other));
+builder.Services.AddScoped<MediaServerService>();
 
-builder.Services.AddHostedService<DatabaseInitializer>();
+builder.Services.AddSingleton<DatabaseInitializer>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<DatabaseInitializer>());
 builder.Services.AddHostedService(sp => sp.GetRequiredService<PlayoutBuilderService>());
 builder.Services.AddHostedService<ScheduledTaskHost>();
 builder.Services.AddHostedService<NewsRefreshHostedService>();
@@ -193,6 +216,7 @@ builder.Services.AddHostedService<AiPlayoutHorizonHostedService>();
 builder.Services.AddHostedService<CommercialBrainzRefreshHostedService>();
 builder.Services.AddHostedService<MusicPackStartupHostedService>();
 builder.Services.AddHostedService<LogRetentionHostedService>();
+builder.Services.AddHostedService<MediaServerHealthHostedService>();
 
 var app = builder.Build();
 
@@ -224,15 +248,44 @@ finally
     Log.CloseAndFlush();
 }
 
-static string BuildPostgresConnectionString()
-{
-    var host = Environment.GetEnvironmentVariable("POSTGRES_HOST") ?? "postgres";
-    var port = Environment.GetEnvironmentVariable("POSTGRES_PORT") ?? "5432";
-    var db = Environment.GetEnvironmentVariable("POSTGRES_DB") ?? "fintv";
-    var user = Environment.GetEnvironmentVariable("POSTGRES_USER") ?? "fintv";
-    var password = Environment.GetEnvironmentVariable("POSTGRES_PASSWORD") ?? "fintv";
-    return $"Host={host};Port={port};Database={db};Username={user};Password={password}";
-}
-
 static bool IsApiOrStream(PathString path)
     => path.StartsWithSegments("/api") || path.StartsWithSegments("/iptv");
+
+static void LoadDotEnv()
+{
+    DirectoryInfo? cursor = new(Directory.GetCurrentDirectory());
+    for (var i = 0; i < 8 && cursor is not null; i++, cursor = cursor.Parent)
+    {
+        var file = Path.Combine(cursor.FullName, ".env");
+        if (!File.Exists(file))
+        {
+            continue;
+        }
+
+        foreach (var raw in File.ReadAllLines(file))
+        {
+            var line = raw.Trim();
+            if (line.Length == 0 || line.StartsWith('#'))
+            {
+                continue;
+            }
+
+            var eq = line.IndexOf('=');
+            if (eq <= 0)
+            {
+                continue;
+            }
+
+            var key = line[..eq].Trim();
+            var value = line[(eq + 1)..].Trim().Trim('"').Trim('\'');
+            if (string.IsNullOrWhiteSpace(key) || !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(key)))
+            {
+                continue;
+            }
+
+            Environment.SetEnvironmentVariable(key, value);
+        }
+
+        return;
+    }
+}

@@ -18,7 +18,6 @@ function Publish-Rid([string]$Target) {
         -r $Target `
         --self-contained true `
         -o $out `
-        /p:SkipLogoFetch=true `
         /p:Version=$Version `
         /p:InformationalVersion="$Version+$Target.$Revision" `
         /p:PublishReadyToRun=false

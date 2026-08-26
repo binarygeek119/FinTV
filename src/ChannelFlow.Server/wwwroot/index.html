@@ -13,7 +13,7 @@
   <link rel="manifest" href="site.webmanifest?v=3d08b8f1">
   <meta name="theme-color" content="#101010">
   <link rel="stylesheet" href="css/legacy-admin.css">
-  <link rel="stylesheet" href="css/app.css?v=ebsticker2">
+  <link rel="stylesheet" href="css/app.css?v=assets8">
 </head>
 <body>
   <div id="login-screen" class="auth-screen hidden">
@@ -21,14 +21,25 @@
       <img src="logo.png?v=3d08b8f1" alt="ChannelFlow" class="auth-logo">
       <h1 id="auth-title">Sign in</h1>
       <p id="auth-subtitle" class="hidden"></p>
-      <label class="field"><span>Username</span><input id="login-user" autocomplete="username" required></label>
-      <label class="field"><span>Password</span><input id="login-pass" type="password" autocomplete="current-password" required></label>
-      <label class="field hidden" id="login-pass-confirm-field"><span>Confirm password</span><input id="login-pass-confirm" type="password" autocomplete="new-password" minlength="8"></label>
-      <label class="field checkbox-field" id="login-remember-field">
-        <input id="login-remember" type="checkbox" checked>
-        <span class="channelflow-check-box" aria-hidden="true"></span>
-        <span>Remember me</span>
-      </label>
+      <div id="db-setup-fields" class="hidden">
+        <div class="auth-field-row">
+          <label class="field"><span>Postgres host</span><input id="db-host" value="127.0.0.1" autocomplete="off"></label>
+          <label class="field"><span>Port</span><input id="db-port" type="number" min="1" max="65535" value="5432"></label>
+        </div>
+        <label class="field"><span>Database</span><input id="db-name" value="channelflow" autocomplete="off"></label>
+        <label class="field"><span>Username</span><input id="db-user" value="channelflow" autocomplete="off"></label>
+        <label class="field"><span>Password</span><input id="db-pass" type="password" autocomplete="new-password"></label>
+      </div>
+      <div id="admin-setup-fields">
+        <label class="field"><span>Username</span><input id="login-user" autocomplete="username" required></label>
+        <label class="field"><span>Password</span><input id="login-pass" type="password" autocomplete="current-password" required></label>
+        <label class="field hidden" id="login-pass-confirm-field"><span>Confirm password</span><input id="login-pass-confirm" type="password" autocomplete="new-password" minlength="8"></label>
+        <label class="field checkbox-field" id="login-remember-field">
+          <input id="login-remember" type="checkbox" checked>
+          <span class="channelflow-check-box" aria-hidden="true"></span>
+          <span>Remember me</span>
+        </label>
+      </div>
       <p id="login-error" class="auth-error"></p>
       <button type="submit" class="raised button-submit" id="login-submit">Sign in</button>
     </form>
@@ -37,7 +48,6 @@
     <aside class="app-drawer">
       <a href="channels" class="drawer-brand" data-tab="channels"><img src="logo.png?v=3d08b8f1" alt="ChannelFlow"></a>
       <nav class="drawer-nav" id="drawer-nav"></nav>
-      <button type="button" id="btn-logout" class="drawer-logout">Sign out</button>
     </aside>
     <div class="app-main">
       <header class="app-topbar">
@@ -46,6 +56,11 @@
           <p class="muted" id="page-subtitle">Manage Live TV channels</p>
         </div>
         <div class="topbar-meta">
+          <div class="topbar-actions">
+            <button type="button" id="btn-copy-m3u" class="emby-button" title="Copy the M3U tuner URL for Jellyfin Live TV or another app">Copy M3U</button>
+            <button type="button" id="btn-copy-xmltv" class="emby-button" title="Copy the XMLTV guide URL">Copy XMLTV</button>
+            <button type="button" id="btn-logout" class="emby-button">Sign out</button>
+          </div>
           <div id="app-clock" class="app-clock" aria-live="polite"></div>
           <div id="topbar-user" class="topbar-user"></div>
         </div>
@@ -83,7 +98,7 @@
                         </label>
                     </div>
                     <div id="deep-weather-fields" class="field-group hidden">
-                        <label class="field"><span>ZIP code</span><input id="deep-ch-weather-location" type="text" class="emby-input" inputmode="numeric" maxlength="10" placeholder="50317"></label>
+                        <label class="field"><span>Location</span><input id="deep-ch-weather-location" type="text" class="emby-input" placeholder="ZIP, city, or lat,lon"></label>
                     </div>
                 </section>
                 <section class="card section-card">
@@ -154,7 +169,7 @@
                 <a href="presets" class="tab" data-tab="presets" role="tab">Presets</a>
                 <a href="lists" class="tab" data-tab="list" role="tab">List</a>
                 <a href="special" class="tab" data-tab="special" role="tab">Special Presentation</a>
-                <a href="jellyfin-library" class="tab" data-tab="jellyfin" role="tab">Jellyfin Library</a>
+                <a href="library" class="tab" data-tab="jellyfin" role="tab">Library</a>
                 <a href="commercials" class="tab" data-tab="commercials" role="tab">Commercials</a>
                 <a href="commercialbrainz" class="tab" data-tab="commercialbrainz" role="tab">CommercialBrainz</a>
                 <a href="youtube" class="tab" data-tab="youtube" role="tab">YouTube</a>
@@ -238,10 +253,10 @@
                             </label>
                             <div id="weather-fields" class="field-group hidden">
                                 <label class="field">
-                                    <span>ZIP code</span>
-                                    <input id="ch-weather-location" type="text" class="emby-input" inputmode="numeric" pattern="[0-9]{5}" maxlength="10" placeholder="50317">
+                                    <span>Location</span>
+                                    <input id="ch-weather-location" type="text" class="emby-input" placeholder="ZIP, city, or lat,lon">
                                 </label>
-                                <p class="hint">Weather channels stream live local weather 24/7 from this US ZIP code. Display screens and units are on the Weather tab.</p>
+                                <p class="hint">Weather channels stream live local weather 24/7 from this US ZIP, city, or lat,lon. Display screens and units are on the Weather tab.</p>
                             </div>
                             <label class="field checkbox-field">
                                 <input id="ch-enabled" type="checkbox" checked>
@@ -282,7 +297,7 @@
                             <button type="button" id="btn-apply-presets" class="raised button-submit emby-button">Create Missing Channels</button>
                         </div>
                     </div>
-                    <p class="hint">Creates the standard Binarygeek119 TV lineup with channel numbers, names, library tags, and bundled logos from <a href="https://github.com/FlowMeadow01/ChannelFlow-logo" target="_blank" rel="noopener">ChannelFlow-logo</a> for both the Live TV guide icon and on-screen channel bug.</p>
+                    <p class="hint">Creates the standard Binarygeek119 TV lineup with channel numbers, names, library tags, and bundled logos (guide icons and on-screen channel bugs).</p>
                     <label class="field">
                         <span>Channel numbering</span>
                         <select id="preset-numbering-mode" class="emby-select">
@@ -342,60 +357,73 @@
             </section>
 
             <section id="tab-jellyfin" class="tab-panel hidden" hidden>
-                <div class="card section-card">
-                    <div class="section-header">
-                        <h3>Jellyfin Library</h3>
-                        <button type="button" id="btn-save-jellyfin-libraries" class="raised button-submit emby-button">Save libraries</button>
+                <nav class="inner-tabs" id="library-inner-tabs" role="tablist" aria-label="Library pages">
+                    <a href="library/connections" class="inner-tab active" data-library-page="connections" role="tab" aria-selected="true">Connections</a>
+                    <a href="library/jellyfin" class="inner-tab" data-library-page="jellyfin" role="tab" aria-selected="false">Jellyfin</a>
+                    <a href="library/emby" class="inner-tab" data-library-page="emby" role="tab" aria-selected="false">Emby</a>
+                    <a href="library/plex" class="inner-tab" data-library-page="plex" role="tab" aria-selected="false">Plex</a>
+                    <a href="library/sidecar" class="inner-tab" data-library-page="sidecar" role="tab" aria-selected="false">Sidecar</a>
+                    <a href="library/other" class="inner-tab" data-library-page="other" role="tab" aria-selected="false">Other</a>
+                    <a href="library/removed" class="inner-tab" data-library-page="removed" role="tab" aria-selected="false">Removed items</a>
+                </nav>
+                <div id="library-page-connections" class="library-page">
+                    <div class="card section-card">
+                        <h3>Media servers</h3>
+                        <p class="hint">Add as many Jellyfin, Emby, Plex, sidecar folders, or other sources as you need. API keys and tokens live here. ChannelFlow reads libraries itself — the Jellyfin plugin is not required. Type tabs only show for servers you have added.</p>
+                        <div class="library-add-grid">
+                            <label class="field"><span>Name</span><input id="ms-name" class="emby-input" placeholder="Living room Jellyfin"></label>
+                            <label class="field"><span>Type</span>
+                                <select id="ms-kind" class="emby-select">
+                                    <option value="jellyfin">Jellyfin</option>
+                                    <option value="emby">Emby</option>
+                                    <option value="plex">Plex</option>
+                                    <option value="sidecar">Sidecar (local + .nfo)</option>
+                                    <option value="other">Other</option>
+                                </select>
+                            </label>
+                            <label class="field" id="ms-url-field"><span>URL</span><input id="ms-url" class="emby-input" placeholder="http://jellyfin:8096"></label>
+                            <label class="field" id="ms-token-field"><span>API key / token</span><input id="ms-token" class="emby-input" autocomplete="off" spellcheck="false" placeholder="Jellyfin Dashboard → API Keys"></label>
+                            <label class="field hidden" id="ms-root-field"><span>Local folder</span><input id="ms-root" class="emby-input" placeholder="/media/movies"></label>
+                        </div>
+                        <div class="actions">
+                            <button type="button" id="btn-add-media-server" class="raised button-submit emby-button">Add server</button>
+                        </div>
+                        <p id="ms-add-status" class="hint"></p>
                     </div>
-                    <p class="hint">Choose which Jellyfin libraries ChannelFlow-Server should pull from. TV shows each TV show library, movies shows each movie library, music shows each music library, and music videos shows each music video library. Names come from the Jellyfin plugin on catalog sync. Check as many as you want. Leave a type unchecked to use every matching library.</p>
-                    <div class="jellyfin-library-grid">
-                        <section class="library-pick-card">
-                            <h4>TV</h4>
-                            <p class="hint">Each TV show library</p>
-                            <div id="jf-lib-tv" class="library-pick-list"></div>
-                        </section>
-                        <section class="library-pick-card">
-                            <h4>Movies</h4>
-                            <p class="hint">Each movie library</p>
-                            <div id="jf-lib-movies" class="library-pick-list"></div>
-                        </section>
-                        <section class="library-pick-card">
-                            <h4>Music</h4>
-                            <p class="hint">Each music library</p>
-                            <div id="jf-lib-music" class="library-pick-list"></div>
-                        </section>
-                        <section class="library-pick-card">
-                            <h4>Music videos</h4>
-                            <p class="hint">Each music video library</p>
-                            <div id="jf-lib-musicvideos" class="library-pick-list"></div>
-                        </section>
-                        <section class="library-pick-card">
-                            <h4>Past Tense News</h4>
-                            <p class="hint">Home movie libraries (Home Movies, Home Videos, or Past Tense News)</p>
-                            <div id="jf-lib-news" class="library-pick-list"></div>
-                        </section>
+                    <div id="ms-connection-list"></div>
+                </div>
+                <div id="library-page-jellyfin" class="library-page hidden" hidden>
+                    <div id="ms-kind-jellyfin" class="ms-kind-panel"></div>
+                </div>
+                <div id="library-page-emby" class="library-page hidden" hidden>
+                    <div id="ms-kind-emby" class="ms-kind-panel"></div>
+                </div>
+                <div id="library-page-plex" class="library-page hidden" hidden>
+                    <div id="ms-kind-plex" class="ms-kind-panel"></div>
+                </div>
+                <div id="library-page-sidecar" class="library-page hidden" hidden>
+                    <div id="ms-kind-sidecar" class="ms-kind-panel"></div>
+                </div>
+                <div id="library-page-other" class="library-page hidden" hidden>
+                    <div id="ms-kind-other" class="ms-kind-panel"></div>
+                </div>
+                <div id="library-page-removed" class="library-page hidden" hidden>
+                    <div class="card section-card">
+                        <h3>Removed items</h3>
+                        <p class="hint">Items that disappear from a media server (or whose remapped file is gone) are marked missing first. After the grace period, catalog cleanup deletes them. A later sync restores them if they come back.</p>
+                        <label class="field">
+                            <span>Grace period (days)</span>
+                            <input id="library-cleanup-grace" type="number" min="0" max="90" step="1" value="7" class="emby-input">
+                        </label>
+                        <div class="actions">
+                            <button type="button" id="btn-library-save-cleanup" class="emby-button">Save grace period</button>
+                            <button type="button" id="btn-library-run-cleanup" class="raised button-submit emby-button">Run catalog cleanup</button>
+                            <button type="button" id="btn-library-scan-local" class="emby-button">Scan local files</button>
+                        </div>
+                        <p id="library-cleanup-status" class="hint">Loading…</p>
+                        <p id="library-scan-status" class="hint"></p>
+                        <div id="library-removed-table" class="data-table-wrap catalog-media-table"></div>
                     </div>
-                </div>
-                <div class="card section-card">
-                    <h3>TV shows</h3>
-                    <p class="hint">Synced series and episodes with runtime, picture format (16:9, 4:3, or other), chapters, rating, plot, stars, Jellyfin path, and IDs.</p>
-                    <div id="jf-media-tv" class="data-table-wrap catalog-media-table"></div>
-                </div>
-                <div class="card section-card">
-                    <h3>Movies</h3>
-                    <div id="jf-media-movies" class="data-table-wrap catalog-media-table"></div>
-                </div>
-                <div class="card section-card">
-                    <h3>Music</h3>
-                    <div id="jf-media-music" class="data-table-wrap catalog-media-table"></div>
-                </div>
-                <div class="card section-card">
-                    <h3>Music videos</h3>
-                    <div id="jf-media-musicvideos" class="data-table-wrap catalog-media-table"></div>
-                </div>
-                <div class="card section-card">
-                    <h3>Past Tense News</h3>
-                    <div id="jf-media-news" class="data-table-wrap catalog-media-table"></div>
                 </div>
             </section>
 
@@ -650,7 +678,7 @@
                 </div>
                 <div class="card section-card" id="ebs-music-packs-card">
                     <h3>Local music packs</h3>
-                    <p class="hint">Anytime downloads on its own when missing. Download Fall and Winter if you want those seasons. Weather and News that use Off Air music follow the same pack. Zips are named <code>anytime_v0.0.1.zip</code> (and the same pattern for other packs).</p>
+                    <p class="hint">Anytime downloads on first launch. Remove it if you do not want it; ChannelFlow will not fetch it again until you click Download. Fall and Winter only play after you download them. Weather and News that use Off Air music follow the same pack. Zips are named <code>anytime_v0.0.1.zip</code> (and the same pattern for other packs).</p>
                     <div id="ebs-music-packs" class="ebs-upload-grid"></div>
                 </div>
                 <div class="card section-card">
@@ -696,7 +724,7 @@
             <section id="tab-emergency" class="tab-panel hidden" hidden>
                 <div class="card section-card">
                     <h3>Emergency Broadcast System</h3>
-                    <p class="hint">When NOAA has watches or warnings for the default Weather tab location, TV, movies, and music splice an EBS graphic onto the current program (same show, same playhead — no black screen or Off Air slate). <strong>Scrolling text</strong> overlays a pre-rendered copy of <code>EBS/ebs_strip.png</code> with WeatherStar 4000 text. <strong>Alerts screen</strong> fills the frame with a pre-rendered copy of <code>EBS/ebs_fullscreen.png</code> and keeps the show audio at a lower volume under the attention/end tones. Each alert dumps every live run-ahead buffer down to 60 seconds so it reaches the tuner faster, then the buffer fills back to the Transcode setting. WeatherStar and FlowWire keep their own displays.</p>
+                    <p class="hint">When NOAA has watches or warnings for the default Weather tab location, TV, movies, and music splice an EBS graphic onto the current program (same show, same playhead — no black screen or Off Air slate). <strong>Scrolling text</strong> overlays a pre-rendered copy of <code>images/media/EBS/ebs_strip.png</code> with WeatherStar 4000 text. <strong>Alerts screen</strong> fills the frame with a pre-rendered copy of <code>images/media/EBS/ebs_fullscreen.png</code> and keeps the show audio at a lower volume under the attention/end tones. Each alert dumps every live run-ahead buffer down to 60 seconds so it reaches the tuner faster, then the buffer fills back to the Transcode setting. WeatherStar and FlowWire keep their own displays.</p>
                     <label class="field">
                         <span>Alert display</span>
                         <select id="weather-alert-overlay-mode" class="emby-select">
@@ -848,11 +876,11 @@
                     <div class="actions">
                         <button type="button" id="btn-save-weather-source" class="raised button-submit emby-button">Save Weather Source</button>
                     </div>
-                    <p class="hint">Apply a weather preset, then set each channel&apos;s location below. Background music comes from a Jellyfin music library, Off Air music, or the built-in WeatherStar tracks.</p>
+                    <p class="hint">Apply a weather preset, then set each channel&apos;s location below. Background music defaults to local packs, then Off Air, then the built-in WeatherStar tracks.</p>
                 </div>
                 <div class="card section-card">
                     <h3>Background music</h3>
-                    <p class="hint">Jellyfin music if a library is selected. Otherwise the stream uses Off Air music (including local packs), then the built-in WeatherStar bed tracks.</p>
+                    <p class="hint">Local music packs by default. Pick a Jellyfin library only if you want that instead. If packs are missing, the stream uses built-in WeatherStar beds.</p>
                     <label class="field">
                         <span>Weather music library</span>
                         <select id="weather-music-library" class="emby-select"></select>
@@ -865,16 +893,16 @@
                 </div>
                 <div class="card section-card">
                     <h3>Location</h3>
-                    <p class="hint">WeatherStar looks up NWS data for US ZIPs and Open-Meteo for the rest of the world. Each weather channel can have its own location. New weather channels use the default. NOAA watches and warnings on TV, movies, and music are on the <strong>Emergency Broadcast System</strong> tab.</p>
-                    <label class="field">
-                        <span>Default location</span>
-                        <input id="weather-default-zip" type="text" class="emby-input" placeholder="50317 or London, UK" autocomplete="off">
+                    <p class="hint">WeatherStar looks up NWS data for US ZIPs and Open-Meteo for the rest of the world. NOAA watches and warnings on TV, movies, and music are on the <strong>Emergency Broadcast System</strong> tab.</p>
+                    <label class="field" id="weather-default-location-field">
+                        <span>Location</span>
+                        <input id="weather-default-zip" type="text" class="emby-input" placeholder="ZIP, city, or lat,lon" autocomplete="off">
                     </label>
                     <div id="weather-zip-list" class="weather-zip-list"></div>
                 </div>
                 <div class="card section-card">
                     <h3>Display settings</h3>
-                    <p class="hint">Choose which WeatherStar screens play in the loop. Location always comes from the ZIP codes above.</p>
+                    <p class="hint">Choose which WeatherStar screens play in the loop.</p>
                     <h4>Screens</h4>
                     <div class="checkbox-grid" id="weather-screens">
                         <label class="field checkbox-field"><input id="wx-hazards" type="checkbox" checked><span class="channelflow-check-box" aria-hidden="true"></span><span>Weather alerts</span></label>
@@ -930,11 +958,6 @@
                     <label class="field">
                         <span>Custom scroll text</span>
                         <input id="wx-customText" type="text" class="emby-input" placeholder="You're watching ChannelFlow Weather">
-                    </label>
-                    <label class="field checkbox-field">
-                        <input id="wx-scanLines" type="checkbox">
-                        <span class="channelflow-check-box" aria-hidden="true"></span>
-                        <span>Scanlines</span>
                     </label>
                     <label class="field checkbox-field">
                         <input id="wx-stickyKiosk" type="checkbox" checked>
@@ -1087,15 +1110,6 @@
                 <div class="card section-card">
                     <h2>General</h2>
                     <p class="hint">Server-wide settings. Debug logging writes extra detail to the ChannelFlow-Server log for troubleshooting AI channel building and playout.</p>
-                    <label class="field">
-                        <span>Plugin API key</span>
-                        <input id="general-api-key" type="text" class="emby-input" autocomplete="off" spellcheck="false">
-                    </label>
-                    <p class="hint">Created automatically on first boot if missing. Paste this key into the ChannelFlow Jellyfin plugin with this server's URL. The same value is used as <code>?apiKey=</code> on M3U and XMLTV URLs.</p>
-                    <div class="actions" style="margin-bottom:1rem">
-                        <button type="button" id="btn-copy-api-key" class="emby-button">Copy API key</button>
-                        <button type="button" id="btn-generate-api-key" class="emby-button">Generate new key</button>
-                    </div>
                     <label class="field checkbox-field">
                         <input id="general-debug-logging" type="checkbox">
                         <span class="channelflow-check-box" aria-hidden="true"></span>
@@ -1121,6 +1135,27 @@
                         <input id="general-public-url" type="text" class="emby-input" placeholder="https://channelflow.example.duckdns.org" autocomplete="off" spellcheck="false" inputmode="url">
                     </label>
                     <p class="hint">Used in M3U and XMLTV links when Jellyfin talks to ChannelFlow on the Docker network. Leave blank to use the request host, including HTTPS from your reverse proxy. Also settable as <code>CHANNELFLOW_PUBLIC_URL</code>.</p>
+                    <h3>Quick pin</h3>
+                    <p class="hint">Create a random pin when another app needs to connect. Give that app this server URL and the pin. It sends the pin back to ChannelFlow, and ChannelFlow returns the M3U and XMLTV links with access already on them. The pin lasts 5 minutes.</p>
+                    <div class="actions">
+                        <button type="button" id="btn-create-quick-pin" class="emby-button">Create quick pin</button>
+                    </div>
+                    <div id="quick-pin-panel" class="quick-pin-panel hidden">
+                        <p class="quick-pin-code" id="quick-pin-code"></p>
+                        <p class="hint" id="quick-pin-expires"></p>
+                        <label class="field">
+                            <span>Server URL</span>
+                            <input id="quick-pin-server-url" type="text" class="emby-input" readonly autocomplete="off" spellcheck="false">
+                        </label>
+                        <label class="field">
+                            <span>Pairing URL</span>
+                            <input id="quick-pin-pair-url" type="text" class="emby-input" readonly autocomplete="off" spellcheck="false">
+                        </label>
+                        <div class="actions">
+                            <button type="button" id="btn-copy-quick-pin" class="emby-button">Copy pin</button>
+                            <button type="button" id="btn-copy-quick-pin-url" class="emby-button">Copy pairing URL</button>
+                        </div>
+                    </div>
                     <div class="actions">
                         <button type="button" id="btn-save-general" class="raised button-submit emby-button">Save General Settings</button>
                     </div>
@@ -1154,7 +1189,7 @@
                 </div>
                 <div class="card section-card">
                     <h2>Catalog cleanup</h2>
-                    <p class="hint">Items removed from Jellyfin are marked missing first. After the grace period, the cleanup task deletes them. Items that return in a later catalog sync are restored. The task also runs daily with the other scheduled jobs.</p>
+                        <p class="hint">Items removed from a media server are marked missing first. After the grace period, the cleanup task deletes them. Manage this from <strong>Library → Removed items</strong>.</p>
                     <label class="field">
                         <span>Grace period (days)</span>
                         <input id="catalog-cleanup-grace" type="number" min="0" max="90" step="1" value="7" class="emby-input">
@@ -1164,7 +1199,7 @@
                         <button type="button" id="btn-run-catalog-cleanup" class="raised button-submit emby-button">Run Catalog Cleanup</button>
                     </div>
                     <p id="catalog-cleanup-status" class="hint">Loading catalog cleanup status…</p>
-                    <p class="hint">Scan checks each catalog path after remap (Jellyfin prefix → local prefix). If that file or folder exists on this server, the item is present. Missing files are marked missing and deleted after the grace period.</p>
+                    <p class="hint">Scan checks each catalog path after remap (server prefix → local prefix). If that file or folder exists on this server, the item is present. Missing files are marked missing and deleted after the grace period.</p>
                     <div class="actions">
                         <button type="button" id="btn-scan-local-catalog" class="raised button-submit emby-button">Scan Local Files</button>
                     </div>
@@ -1201,7 +1236,7 @@
                 <div class="card section-card">
                     <h3>Authors</h3>
                     <ul class="credits-list">
-                        <li><a href="https://github.com/binarygeek119" target="_blank" rel="noopener">binarygeek119</a> — author of <a href="https://github.com/FlowMeadow01/ChannelFlow" target="_blank" rel="noopener">ChannelFlow</a></li>
+                        <li><a href="https://github.com/binarygeek119" target="_blank" rel="noopener">binarygeek119</a> — author of <a href="https://github.com/binarygeek119/ChannelFlow" target="_blank" rel="noopener">ChannelFlow</a></li>
                         <li><a href="https://github.com/netbymatt" target="_blank" rel="noopener">netbymatt</a> — <a href="https://github.com/netbymatt/ws4kp" target="_blank" rel="noopener">WeatherStar 4000+</a> and <a href="https://github.com/netbymatt/ws3kp" target="_blank" rel="noopener">WeatherStar 3000+</a></li>
                         <li><a href="https://github.com/jasongdove" target="_blank" rel="noopener">jasongdove</a> — <a href="https://github.com/ErsatzTV/next" target="_blank" rel="noopener">ErsatzTV/next</a> and <a href="https://github.com/ErsatzTV/legacy" target="_blank" rel="noopener">ErsatzTV/legacy</a></li>
                         <li><a href="https://github.com/liam8888999" target="_blank" rel="noopener">liam8888999</a> — <a href="https://github.com/liam8888999/ErsatzTV-Filler" target="_blank" rel="noopener">ErsatzTV-Filler</a></li>
@@ -1210,8 +1245,8 @@
                 <div class="card section-card">
                     <h3>ChannelFlow</h3>
                     <ul class="credits-list">
-                        <li><a href="https://github.com/FlowMeadow01/ChannelFlow" target="_blank" rel="noopener">ChannelFlow</a> — simulated live TV for Jellyfin, by binarygeek119</li>
-                        <li><a href="https://github.com/FlowMeadow01/ChannelFlow-logo" target="_blank" rel="noopener">ChannelFlow-logo</a> — channel bugs and guide icons, including FlowWire</li>
+                        <li><a href="https://github.com/binarygeek119/ChannelFlow" target="_blank" rel="noopener">ChannelFlow</a> — simulated live TV for Jellyfin, by binarygeek119</li>
+                        <li>Bundled channel bugs and guide icons, including FlowWire</li>
                     </ul>
                 </div>
                 <div class="card section-card">
@@ -1225,7 +1260,7 @@
                 <div class="card section-card">
                     <h3>Jellyfin</h3>
                     <ul class="credits-list">
-                        <li><a href="https://jellyfin.org" target="_blank" rel="noopener">Jellyfin</a> — media server, library, and Live TV plugin host</li>
+                        <li><a href="https://jellyfin.org" target="_blank" rel="noopener">Jellyfin</a> — media server, library, and Live TV tuner host</li>
                         <li><a href="https://github.com/jellyfin/jellyfin-ffmpeg" target="_blank" rel="noopener">jellyfin-ffmpeg</a> — FFmpeg build used for live encode (VAAPI, QSV, NVENC)</li>
                     </ul>
                 </div>
@@ -1294,7 +1329,7 @@
                     </label>
                     <label class="field"><span>Anchor intro</span><textarea id="news-intro" class="emby-input" rows="2" placeholder="I'm Catherine Wolfe. You're watching FlowWire News."></textarea></label>
                     <label class="field"><span>Anchor outro</span><textarea id="news-outro" class="emby-input" rows="2" placeholder="I'm Catherine Wolfe. Stay with FlowWire News."></textarea></label>
-                    <p class="hint">Catherine reads the <strong>anchor intro</strong> before the stories, then the <strong>anchor outro</strong> as her sign-off immediately before outro audio. Leave both blank to use her defaults. Her photo is <code>News/Catherine_Wolfe.jpg</code> in the ChannelFlow logo set. Bumper music comes from <code>News/FlowWire-intro.mp3</code> and <code>News/FlowWire-outro.mp3</code>. Override those with <code>intro.mp3</code> and <code>outro.mp3</code> in the server news folder, or a short clip from News music is used if nothing is found.</p>
+                    <p class="hint">Catherine reads the <strong>anchor intro</strong> before the stories, then the <strong>anchor outro</strong> as her sign-off immediately before outro audio. Leave both blank to use her defaults. Her photo is <code>images/media/FlowWire_News/Catherine_Wolfe.jpg</code>. Bumper music comes from <code>audio/FlowWire_News/FlowWire-intro.mp3</code> and <code>audio/FlowWire_News/FlowWire-outro.mp3</code>. Override those with <code>intro.mp3</code> and <code>outro.mp3</code> in the server news folder, or a short clip from News music is used if nothing is found.</p>
                     <label class="field checkbox-field"><input id="news-tts" type="checkbox" checked><span class="channelflow-check-box"></span><span>Enable TTS</span></label>
                     <label class="field">
                         <span>TTS engine</span>
@@ -1367,7 +1402,17 @@
       </div>
     </div>
   </div>
-  <script src="js/app.js?v=ebsticker2"></script>
-  <script src="js/shell.js?v=navbtns3"></script>
+  <div id="catalog-sync-popup" class="catalog-sync-popup hidden" hidden role="status" aria-live="polite">
+    <button type="button" id="catalog-sync-dismiss" class="catalog-sync-dismiss hidden" aria-label="Dismiss">&times;</button>
+    <p class="catalog-sync-kicker" id="catalog-sync-kicker">Catalog sync</p>
+    <p class="catalog-sync-title" id="catalog-sync-title">Starting…</p>
+    <p class="catalog-sync-message" id="catalog-sync-message"></p>
+    <div class="catalog-sync-bar" id="catalog-sync-bar" data-indeterminate="true">
+      <div class="catalog-sync-bar-fill" id="catalog-sync-bar-fill"></div>
+    </div>
+    <p class="catalog-sync-meta" id="catalog-sync-meta"></p>
+  </div>
+  <script src="js/app.js?v=assets5"></script>
+  <script src="js/shell.js?v=library3"></script>
 </body>
 </html>

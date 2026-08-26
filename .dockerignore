@@ -10,6 +10,7 @@ artifacts
 *.zip
 plugin
 Jellyfin.Plugin.FinTV
+legacy
 unraid
 *.md
 !vendor/README.md
@@ -19,4 +20,3 @@ vendor/**/tests
 vendor/**/.github
 .env
 .env.*
-Catherine_Wolfe.jpg

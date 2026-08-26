@@ -58,6 +58,10 @@ public class FinTvDbContext : DbContext
 
     public DbSet<PathMapping> PathMappings => Set<PathMapping>();
 
+    public DbSet<MediaServerConnection> MediaServerConnections => Set<MediaServerConnection>();
+
+    public DbSet<MediaServerLibrary> MediaServerLibraries => Set<MediaServerLibrary>();
+
     public DbSet<AdminUser> AdminUsers => Set<AdminUser>();
 
     public DbSet<AppSettingsRow> AppSettings => Set<AppSettingsRow>();
@@ -141,6 +145,7 @@ public class FinTvDbContext : DbContext
             entity.HasIndex(e => e.ParentId);
             entity.HasIndex(e => e.SeriesId);
             entity.HasIndex(e => e.LibraryId);
+            entity.HasIndex(e => e.SourceConnectionId);
             entity.HasIndex(e => e.IsMissing);
             entity.HasIndex(e => e.AspectRatio);
             entity.HasMany(e => e.Chapters).WithOne(e => e.MediaItem).HasForeignKey(e => e.MediaItemId).OnDelete(DeleteBehavior.Cascade);
@@ -149,6 +154,24 @@ public class FinTvDbContext : DbContext
         modelBuilder.Entity<PathMapping>(entity =>
         {
             entity.HasIndex(e => e.SortOrder);
+            entity.HasIndex(e => e.ConnectionId);
+        });
+
+        modelBuilder.Entity<MediaServerConnection>(entity =>
+        {
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.HasIndex(e => e.Kind);
+            entity.HasIndex(e => e.SortOrder);
+            entity.HasMany(e => e.Libraries)
+                .WithOne(e => e.Connection)
+                .HasForeignKey(e => e.ConnectionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<MediaServerLibrary>(entity =>
+        {
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.HasIndex(e => new { e.ConnectionId, e.ExternalId }).IsUnique();
         });
 
         modelBuilder.Entity<AdminUser>(entity =>
@@ -187,6 +210,7 @@ public class FinTvDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.Name);
             entity.HasIndex(e => e.LibraryId);
+            entity.HasIndex(e => e.SourceConnectionId);
             entity.HasIndex(e => e.JellyfinItemId);
             entity.HasIndex(e => e.Path);
             entity.HasIndex(e => e.IsMissing);

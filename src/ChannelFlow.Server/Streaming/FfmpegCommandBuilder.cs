@@ -1574,11 +1574,7 @@ public class FfmpegCommandBuilder
 
         if (channel.LogoSetId.HasValue && !string.IsNullOrWhiteSpace(channel.LogoFileName))
         {
-            foreach (var logosRoot in new[]
-                     {
-                         Path.Combine(FinTvRuntime.Current?.LogosFolder ?? string.Empty, "binarygeek119"),
-                         FinTvRuntime.Current?.BundledLogosFolder ?? string.Empty
-                     }.Where(path => !string.IsNullOrWhiteSpace(path) && Directory.Exists(path)))
+            foreach (var logosRoot in FinTvRuntime.Current?.ExistingBundledAssetRoots() ?? [])
             {
                 var found = Directory.EnumerateFiles(logosRoot, channel.LogoFileName, SearchOption.AllDirectories)
                     .FirstOrDefault();

@@ -44,19 +44,8 @@
     <ItemGroup>
       <BrandLogo Include="$(MSBuildThisFileDirectory)..\..\logo.png" Condition="Exists('$(MSBuildThisFileDirectory)..\..\logo.png')" />
       <BrandLogo Include="$(MSBuildThisFileDirectory)..\..\logo-plane.png" Condition="Exists('$(MSBuildThisFileDirectory)..\..\logo-plane.png')" />
-      <FaviconPack Include="$(MSBuildThisFileDirectory)..\..\favicon_io\favicon.ico" />
-      <FaviconPack Include="$(MSBuildThisFileDirectory)..\..\favicon_io\favicon-16x16.png" />
-      <FaviconPack Include="$(MSBuildThisFileDirectory)..\..\favicon_io\favicon-32x32.png" />
-      <FaviconPack Include="$(MSBuildThisFileDirectory)..\..\favicon_io\apple-touch-icon.png" />
-      <FaviconPack Include="$(MSBuildThisFileDirectory)..\..\favicon_io\android-chrome-192x192.png" />
-      <FaviconPack Include="$(MSBuildThisFileDirectory)..\..\favicon_io\android-chrome-512x512.png" />
     </ItemGroup>
     <Copy SourceFiles="@(BrandLogo)" DestinationFolder="$(MSBuildThisFileDirectory)wwwroot" />
-    <Copy SourceFiles="@(FaviconPack)" DestinationFolder="$(MSBuildThisFileDirectory)wwwroot" Condition="Exists('$(MSBuildThisFileDirectory)..\..\favicon_io\favicon.ico')" />
-  </Target>
-
-  <Target Name="FetchBinarygeek119Logos" BeforeTargets="PrepareForBuild" Condition="'$(SkipLogoFetch)' != 'true'">
-    <Exec Condition="'$(OS)' != 'Windows_NT'" Command="python3 &quot;$(MSBuildThisFileDirectory)..\..\scripts\fetch-binarygeek119-logos.py&quot; &quot;$(MSBuildThisFileDirectory)wwwroot\logos\binarygeek119&quot;" />
   </Target>
 
 </Project>

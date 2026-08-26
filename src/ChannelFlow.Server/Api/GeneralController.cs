@@ -1,5 +1,6 @@
 using FinTv.Auth;
 using FinTv.Configuration;
+using FinTv.Domain;
 using FinTv.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -7,15 +8,24 @@ using Microsoft.AspNetCore.Mvc;
 namespace FinTv.Api;
 
 /// <summary>
-/// General ChannelFlow plugin settings for the admin UI.
+/// General ChannelFlow-Server settings for the admin UI.
 /// </summary>
 [ApiController]
 [Route("api/general")]
 [Authorize(Policy = "admin")]
 public class GeneralController : ControllerBase
 {
+    private readonly QuickPinService _quickPins;
+    private readonly IPublicBaseUrl _appHost;
+
+    public GeneralController(QuickPinService quickPins, IPublicBaseUrl appHost)
+    {
+        _quickPins = quickPins;
+        _appHost = appHost;
+    }
+
     /// <summary>
-    /// Gets general plugin settings.
+    /// Gets general settings.
     /// </summary>
     [HttpGet("settings")]
     public ActionResult<object> GetSettings()
@@ -32,8 +42,7 @@ public class GeneralController : ControllerBase
                 streamIdleTimeoutSeconds = PluginConfiguration.ClampStreamIdleTimeoutSeconds(config.StreamIdleTimeoutSeconds),
                 publicBaseUrl = config.PublicBaseUrl
                     ?? ReverseProxyHosting.NormalizePublicBaseUrl(AppEnvironment.Get("PUBLIC_URL"))
-                    ?? string.Empty,
-                apiKey = PluginApiKey.Resolve() ?? string.Empty
+                    ?? string.Empty
             });
         }
         catch (Exception ex)
@@ -67,7 +76,7 @@ public class GeneralController : ControllerBase
     }
 
     /// <summary>
-    /// Updates general plugin settings.
+    /// Updates general settings.
     /// </summary>
     [HttpPut("settings")]
     public IActionResult UpdateSettings([FromBody] GeneralSettingsRequest? request)
@@ -118,24 +127,6 @@ public class GeneralController : ControllerBase
                 plugin.Configuration.PublicBaseUrl = ReverseProxyHosting.NormalizePublicBaseUrl(request.PublicBaseUrl);
             }
 
-            if (request.GenerateApiKey == true)
-            {
-                plugin.Configuration.ApiKey = PluginApiKey.Generate();
-            }
-            else if (request.ApiKey is not null)
-            {
-                var apiKey = request.ApiKey.Trim();
-                if (apiKey.Length > 0 && apiKey.Length < 8)
-                {
-                    return BadRequest(new { message = "API key must be at least 8 characters." });
-                }
-
-                if (apiKey.Length > 0)
-                {
-                    plugin.Configuration.ApiKey = apiKey;
-                }
-            }
-
             plugin.SaveConfiguration();
             return Ok(new
             {
@@ -145,14 +136,43 @@ public class GeneralController : ControllerBase
                 playoutDaysToBuild = plugin.Configuration.PlayoutDaysToBuild,
                 streamIdleTimeoutSeconds = PluginConfiguration.ClampStreamIdleTimeoutSeconds(
                     plugin.Configuration.StreamIdleTimeoutSeconds),
-                publicBaseUrl = plugin.Configuration.PublicBaseUrl ?? string.Empty,
-                apiKey = PluginApiKey.Resolve() ?? string.Empty
+                publicBaseUrl = plugin.Configuration.PublicBaseUrl ?? string.Empty
             });
         }
         catch (Exception ex)
         {
             return BadRequest(new { message = $"Could not save general settings: {ex.Message}" });
         }
+    }
+
+    /// <summary>
+    /// Gets the active quick pin, if one has been created and has not expired.
+    /// </summary>
+    [HttpGet("quick-pin")]
+    public ActionResult<object> GetQuickPin()
+        => Ok(DescribeQuickPin(_quickPins.Snapshot(includePin: true)));
+
+    /// <summary>
+    /// Creates a new 5-minute quick pin for pairing another app.
+    /// </summary>
+    [HttpPost("quick-pin")]
+    public ActionResult<object> CreateQuickPin()
+        => Ok(DescribeQuickPin(_quickPins.Create()));
+
+    private object DescribeQuickPin(QuickPinSnapshot snapshot)
+    {
+        var baseUrl = EpgService.GetPublicBaseUrl(Request, _appHost);
+        return new
+        {
+            active = snapshot.Active,
+            pin = snapshot.Pin,
+            expiresAt = snapshot.ExpiresAt,
+            expiresInSeconds = snapshot.ExpiresInSeconds,
+            lifetimeSeconds = QuickPinService.LifetimeSeconds,
+            serverUrl = baseUrl,
+            pairUrl = $"{baseUrl}/api/setup/pair",
+            pairPageUrl = $"{baseUrl}/pair"
+        };
     }
 }
 
@@ -185,14 +205,4 @@ public class GeneralSettingsRequest
     /// Public origin for M3U/XMLTV when reverse-proxied (https://channelflow.example.com).
     /// </summary>
     public string? PublicBaseUrl { get; set; }
-
-    /// <summary>
-    /// Gets or sets the shared secret for the Jellyfin plugin and IPTV URLs.
-    /// </summary>
-    public string? ApiKey { get; set; }
-
-    /// <summary>
-    /// Gets or sets whether to replace the plugin API key with a newly generated value.
-    /// </summary>
-    public bool? GenerateApiKey { get; set; }
 }

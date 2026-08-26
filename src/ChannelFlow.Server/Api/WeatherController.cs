@@ -32,6 +32,8 @@ public class WeatherController : ControllerBase
     [HttpGet("status")]
     public async Task<ActionResult<object>> GetStatus(CancellationToken cancellationToken)
     {
+        await EnsureRandomWeatherLocationsAsync(cancellationToken);
+
         var config = FinTvRuntime.Current?.Configuration;
         var weatherChannels = (await _channels.GetAllAsync(cancellationToken))
             .Where(c => c.ContentType == ChannelContentType.Weather)
@@ -80,6 +82,39 @@ public class WeatherController : ControllerBase
             publicSite = false,
             bind = "127.0.0.1"
         });
+    }
+
+    private async Task EnsureRandomWeatherLocationsAsync(CancellationToken cancellationToken)
+    {
+        var plugin = FinTvRuntime.Current;
+        var channels = (await _channels.GetAllAsync(cancellationToken))
+            .Where(c => c.ContentType == ChannelContentType.Weather)
+            .ToList();
+        var used = channels
+            .Select(c => c.WeatherLocationQuery)
+            .Where(q => !WeatherStarChannelService.IsUnsetOrLegacyLocation(q))
+            .Select(q => q!.Trim())
+            .ToList();
+
+        foreach (var channel in channels)
+        {
+            if (!WeatherStarChannelService.IsUnsetOrLegacyLocation(channel.WeatherLocationQuery))
+            {
+                continue;
+            }
+
+            var location = WeatherStarChannelService.PickRandomLocation(used);
+            used.Add(location);
+            await _channels.UpdateWeatherLocationAsync(channel.Id, location, cancellationToken);
+        }
+
+        if (plugin is not null && WeatherStarChannelService.IsUnsetOrLegacyLocation(plugin.Configuration.WeatherDefaultLocationQuery))
+        {
+            plugin.Configuration.WeatherDefaultLocationQuery = used.Count > 0
+                ? used[0]
+                : WeatherStarChannelService.PickRandomLocation();
+            plugin.SaveConfiguration();
+        }
     }
 
     [HttpPut("settings")]

@@ -1,5 +1,8 @@
+# One-shot helper to vendor ChannelFlow artwork from FlowMeadow01/ChannelFlow-logo.
+# Artwork is committed under src/ChannelFlow.Server/wwwroot/images, wwwroot/audio, and wwwroot/videos.
+# Builds and runtime no longer fetch from GitHub.
 param(
-    [string]$OutputDir = (Join-Path $PSScriptRoot "..\Jellyfin.Plugin.FinTV\Assets\logos\binarygeek119")
+    [string]$OutputDir = (Join-Path $PSScriptRoot "..\src\ChannelFlow.Server\wwwroot\images\logos")
 )
 
 $ErrorActionPreference = "Stop"

@@ -526,6 +526,8 @@ public class CatalogItemDto
 
     public Guid? LibraryId { get; set; }
 
+    public Guid? SourceConnectionId { get; set; }
+
     public string? LibraryName { get; set; }
 
     public string? CollectionType { get; set; }

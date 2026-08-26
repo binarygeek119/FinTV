@@ -82,13 +82,21 @@
     let guideTimer = null;
     let guideScrollToken = 0;
     let scheduleTimeZone = null;
+    let catalogSyncPollTimer = null;
+    let catalogSyncHideTimer = null;
+    let catalogSyncKind = null;
+    let catalogSyncSeenRunning = false;
+    let catalogSyncClosed = false;
     let appClockTimer = null;
     const GUIDE_PX_PER_MIN = 4;
     const GUIDE_CHANNEL_COL = 168;
 
     function $(id) {
         if (configPage) {
-            return configPage.querySelector('#' + id);
+            const found = configPage.querySelector('#' + id);
+            if (found) {
+                return found;
+            }
         }
 
         return document.getElementById(id);
@@ -3394,7 +3402,7 @@
     }
 
     function updateEbsLibraryFieldVisibility() {
-        const source = Number($('ebs-music-source')?.value || $('setup-ebs-music-source')?.value || '1');
+        const source = Number($('ebs-music-source')?.value || $('setup-ebs-music-source')?.value || '2');
         const audioMode = Number($('ebs-audio-mode')?.value || '0');
         const field = $('ebs-library-field') || $('setup-ebs-library-field');
         if (field) field.style.display = audioMode === 0 && source === 1 ? '' : 'none';
@@ -3463,6 +3471,9 @@
             ? `${pack.trackCount} track${pack.trackCount === 1 ? '' : 's'}`
             : 'Not downloaded';
         const active = pack.isActive ? '<span class="stat-pill">Playing now</span>' : '';
+        const skipped = pack.autoDownloadSkipped
+            ? '<p class="hint">Removed. ChannelFlow will not auto-download this pack until you click Download.</p>'
+            : '';
         const error = pack.error ? `<p class="hint">${escapeHtml(pack.error)}</p>` : '';
         let actions = '';
         if (pack.status === 'downloading') {
@@ -3481,7 +3492,7 @@
             <h4>${escapeHtml(pack.name || pack.id)} ${active}</h4>
             <p class="hint">${escapeHtml(pack.playsWhen || '')}</p>
             <p class="hint">${escapeHtml(version)} · ${escapeHtml(tracks)}</p>
-            ${error}
+            ${error}${skipped}
             <div class="actions">${actions}</div>
         </div>`;
     }
@@ -3493,7 +3504,11 @@
     }
 
     async function removeMusicPack(id) {
-        if (!confirm('Remove the downloaded files for this music pack? You can download it again later.')) {
+        const anytime = String(id || '').toLowerCase() === 'anytime';
+        const message = anytime
+            ? 'Remove Anytime? ChannelFlow will not download it again until you click Download.'
+            : 'Remove the downloaded files for this music pack? You can download it again later.';
+        if (!confirm(message)) {
             return;
         }
         await api('/music-packs/' + encodeURIComponent(id), { method: 'DELETE' });
@@ -4534,7 +4549,7 @@
             if ($('ebs-display-mode')) $('ebs-display-mode').value = String(settings.ebsDisplayMode ?? 0);
             if ($('ebs-audio-mode')) $('ebs-audio-mode').value = String(settings.ebsAudioMode ?? 0);
             if ($('ebs-slate-variant')) $('ebs-slate-variant').value = String(settings.ebsSlateVariant ?? 0);
-            if ($('ebs-music-source')) $('ebs-music-source').value = String(settings.ebsBackgroundMusicSource ?? 1);
+            if ($('ebs-music-source')) $('ebs-music-source').value = String(settings.ebsBackgroundMusicSource ?? 2);
             populateEbsMusicLibraries(
                 settings.musicLibraries,
                 settings.ebsBackgroundMusicLibraryId || '',
@@ -4559,7 +4574,7 @@
                     ebsDisplayMode: Number($('ebs-display-mode')?.value || '0'),
                     ebsAudioMode: Number($('ebs-audio-mode')?.value || '0'),
                     ebsSlateVariant: Number($('ebs-slate-variant')?.value || '0'),
-                    ebsBackgroundMusicSource: Number($('ebs-music-source')?.value || '1'),
+                    ebsBackgroundMusicSource: Number($('ebs-music-source')?.value || '2'),
                     ebsBackgroundMusicLibraryId: selectedOption?.value || null,
                     ebsBackgroundMusicLibraryName: selectedOption?.textContent?.trim() || 'Background Music'
                 })
@@ -4622,7 +4637,7 @@
         const select = $('weather-music-library');
         if (select && Array.isArray(status?.musicLibraries)) {
             const current = status.weatherMusicLibraryId || '';
-            select.innerHTML = '<option value="">Use Off Air / all music</option>' +
+            select.innerHTML = '<option value="">Local music packs (Off Air)</option>' +
                 status.musicLibraries.map((lib) => `<option value="${escapeHtml(lib.id)}" ${lib.id === current ? 'selected' : ''}>${escapeHtml(lib.name)}</option>`).join('');
             if (current) select.value = current;
         }
@@ -4698,9 +4713,6 @@
         if ($('wx-customTextEnable')) {
             $('wx-customTextEnable').checked = weatherQueryFlag(params, 'customTextEnable', false);
         }
-        if ($('wx-scanLines')) {
-            $('wx-scanLines').checked = weatherQueryFlag(params, 'scanLines', false);
-        }
         if ($('wx-customText')) {
             $('wx-customText').value = params.get('customText') || '';
         }
@@ -4731,7 +4743,6 @@
         params.set('units', $('wx-units')?.value || 'us');
         params.set('customText', $('wx-customText')?.value.trim() || '');
         params.set('mediaVolume', $('wx-mediaVolume')?.value || '0.75');
-        params.set('scanLines', $('wx-scanLines')?.checked ? 'true' : 'false');
         return params.toString();
     }
 
@@ -4853,20 +4864,27 @@
 
     function renderWeatherZipList(rows) {
         const el = $('weather-zip-list');
+        const fallback = $('weather-default-location-field');
+        if (fallback) {
+            fallback.classList.toggle('hidden', rows.length > 0);
+        }
         if (!el) {
             return;
         }
         if (!rows.length) {
-            el.innerHTML = '<p class="hint">No weather channels yet. Apply a WeatherStar preset or create a Weather channel, then set its location here.</p>';
+            el.innerHTML = '<p class="hint">Apply a WeatherStar preset or create a Weather channel. New weather channels use this location.</p>';
             return;
         }
         el.innerHTML = rows.map((ch) => {
             const location = ch.location || ch.weatherLocationQuery || ch.zip || '';
+            const heading = rows.length > 1
+                ? '<div class="wx-channel-label">' + escapeHtml((ch.number || '') + ' · ' + (ch.name || 'Weather')) + '</div>'
+                : '';
             return '<div class="weather-zip-row">'
-                + '<div class="wx-channel-label">' + escapeHtml((ch.number || '') + ' · ' + (ch.name || 'Weather')) + '</div>'
+                + heading
                 + '<label class="field"><span>Location</span>'
                 + '<input class="emby-input weather-channel-zip" data-channel-id="' + escapeHtml(ch.id)
-                + '" placeholder="50317 or London, UK" value="' + escapeHtml(location) + '">'
+                + '" placeholder="ZIP, city, or lat,lon" value="' + escapeHtml(location) + '">'
                 + '</label></div>';
         }).join('');
     }
@@ -4884,14 +4902,16 @@
         const musicSelect = $('weather-music-library');
         const selected = musicSelect?.selectedOptions?.[0];
         try {
-            const defaultRaw = $('weather-default-zip')?.value.trim() || '';
-            const defaultLocation = defaultRaw ? readWeatherLocation(defaultRaw, 'Default location') : '';
             const channelZips = Array.from(qa('.weather-channel-zip'))
                 .filter((input) => (input.value || '').trim().length >= 2)
                 .map((input) => ({
                     id: input.dataset.channelId,
-                    location: readWeatherLocation(input.value, 'Channel location')
+                    location: readWeatherLocation(input.value, 'Location')
                 }));
+            const defaultRaw = $('weather-default-zip')?.value.trim() || '';
+            const defaultLocation = channelZips.length
+                ? channelZips[0].location
+                : (defaultRaw ? readWeatherLocation(defaultRaw, 'Location') : '');
             const saved = await api('/weather/settings', {
                 method: 'PUT',
                 body: JSON.stringify({
@@ -5204,10 +5224,22 @@
 
         if (grace && typeof status.gracePeriodDays === 'number') {
             grace.value = String(status.gracePeriodDays);
+            const libraryGrace = $('library-cleanup-grace');
+            if (libraryGrace) {
+                libraryGrace.value = String(status.gracePeriodDays);
+            }
         }
 
+        const libraryStatus = $('library-cleanup-status');
+        const writeStatus = (text) => {
+            el.textContent = text;
+            if (libraryStatus) {
+                libraryStatus.textContent = text;
+            }
+        };
+
         if (status.isRunning) {
-            el.textContent = 'Catalog cleanup is running… marking missing items, scanning remapped local files, then deleting rows past the grace period.';
+            writeStatus('Catalog cleanup is running… marking missing items, scanning remapped local files, then deleting rows past the grace period.');
             if (runBtn) {
                 runBtn.disabled = true;
                 runBtn.textContent = 'Cleaning…';
@@ -5222,16 +5254,19 @@
         }
 
         if (status.lastError) {
-            el.textContent =
+            writeStatus(
                 `Last run failed: ${status.lastError}` +
-                (status.lastCompletedAt ? ` · previous success ${new Date(status.lastCompletedAt).toLocaleString()}` : '');
+                (status.lastCompletedAt ? ` · previous success ${new Date(status.lastCompletedAt).toLocaleString()}` : '')
+            );
         } else if (status.lastCompletedAt) {
-            el.textContent =
+            writeStatus(
                 `Last run ${new Date(status.lastCompletedAt).toLocaleString()}: marked ${status.markedMissing} missing, removed ${status.removed}. ` +
-                `${status.currentlyMissing} catalog row(s) currently missing (waiting on the ${status.gracePeriodDays}-day grace period).`;
+                `${status.currentlyMissing} catalog row(s) currently missing (waiting on the ${status.gracePeriodDays}-day grace period).`
+            );
         } else {
-            el.textContent =
-                `${status.currentlyMissing} catalog row(s) currently missing. Grace period is ${status.gracePeriodDays} day(s). Run cleanup after a catalog sync, or wait for the daily task.`;
+            writeStatus(
+                `${status.currentlyMissing} catalog row(s) currently missing. Grace period is ${status.gracePeriodDays} day(s). Run cleanup after a catalog sync, or wait for the daily task.`
+            );
         }
 
         renderCatalogLocalScanStatus(status);
@@ -5245,9 +5280,18 @@
             return;
         }
 
+        const writeScan = (text) => {
+            el.textContent = text;
+            const libraryScan = $('library-scan-status');
+            if (libraryScan) {
+                libraryScan.textContent = text;
+            }
+        };
+
         if (scan?.isRunning) {
-            el.textContent =
-                `Scanning remapped local files… ${scan.processedItems}/${scan.totalItems} checked · ${scan.found} found · ${scan.restored} restored · ${scan.markedMissing} marked missing.`;
+            writeScan(
+                `Scanning remapped local files… ${scan.processedItems}/${scan.totalItems} checked · ${scan.found} found · ${scan.restored} restored · ${scan.markedMissing} marked missing.`
+            );
             if (scanBtn) {
                 scanBtn.disabled = true;
                 scanBtn.textContent = 'Scanning…';
@@ -5261,19 +5305,21 @@
         }
 
         if (scan?.lastError) {
-            el.textContent =
+            writeScan(
                 `Last scan failed: ${scan.lastError}` +
-                (scan.lastCompletedAt ? ` · previous success ${new Date(scan.lastCompletedAt).toLocaleString()}` : '');
+                (scan.lastCompletedAt ? ` · previous success ${new Date(scan.lastCompletedAt).toLocaleString()}` : '')
+            );
             return;
         }
 
         if (scan?.lastCompletedAt) {
-            el.textContent =
-                `Last scan ${new Date(scan.lastCompletedAt).toLocaleString()}: ${scan.found} file(s) present at remapped paths, restored ${scan.restored}, marked ${scan.markedMissing} missing, skipped ${scan.skipped} with no path.`;
+            writeScan(
+                `Last scan ${new Date(scan.lastCompletedAt).toLocaleString()}: ${scan.found} file(s) present at remapped paths, restored ${scan.restored}, marked ${scan.markedMissing} missing, skipped ${scan.skipped} with no path.`
+            );
             return;
         }
 
-        el.textContent = 'Scan catalog items against remapped local files. If the remapped path exists, the Jellyfin item is present.';
+        writeScan('Scan catalog items against remapped local files. If the remapped path exists, the item is present.');
     }
 
     async function loadCatalogCleanup() {
@@ -5779,6 +5825,88 @@
         await loadStreamOutput();
     }
 
+    let quickPinTimer = null;
+    let quickPinExpiresAt = 0;
+    let quickPinValue = '';
+
+    function formatQuickPin(pin) {
+        const digits = String(pin || '').replace(/\D/g, '');
+        return digits.length === 6 ? `${digits.slice(0, 3)} ${digits.slice(3)}` : digits;
+    }
+
+    function stopQuickPinTimer() {
+        if (quickPinTimer) {
+            clearInterval(quickPinTimer);
+            quickPinTimer = null;
+        }
+    }
+
+    function renderQuickPinExpiry() {
+        const label = $('quick-pin-expires');
+        if (!label) {
+            return;
+        }
+
+        const remaining = Math.max(0, Math.ceil((quickPinExpiresAt - Date.now()) / 1000));
+        if (remaining <= 0) {
+            stopQuickPinTimer();
+            showQuickPin(null);
+            return;
+        }
+
+        const minutes = Math.floor(remaining / 60);
+        const seconds = String(remaining % 60).padStart(2, '0');
+        label.textContent = `Expires in ${minutes}:${seconds}`;
+    }
+
+    function showQuickPin(data) {
+        const panel = $('quick-pin-panel');
+        if (!panel) {
+            return;
+        }
+
+        const active = !!(data && data.active && data.pin && Number(data.expiresInSeconds || 0) > 0);
+        panel.classList.toggle('hidden', !active);
+        if (!active) {
+            stopQuickPinTimer();
+            quickPinValue = '';
+            return;
+        }
+
+        quickPinValue = String(data.pin);
+        if ($('quick-pin-code')) {
+            $('quick-pin-code').textContent = formatQuickPin(data.pin);
+        }
+        if ($('quick-pin-server-url')) {
+            $('quick-pin-server-url').value = data.serverUrl || '';
+        }
+        if ($('quick-pin-pair-url')) {
+            $('quick-pin-pair-url').value = data.pairUrl || '';
+        }
+
+        quickPinExpiresAt = data.expiresAt ? Date.parse(data.expiresAt) : (Date.now() + (Number(data.expiresInSeconds) * 1000));
+        renderQuickPinExpiry();
+        stopQuickPinTimer();
+        quickPinTimer = setInterval(renderQuickPinExpiry, 1000);
+    }
+
+    async function loadQuickPin() {
+        try {
+            showQuickPin(await api('/general/quick-pin'));
+        } catch {
+            showQuickPin(null);
+        }
+    }
+
+    async function createQuickPin() {
+        try {
+            showQuickPin(await api('/general/quick-pin', { method: 'POST' }));
+            toast('Quick pin created. It expires in 5 minutes.', 'success');
+        } catch (err) {
+            toast(err.message || 'Could not create a quick pin.', 'error');
+        }
+    }
+
     async function loadGeneral() {
         try {
             const [settings, timeZones] = await Promise.all([
@@ -5829,9 +5957,7 @@
             if ($('general-public-url')) {
                 $('general-public-url').value = settings.publicBaseUrl || '';
             }
-            if ($('general-api-key')) {
-                $('general-api-key').value = settings.apiKey || '';
-            }
+            await loadQuickPin();
         } catch (err) {
             reportApiError(err, 'Could not load general settings.');
         }
@@ -5851,8 +5977,7 @@
                     scheduleTimeZone: $('general-schedule-tz')?.value || 'America/New_York',
                     playoutDaysToBuild: Number($('general-playout-days')?.value || '14'),
                     streamIdleTimeoutSeconds: Number($('general-stream-idle-timeout')?.value || '30'),
-                    publicBaseUrl: ($('general-public-url')?.value || '').trim(),
-                    apiKey: ($('general-api-key')?.value || '').trim() || null
+                    publicBaseUrl: ($('general-public-url')?.value || '').trim()
                 })
             });
             if ($('general-public-url')) {
@@ -5863,42 +5988,6 @@
         } catch (err) {
             toast(err.message, 'error');
         }
-    }
-
-    async function generatePluginApiKey() {
-        if (!confirm('Generate a new API key? The Jellyfin plugin will stop linking until you paste the new key.')) {
-            return;
-        }
-
-        try {
-            const saved = await api('/general/settings', {
-                method: 'PUT',
-                body: JSON.stringify({
-                    debugLogging: !!$('general-debug-logging')?.checked,
-                    scheduleTimeZone: $('general-schedule-tz')?.value || 'America/New_York',
-                    playoutDaysToBuild: Number($('general-playout-days')?.value || '14'),
-                    generateApiKey: true
-                })
-            });
-            if ($('general-api-key')) {
-                $('general-api-key').value = saved.apiKey || '';
-            }
-            toast('New plugin API key saved. Copy it into the Jellyfin plugin.', 'success');
-        } catch (err) {
-            toast(err.message, 'error');
-        }
-    }
-
-    function copyPluginApiKey() {
-        const text = ($('general-api-key')?.value || '').trim();
-        if (!text) {
-            toast('No API key to copy.', 'error');
-            return;
-        }
-
-        navigator.clipboard.writeText(text).then(() => toast('API key copied.', 'success')).catch(() => {
-            window.prompt('Copy API key:', text);
-        });
     }
 
     function normalizeConfigPageRoot(node) {
@@ -5987,51 +6076,622 @@
         }).join('');
     }
 
-    async function loadJellyfinLibraries() {
-        try {
-            const data = await api('/catalog/libraries') || {};
-            const libraries = data.libraries || [];
-            renderJellyfinLibraryGroup('jf-lib-tv', libraries, data.tvLibraryIds, 'tv');
-            renderJellyfinLibraryGroup('jf-lib-movies', libraries, data.movieLibraryIds, 'movies');
-            renderJellyfinLibraryGroup('jf-lib-music', libraries, data.musicLibraryIds, 'music');
-            renderJellyfinLibraryGroup('jf-lib-musicvideos', libraries, data.musicVideoLibraryIds, 'musicvideos');
-            renderJellyfinLibraryGroup('jf-lib-news', libraries, data.homeVideoLibraryIds, 'news');
-            decorateCheckboxes();
-            await loadCatalogMedia();
-        } catch (err) {
-            reportApiError(err, 'Could not load Jellyfin libraries.');
+    let mediaServers = [];
+    let libraryPage = 'connections';
+    const libraryKindSelected = {};
+
+    const LIBRARY_KIND_PAGES = ['jellyfin', 'emby', 'plex', 'sidecar', 'other'];
+    const LIBRARY_PAGES = ['connections', 'jellyfin', 'emby', 'plex', 'sidecar', 'other', 'removed'];
+
+    function libraryPath(page) {
+        const name = LIBRARY_PAGES.includes(page) ? page : 'connections';
+        return '/library/' + name;
+    }
+
+    function libraryPageFromPath(pathname) {
+        const path = normalizePathname(pathname);
+        if (path === '/library' || path === '/jellyfin') {
+            return 'connections';
         }
+
+        if (path.startsWith('/library/')) {
+            const page = path.slice('/library/'.length);
+            if (LIBRARY_PAGES.includes(page)) {
+                return page;
+            }
+        }
+
+        return 'connections';
+    }
+
+    function librarySubtitle() {
+        const labels = {
+            connections: TAB_SUBTITLES.jellyfin,
+            jellyfin: 'Jellyfin libraries and synced catalog',
+            emby: 'Emby libraries and synced catalog',
+            plex: 'Plex libraries and synced catalog',
+            sidecar: 'Local sidecar folders and NFO catalog',
+            other: 'Other media sources',
+            removed: 'Items missing from the last catalog sync'
+        };
+        return labels[libraryPage] || TAB_SUBTITLES.jellyfin;
+    }
+
+    function applyLibraryPage(options) {
+        options = options || {};
+        const before = libraryPage;
+        syncLibraryKindTabs();
+        if (libraryPage !== before && !options.skipUrl) {
+            history.replaceState({ tab: 'jellyfin', libraryPage }, '', withAppBase(libraryPath(libraryPage)));
+        }
+
+        document.querySelectorAll('#library-inner-tabs .inner-tab').forEach((tab) => {
+            const on = tab.dataset.libraryPage === libraryPage;
+            tab.classList.toggle('active', on);
+            tab.setAttribute('aria-selected', on ? 'true' : 'false');
+            tab.setAttribute('href', withAppBase(libraryPath(tab.dataset.libraryPage)));
+        });
+        document.querySelectorAll('#tab-jellyfin .library-page').forEach((page) => {
+            const on = page.id === 'library-page-' + libraryPage;
+            page.classList.toggle('hidden', !on);
+            page.hidden = !on;
+        });
+        if (libraryPage === 'removed') {
+            loadLibraryRemoved();
+        } else if (libraryPage !== 'connections') {
+            renderKindPanel(libraryPage);
+        }
+    }
+
+    function switchLibraryPage(page, options) {
+        options = options || {};
+        libraryPage = LIBRARY_PAGES.includes(page) ? page : 'connections';
+        applyLibraryPage({ skipUrl: true });
+        const path = libraryPath(libraryPage);
+        if (!options.skipHistory && normalizePathname(location.pathname) !== path) {
+            history.pushState({ tab: 'jellyfin', libraryPage }, '', withAppBase(path));
+        }
+
+        window.dispatchEvent(new CustomEvent('channelflow-tabchange', {
+            detail: { tab: 'jellyfin', title: TAB_TITLES.jellyfin, subtitle: librarySubtitle() }
+        }));
+    }
+
+    function usedLibraryKinds() {
+        return new Set((mediaServers || [])
+            .filter((server) => server.enabled !== false)
+            .map((server) => server.kind));
+    }
+
+    function syncLibraryKindTabs() {
+        const used = usedLibraryKinds();
+        document.querySelectorAll('#library-inner-tabs .inner-tab').forEach((tab) => {
+            const page = tab.dataset.libraryPage;
+            const always = page === 'connections' || page === 'removed';
+            const show = always || used.has(page);
+            tab.hidden = !show;
+            tab.classList.toggle('hidden', !show);
+        });
+        if (LIBRARY_KIND_PAGES.includes(libraryPage) && !used.has(libraryPage)) {
+            libraryPage = 'connections';
+        }
+    }
+
+    function healthBadge(server) {
+        if (server.lastHealthOk === true) {
+            return '<span class="ms-health ok">Healthy</span>';
+        }
+        if (server.lastHealthOk === false) {
+            return '<span class="ms-health bad">Unreachable</span>';
+        }
+        return '<span class="ms-health">Not tested</span>';
+    }
+
+    function renderConnectionCards() {
+        const el = $('ms-connection-list');
+        if (!el) {
+            return;
+        }
+        if (!mediaServers.length) {
+            el.innerHTML = '<div class="card section-card"><p class="hint">No media servers yet. Add one above.</p></div>';
+            return;
+        }
+        el.innerHTML = mediaServers.map((server) => {
+            const isSidecar = server.kind === 'sidecar';
+            return `<div class="card section-card ms-server-card" data-id="${server.id}">
+                <div class="section-header">
+                    <h3>${escapeHtml(server.name || server.kind)} ${healthBadge(server)}</h3>
+                    <div class="actions">
+                        <button type="button" class="emby-button" data-ms="test">Test server</button>
+                        <button type="button" class="emby-button" data-ms="health">Health</button>
+                        <button type="button" class="raised button-submit emby-button" data-ms="save">Save</button>
+                        <button type="button" class="emby-button" data-ms="delete">Remove</button>
+                    </div>
+                </div>
+                <p class="hint">${escapeHtml(server.kind)} ${server.lastHealthMessage ? '· ' + escapeHtml(server.lastHealthMessage) : ''}</p>
+                <div class="library-add-grid">
+                    <label class="field"><span>Name</span><input class="emby-input ms-edit-name" value="${escapeHtml(server.name || '')}"></label>
+                    ${isSidecar
+                        ? `<label class="field"><span>Local folder</span><input class="emby-input ms-edit-root" value="${escapeHtml(server.sidecarRoot || '')}"></label>`
+                        : `<label class="field"><span>URL</span><input class="emby-input ms-edit-url" value="${escapeHtml(server.baseUrl || '')}"></label>
+                           <label class="field"><span>API key / token</span><input class="emby-input ms-edit-token" placeholder="${server.hasToken ? 'saved · leave blank to keep' : ''}" autocomplete="off"></label>`}
+                </div>
+                <h4>Path remaps</h4>
+                <p class="hint">Server path prefix → local ChannelFlow mount. One mapping per line: <code>/data/media = /media</code></p>
+                <textarea class="ms-remap" rows="4" placeholder="/data/media = /media"></textarea>
+                <div class="actions">
+                    <button type="button" class="emby-button" data-ms="save-remap">Save remaps</button>
+                    <button type="button" class="emby-button" data-ms="test-remap">Test remaps</button>
+                </div>
+                <pre class="ms-remap-result hint"></pre>
+            </div>`;
+        }).join('');
+        el.querySelectorAll('.ms-server-card').forEach((card) => bindServerCard(card));
+    }
+
+    function bindServerCard(card) {
+        const id = card.dataset.id;
+        const remapEl = card.querySelector('.ms-remap');
+        api('/media-servers/' + id + '/path-mappings').then((rows) => {
+            remapEl.value = (rows || []).map((r) => r.jellyfinPrefix + ' = ' + r.localPrefix).join('\n');
+        }).catch(() => {});
+        card.querySelector('[data-ms="test"]').onclick = () => runServerAction(id, 'test', card);
+        card.querySelector('[data-ms="health"]').onclick = () => runServerAction(id, 'health', card);
+        card.querySelector('[data-ms="save"]').onclick = () => saveServerCard(id, card);
+        card.querySelector('[data-ms="delete"]').onclick = () => deleteServer(id);
+        card.querySelector('[data-ms="save-remap"]').onclick = () => saveServerRemaps(id, card);
+        card.querySelector('[data-ms="test-remap"]').onclick = () => testServerRemaps(id, card);
+    }
+
+    async function runServerAction(id, action, card) {
+        try {
+            const result = await api('/media-servers/' + id + '/' + action, { method: 'POST' });
+            toast((result.health && result.health.message) || 'Done.', result.health && result.health.ok ? 'success' : 'error');
+            await loadMediaServers();
+        } catch (err) {
+            toast(err.message, 'error');
+        }
+    }
+
+    async function saveServerCard(id, card) {
+        const body = {
+            name: card.querySelector('.ms-edit-name')?.value,
+            baseUrl: card.querySelector('.ms-edit-url')?.value,
+            sidecarRoot: card.querySelector('.ms-edit-root')?.value,
+            accessToken: card.querySelector('.ms-edit-token')?.value || undefined
+        };
+        await api('/media-servers/' + id, { method: 'PUT', body: JSON.stringify(body) });
+        toast('Server saved.', 'success');
+        await loadMediaServers();
+    }
+
+    async function deleteServer(id) {
+        if (!confirm('Remove this media server? Catalog items stay until cleanup.')) {
+            return;
+        }
+        await api('/media-servers/' + id, { method: 'DELETE' });
+        await loadMediaServers();
+    }
+
+    async function saveServerRemaps(id, card) {
+        const mappings = (card.querySelector('.ms-remap').value || '').split('\n')
+            .map((line) => line.split('='))
+            .filter((p) => p.length >= 2)
+            .map((p, i) => ({ jellyfinPrefix: p[0].trim(), localPrefix: p.slice(1).join('=').trim(), sortOrder: i }));
+        await api('/media-servers/' + id + '/path-mappings', { method: 'PUT', body: JSON.stringify(mappings) });
+        toast('Remaps saved.', 'success');
+    }
+
+    async function testServerRemaps(id, card) {
+        const result = await api('/media-servers/' + id + '/path-mappings/test', { method: 'POST' });
+        card.querySelector('.ms-remap-result').textContent = JSON.stringify(result, null, 2);
+    }
+
+    async function loadMediaServers() {
+        const data = await api('/media-servers') || {};
+        mediaServers = data.servers || [];
+        const url = $('ms-url');
+        if (url && !url.value && data.suggestedJellyfinUrl) {
+            url.value = data.suggestedJellyfinUrl;
+        }
+        syncLibraryKindTabs();
+        renderConnectionCards();
+        if (libraryPage !== 'connections' && libraryPage !== 'removed') {
+            renderKindPanel(libraryPage);
+        }
+    }
+
+    function serversOfKind(kind) {
+        return mediaServers.filter((s) => s.kind === kind && s.enabled !== false);
+    }
+
+    function renderKindPanel(kind) {
+        const el = $('ms-kind-' + kind);
+        if (!el) {
+            return;
+        }
+        const servers = serversOfKind(kind);
+        if (!servers.length) {
+            const placeholder = kind === 'emby' || kind === 'plex'
+                ? `<p class="hint">${kind === 'plex' ? 'Plex' : 'Emby'} support is a placeholder. Add a connection on the Connections tab (URL and token). Test/health work; catalog sync comes later.</p>`
+                : '<p class="hint">Add a ' + kind + ' connection on the Connections tab.</p>';
+            el.innerHTML = '<div class="card section-card">' + placeholder + '</div>';
+            return;
+        }
+        const selectedId = libraryKindSelected[kind] || servers[0].id;
+        libraryKindSelected[kind] = selectedId;
+        const selected = servers.find((s) => s.id === selectedId) || servers[0];
+        const canSync = !!selected.canSync;
+        el.innerHTML = `<div class="card section-card">
+                <div class="section-header">
+                    <h3>${escapeHtml(kind)}</h3>
+                    <div class="actions">
+                        ${servers.length > 1 ? `<select class="emby-select" id="ms-pick-${kind}">${servers.map((s) =>
+                            `<option value="${s.id}" ${s.id === selected.id ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('')}</select>` : ''}
+                        <button type="button" class="emby-button" id="ms-refresh-${kind}">Refresh libraries</button>
+                        <button type="button" class="raised button-submit emby-button" id="ms-sync-${kind}" ${canSync ? '' : 'disabled'}>${canSync ? 'Sync catalog' : 'Sync coming later'}</button>
+                        <button type="button" class="emby-button" id="ms-save-libs-${kind}">Save libraries</button>
+                    </div>
+                </div>
+                <p class="hint">${canSync
+                    ? 'Check libraries to import. Sync pulls metadata (and sidecar .nfo files) into ChannelFlow.'
+                    : 'This server type is connected for health checks. Catalog browse/sync is not available yet.'}</p>
+                <p class="hint" id="ms-kind-status-${kind}">${healthBadge(selected)} ${escapeHtml(selected.lastHealthMessage || '')}</p>
+                <div class="jellyfin-library-grid" id="ms-libs-${kind}"></div>
+                <h4>Path remaps</h4>
+                <p class="hint">Server path prefix → local ChannelFlow mount. One mapping per line: <code>/data/media = /media</code></p>
+                <textarea class="ms-remap" id="ms-remap-${kind}" rows="4" placeholder="/data/media = /media"></textarea>
+                <div class="actions">
+                    <button type="button" class="emby-button" id="ms-save-remap-${kind}">Save remaps</button>
+                    <button type="button" class="emby-button" id="ms-test-remap-${kind}">Test remaps</button>
+                </div>
+                <pre class="ms-remap-result hint" id="ms-remap-result-${kind}"></pre>
+            </div>
+            <div class="card section-card"><h3>TV shows</h3><div id="ms-media-${kind}-tv" class="data-table-wrap catalog-media-table"></div></div>
+            <div class="card section-card"><h3>Movies</h3><div id="ms-media-${kind}-movies" class="data-table-wrap catalog-media-table"></div></div>
+            <div class="card section-card"><h3>Music</h3><div id="ms-media-${kind}-music" class="data-table-wrap catalog-media-table"></div></div>
+            <div class="card section-card"><h3>Music videos</h3><div id="ms-media-${kind}-musicvideos" class="data-table-wrap catalog-media-table"></div></div>
+            <div class="card section-card"><h3>Other / news</h3><div id="ms-media-${kind}-news" class="data-table-wrap catalog-media-table"></div></div>`;
+        renderServerLibraries(kind, selected);
+        const pick = $('ms-pick-' + kind);
+        if (pick) {
+            pick.onchange = () => {
+                libraryKindSelected[kind] = pick.value;
+                renderKindPanel(kind);
+            };
+        }
+        $('ms-refresh-' + kind).onclick = () => refreshServerLibraries(selected.id, kind);
+        $('ms-sync-' + kind).onclick = () => syncServerCatalog(selected.id, kind);
+        $('ms-save-libs-' + kind).onclick = () => saveServerLibraries(selected.id, kind);
+        bindKindRemaps(kind, selected.id);
+        loadKindCatalog(kind, selected.id);
+    }
+
+    function renderServerLibraries(kind, server) {
+        const el = $('ms-libs-' + kind);
+        const libs = server.libraries || [];
+        if (!libs.length) {
+            el.innerHTML = '<div class="empty-state">No libraries yet. Click Refresh libraries.</div>';
+            return;
+        }
+        const groups = [
+            ['tv', 'TV'],
+            ['movies', 'Movies'],
+            ['music', 'Music'],
+            ['musicvideos', 'Music videos'],
+            ['news', 'Home movies / news'],
+            ['other', 'Other']
+        ];
+        el.innerHTML = groups.map(([group, label]) => {
+            const matching = libs.filter((lib) => (lib.group || 'other') === group);
+            if (!matching.length) {
+                return '';
+            }
+            return `<section class="library-pick-card"><h4>${label}</h4><div class="library-pick-list">${matching.map((lib) => {
+                const checked = lib.syncEnabled ? 'checked' : '';
+                return `<label class="checkbox-field"><input type="checkbox" data-lib-id="${lib.id}" ${checked}>
+                    <span class="channelflow-check-box" aria-hidden="true"></span>
+                    <span>${escapeHtml(lib.name)} <span class="library-pick-meta">${lib.itemCount || 0}</span></span></label>`;
+            }).join('')}</div></section>`;
+        }).join('') || '<div class="empty-state">No libraries on this server.</div>';
+        decorateCheckboxes();
+    }
+
+    function bindKindRemaps(kind, id) {
+        const card = $('ms-kind-' + kind)?.querySelector('.card');
+        const remapEl = $('ms-remap-' + kind);
+        if (!card || !remapEl) {
+            return;
+        }
+        api('/media-servers/' + id + '/path-mappings').then((rows) => {
+            remapEl.value = (rows || []).map((r) => r.jellyfinPrefix + ' = ' + r.localPrefix).join('\n');
+        }).catch(() => {});
+        $('ms-save-remap-' + kind).onclick = () => saveServerRemaps(id, card);
+        $('ms-test-remap-' + kind).onclick = () => testServerRemaps(id, card);
+    }
+
+    async function refreshServerLibraries(id, kind) {
+        try {
+            await api('/media-servers/' + id + '/libraries/refresh', { method: 'POST' });
+            await loadMediaServers();
+            renderKindPanel(kind);
+            toast('Libraries refreshed.', 'success');
+        } catch (err) {
+            toast(err.message, 'error');
+        }
+    }
+
+    async function saveServerLibraries(id, kind) {
+        const el = $('ms-libs-' + kind);
+        const libraries = Array.from(el.querySelectorAll('input[data-lib-id]')).map((input) => ({
+            id: input.dataset.libId,
+            syncEnabled: input.checked
+        }));
+        await api('/media-servers/' + id + '/libraries', { method: 'PUT', body: JSON.stringify(libraries) });
+        toast('Libraries saved.', 'success');
+        await loadMediaServers();
+        renderKindPanel(kind);
+    }
+
+    function formatSyncCount(value) {
+        return Number(value || 0).toLocaleString();
+    }
+
+    function startCatalogSyncPolling() {
+        if (catalogSyncPollTimer) {
+            return;
+        }
+
+        void pollCatalogSyncProgress();
+        catalogSyncPollTimer = setInterval(() => {
+            void pollCatalogSyncProgress();
+        }, 700);
+    }
+
+    async function pollCatalogSyncProgress() {
+        try {
+            renderCatalogSyncPopup(await api('/media-servers/sync/progress') || {});
+        } catch (ignore) {
+            // Keep the last popup state if the poll fails mid-sync.
+        }
+    }
+
+    function hideCatalogSyncPopup() {
+        const el = $('catalog-sync-popup');
+        if (!el) {
+            return;
+        }
+
+        el.hidden = true;
+        el.classList.add('hidden');
+        el.classList.remove('is-done', 'is-error');
+    }
+
+    function setCatalogSyncButtonsDisabled(disabled) {
+        document.querySelectorAll('button[id^="ms-sync-"]').forEach((btn) => {
+            if (/coming later/i.test(btn.textContent || '')) {
+                return;
+            }
+
+            btn.disabled = !!disabled;
+        });
+    }
+
+    function catalogSyncMeta(snap) {
+        const phase = snap.phase || '';
+        if (phase === 'fetching') {
+            let text = formatSyncCount(snap.items) + ' item' + (snap.items === 1 ? '' : 's');
+            if (snap.libraryCount) {
+                text += ' · library ' + (snap.libraryIndex || 1) + ' of ' + snap.libraryCount;
+            }
+            return text;
+        }
+
+        if (phase === 'saving') {
+            return 'Saved ' + formatSyncCount(snap.saved) + ' of ' + formatSyncCount(snap.total || snap.items);
+        }
+
+        if (phase === 'done') {
+            return snap.percent != null ? snap.percent + '%' : '';
+        }
+
+        return '';
+    }
+
+    function renderCatalogSyncPopup(snap) {
+        const el = $('catalog-sync-popup');
+        if (!el) {
+            return;
+        }
+
+        const running = !!snap.running;
+        const phase = snap.phase || 'idle';
+        const dismiss = $('catalog-sync-dismiss');
+        const title = $('catalog-sync-title');
+        const message = $('catalog-sync-message');
+        const meta = $('catalog-sync-meta');
+        const bar = $('catalog-sync-bar');
+        const fill = $('catalog-sync-bar-fill');
+
+        if (running) {
+            catalogSyncSeenRunning = true;
+            catalogSyncClosed = false;
+            if (catalogSyncHideTimer) {
+                clearTimeout(catalogSyncHideTimer);
+                catalogSyncHideTimer = null;
+            }
+
+            el.hidden = false;
+            el.classList.remove('hidden', 'is-done', 'is-error');
+            setCatalogSyncButtonsDisabled(true);
+        } else if (catalogSyncSeenRunning && !catalogSyncClosed && (phase === 'done' || phase === 'error')) {
+            el.hidden = false;
+            el.classList.remove('hidden');
+            el.classList.toggle('is-error', phase === 'error');
+            el.classList.toggle('is-done', phase === 'done');
+            setCatalogSyncButtonsDisabled(false);
+            if (!catalogSyncHideTimer) {
+                catalogSyncHideTimer = setTimeout(() => {
+                    catalogSyncHideTimer = null;
+                    catalogSyncSeenRunning = false;
+                    hideCatalogSyncPopup();
+                }, phase === 'error' ? 8000 : 4500);
+            }
+        } else if (!running && !catalogSyncSeenRunning) {
+            setCatalogSyncButtonsDisabled(false);
+        }
+
+        if (title) {
+            title.textContent = snap.serverName || 'Catalog sync';
+        }
+
+        if (message) {
+            message.textContent = snap.message || '';
+        }
+
+        if (meta) {
+            meta.textContent = catalogSyncMeta(snap);
+        }
+
+        if (bar && fill) {
+            const indeterminate = running && (snap.percent == null || snap.percent === undefined);
+            bar.dataset.indeterminate = indeterminate ? 'true' : 'false';
+            fill.style.width = indeterminate ? '' : Math.max(0, Math.min(100, Number(snap.percent) || 0)) + '%';
+        }
+
+        if (dismiss) {
+            const canDismiss = !running && (phase === 'done' || phase === 'error');
+            dismiss.classList.toggle('hidden', !canDismiss);
+            dismiss.hidden = !canDismiss;
+        }
+    }
+
+    async function syncServerCatalog(id, kind) {
+        catalogSyncKind = kind;
+        catalogSyncClosed = false;
+        catalogSyncSeenRunning = true;
+        if (catalogSyncHideTimer) {
+            clearTimeout(catalogSyncHideTimer);
+            catalogSyncHideTimer = null;
+        }
+
+        renderCatalogSyncPopup({
+            running: true,
+            phase: 'starting',
+            serverName: '',
+            message: 'Starting catalog sync…',
+            percent: null,
+            items: 0,
+            saved: 0,
+            total: 0
+        });
+        startCatalogSyncPolling();
+        try {
+            await api('/media-servers/' + id + '/sync', { method: 'POST' });
+            await pollCatalogSyncProgress();
+            await loadMediaServers();
+            renderKindPanel(kind);
+        } catch (err) {
+            await pollCatalogSyncProgress().catch(() => {});
+            toast(err.message, 'error');
+        }
+    }
+
+    async function loadKindCatalog(kind, connectionId) {
+        try {
+            const data = await api('/media-servers/catalog?connectionId=' + encodeURIComponent(connectionId)) || {};
+            const totals = data.totals || {};
+            renderCatalogMediaTable('ms-media-' + kind + '-tv', data.tvShows, totals.tvShows);
+            renderCatalogMediaTable('ms-media-' + kind + '-movies', data.movies, totals.movies);
+            renderCatalogMediaTable('ms-media-' + kind + '-music', data.music, totals.music);
+            renderCatalogMediaTable('ms-media-' + kind + '-musicvideos', data.musicVideos, totals.musicVideos);
+            renderCatalogMediaTable('ms-media-' + kind + '-news', data.pastTenseNews, totals.pastTenseNews);
+        } catch (err) {
+            reportApiError(err, 'Could not load catalog.');
+        }
+    }
+
+    async function loadLibraryTab() {
+        try {
+            toggleMediaServerAddFields();
+            await loadMediaServers();
+            applyLibraryPage();
+        } catch (err) {
+            reportApiError(err, 'Could not load media servers.');
+        }
+    }
+
+    async function addMediaServer() {
+        const kind = $('ms-kind').value;
+        const status = $('ms-add-status');
+        status.textContent = '';
+        try {
+            await api('/media-servers', {
+                method: 'POST',
+                body: JSON.stringify({
+                    kind,
+                    name: $('ms-name').value,
+                    baseUrl: $('ms-url').value,
+                    accessToken: $('ms-token').value,
+                    sidecarRoot: $('ms-root').value
+                })
+            });
+            $('ms-name').value = '';
+            $('ms-token').value = '';
+            toast('Server added. Use Test server, then refresh libraries.', 'success');
+            await loadMediaServers();
+        } catch (err) {
+            status.textContent = err.message;
+        }
+    }
+
+    function toggleMediaServerAddFields() {
+        const sidecar = $('ms-kind').value === 'sidecar';
+        $('ms-url-field').classList.toggle('hidden', sidecar);
+        $('ms-token-field').classList.toggle('hidden', sidecar);
+        $('ms-root-field').classList.toggle('hidden', !sidecar);
+    }
+
+    async function loadLibraryRemoved() {
+        try {
+            await loadCatalogCleanup();
+            const grace = $('catalog-cleanup-grace');
+            const localGrace = $('library-cleanup-grace');
+            if (grace && localGrace) {
+                localGrace.value = grace.value;
+            }
+            $('library-cleanup-status').textContent = $('catalog-cleanup-status')?.textContent || '';
+            $('library-scan-status').textContent = $('catalog-local-scan-status')?.textContent || '';
+            const data = await api('/media-servers/removed') || {};
+            const el = $('library-removed-table');
+            const items = data.items || [];
+            if (!items.length) {
+                el.innerHTML = '<div class="empty-state">Nothing is marked missing.</div>';
+                return;
+            }
+            el.innerHTML = `<table class="data-table"><thead><tr><th>Title</th><th>Server</th><th>Library</th><th>Path</th><th>Missing since</th></tr></thead><tbody>${
+                items.map((row) => `<tr>
+                    <td>${escapeHtml(row.name || '')}</td>
+                    <td>${escapeHtml(row.serverName || '')}</td>
+                    <td>${escapeHtml(row.libraryName || '')}</td>
+                    <td>${escapeHtml(row.path || '')}</td>
+                    <td>${escapeHtml(row.missingSince || '')}</td>
+                </tr>`).join('')
+            }</tbody></table>`;
+        } catch (err) {
+            reportApiError(err, 'Could not load removed items.');
+        }
+    }
+
+    async function loadJellyfinLibraries() {
+        await loadLibraryTab();
     }
 
     async function saveJellyfinLibraries() {
-        await api('/catalog/libraries', {
-            method: 'PUT',
-            body: JSON.stringify({
-                tvLibraryIds: selectedLibraryIds('jf-lib-tv'),
-                movieLibraryIds: selectedLibraryIds('jf-lib-movies'),
-                musicLibraryIds: selectedLibraryIds('jf-lib-music'),
-                musicVideoLibraryIds: selectedLibraryIds('jf-lib-musicvideos'),
-                homeVideoLibraryIds: selectedLibraryIds('jf-lib-news')
-            })
-        });
-        toast('Jellyfin libraries saved.', 'success');
-        await loadJellyfinLibraries();
+        await loadLibraryTab();
     }
 
-    async function loadCatalogMedia() {
-        try {
-            const data = await api('/catalog/media') || {};
-            renderCatalogMediaTable('jf-media-tv', data.tvShows);
-            renderCatalogMediaTable('jf-media-movies', data.movies);
-            renderCatalogMediaTable('jf-media-music', data.music);
-            renderCatalogMediaTable('jf-media-musicvideos', data.musicVideos);
-            renderCatalogMediaTable('jf-media-news', data.pastTenseNews);
-        } catch (err) {
-            reportApiError(err, 'Could not load synced catalog media.');
-        }
-    }
-
-    function renderCatalogMediaTable(containerId, rows) {
+    function renderCatalogMediaTable(containerId, rows, total) {
         const el = $(containerId);
         if (!el) {
             return;
@@ -6039,11 +6699,16 @@
 
         const items = Array.isArray(rows) ? rows : [];
         if (!items.length) {
-            el.innerHTML = '<div class="empty-state">No synced items yet. Send libraries from the Jellyfin plugin, then run catalog sync.</div>';
+            el.innerHTML = '<div class="empty-state">No synced items yet. Add a connection, refresh libraries, then sync.</div>';
             return;
         }
 
-        el.innerHTML = `<table class="data-table">
+        const count = typeof total === 'number' ? total : items.length;
+        const note = count > items.length
+            ? `<div class="meta">Showing ${items.length} of ${count}</div>`
+            : '';
+
+        el.innerHTML = `${note}<table class="data-table">
             <thead>
                 <tr>
                     <th>Title</th>
@@ -6061,10 +6726,10 @@
                 ${items.map((row) => `<tr>
                     <td>${escapeHtml(row.name || '')}</td>
                     <td>${escapeHtml(row.runtime || '')}</td>
-                    <td>${escapeHtml(row.format || '')}</td>
-                    <td>${escapeHtml(row.chapters || '')}</td>
-                    <td>${escapeHtml(row.rating || '')}</td>
-                    <td class="catalog-plot" title="${escapeHtml(row.plot || '')}">${escapeHtml(row.plot || '')}</td>
+                    <td>${escapeHtml(row.format || row.aspectRatio || '')}</td>
+                    <td>${escapeHtml(String(row.chapters ?? row.chapterCount ?? ''))}</td>
+                    <td>${escapeHtml(row.rating || row.officialRating || '')}</td>
+                    <td class="catalog-plot" title="${escapeHtml(row.plot || row.overview || '')}">${escapeHtml(row.plot || row.overview || '')}</td>
                     <td>${escapeHtml(row.stars || '')}</td>
                     <td class="catalog-path" title="${escapeHtml(row.path || '')}">${escapeHtml(row.path || '')}</td>
                     <td class="catalog-ids" title="${escapeHtml(row.ids || '')}">${escapeHtml(row.ids || '')}</td>
@@ -6885,7 +7550,7 @@
         presets: '/presets',
         lineups: '/lineups',
         list: '/lists',
-        jellyfin: '/jellyfin-library',
+        jellyfin: '/library',
         special: '/special',
         commercials: '/commercials',
         commercialbrainz: '/commercialbrainz',
@@ -6908,7 +7573,7 @@
         presets: 'Presets',
         lineups: 'Lineups',
         list: 'Lists',
-        jellyfin: 'Jellyfin Library',
+        jellyfin: 'Library',
         special: 'Special Presentation',
         commercials: 'Commercials',
         commercialbrainz: 'CommercialBrainz',
@@ -6931,7 +7596,7 @@
         presets: 'Create the Binarygeek119 ready-made lineup',
         lineups: 'Edit 24-hour schedules and playout',
         list: 'Register Jellyfin playlists as ChannelFlow lists',
-        jellyfin: 'Choose which Jellyfin libraries to sync from',
+        jellyfin: 'Media servers, libraries, remaps, and removed items',
         special: 'Recurring blocks that override the normal lineup',
         commercials: 'Jellyfin commercials, saved playlists, and channel mapping',
         commercialbrainz: 'YouTube commercial pool from CommercialBrainz',
@@ -6980,7 +7645,7 @@
             return 'list';
         }
 
-        if (path === '/jellyfin' || path === '/library') {
+        if (path === '/jellyfin' || path === '/library' || path.startsWith('/library/')) {
             return 'jellyfin';
         }
 
@@ -7022,6 +7687,7 @@
             }
 
             closeDeepChannelEditor({ skipHistory: true });
+            libraryPage = libraryPageFromPath(location.pathname);
             switchTab(tabFromPath(location.pathname), { skipHistory: true });
         });
     }
@@ -7033,10 +7699,19 @@
         }
 
         const tab = tabFromPath(path);
+        if (tab === 'jellyfin') {
+            libraryPage = libraryPageFromPath(path);
+        }
+
         switchTab(tab, { skipHistory: true });
         const app = document.getElementById('app-shell');
         if (app && !app.classList.contains('hidden') && (path === '/' || path === '/index.html' || path === '/setup')) {
             history.replaceState({ tab }, '', withAppBase(TAB_PATHS[tab]));
+        } else if (app && !app.classList.contains('hidden') && tab === 'jellyfin') {
+            const canonical = libraryPath(libraryPage);
+            if (normalizePathname(location.pathname) !== canonical) {
+                history.replaceState({ tab, libraryPage }, '', withAppBase(canonical));
+            }
         }
     }
 
@@ -7086,7 +7761,13 @@
         if (name === 'presets') loadPresets();
         if (name === 'lineups') loadLineups();
         if (name === 'list') loadLists();
-        if (name === 'jellyfin') loadJellyfinLibraries();
+        if (name === 'jellyfin') {
+            if (!options.skipHistory && tabFromPath(location.pathname) !== 'jellyfin') {
+                libraryPage = 'connections';
+            }
+
+            loadLibraryTab();
+        }
         if (name === 'tasks') {
             loadCatalogCleanup();
             api('/news/settings').then((settings) => renderNewsBulletinStatus(settings.bulletin)).catch(() => {});
@@ -7099,9 +7780,9 @@
         if (name === 'commercialbrainz') loadCommercialBrainz();
         if (name === 'youtube') loadYouTube();
 
-        const path = TAB_PATHS[name];
+        const path = name === 'jellyfin' ? libraryPath(libraryPage) : TAB_PATHS[name];
         if (!options.skipHistory && normalizePathname(location.pathname) !== path) {
-            history.pushState({ tab: name }, '', withAppBase(path));
+            history.pushState({ tab: name, libraryPage: name === 'jellyfin' ? libraryPage : undefined }, '', withAppBase(path));
         }
 
         document.title = (TAB_TITLES[name] || name) + ' · ChannelFlow-Server';
@@ -7109,15 +7790,31 @@
             detail: {
                 tab: name,
                 title: TAB_TITLES[name],
-                subtitle: name === 'commercials' ? commercialsSubtitle() : TAB_SUBTITLES[name]
+                subtitle: name === 'commercials'
+                    ? commercialsSubtitle()
+                    : name === 'jellyfin'
+                        ? librarySubtitle()
+                        : TAB_SUBTITLES[name]
             }
         }));
     }
 
-    function copyText(elementId) {
-        const el = $(elementId);
-        const text = (el && 'value' in el && el.value) ? el.value : (el?.textContent || '');
-        navigator.clipboard.writeText(text).then(() => toast('Copied to clipboard.', 'success')).catch(() => {
+    async function copySetupUrl(kind) {
+        try {
+            const urls = await api('/setup/urls');
+            const isM3u = kind === 'm3u';
+            const text = isM3u ? (urls?.m3u || '') : (urls?.epg || '');
+            if (!text) {
+                throw new Error(isM3u ? 'M3U URL is not ready.' : 'XMLTV URL is not ready.');
+            }
+            copyToClipboard(text, isM3u ? 'Copied M3U tuner URL.' : 'Copied XMLTV guide URL.');
+        } catch (err) {
+            toast(err.message || 'Could not copy URL.', 'error');
+        }
+    }
+
+    function copyToClipboard(text, successMessage) {
+        navigator.clipboard.writeText(text).then(() => toast(successMessage || 'Copied to clipboard.', 'success')).catch(() => {
             window.prompt('Copy URL:', text);
         });
     }
@@ -7222,7 +7919,27 @@
         click('btn-preview-lineup', previewLineup);
         click('btn-add-override', openOverrideForm);
         click('btn-add-list', () => openListForm().catch((e) => toast(e.message, 'error')));
-        click('btn-save-jellyfin-libraries', () => saveJellyfinLibraries().catch((e) => toast(e.message, 'error')));
+        click('btn-add-media-server', () => addMediaServer().catch((e) => toast(e.message, 'error')));
+        change('ms-kind', toggleMediaServerAddFields);
+        document.getElementById('library-inner-tabs')?.querySelectorAll('.inner-tab').forEach((tab) => {
+            tab.addEventListener('click', (event) => {
+                if (isModifiedClick(event)) {
+                    return;
+                }
+
+                event.preventDefault();
+                switchLibraryPage(tab.dataset.libraryPage);
+            });
+        });
+        click('btn-library-save-cleanup', () => {
+            const days = $('library-cleanup-grace')?.value;
+            if ($('catalog-cleanup-grace') && days != null) {
+                $('catalog-cleanup-grace').value = days;
+            }
+            saveCatalogCleanupSettings().then(() => loadLibraryRemoved()).catch((e) => toast(e.message, 'error'));
+        });
+        click('btn-library-run-cleanup', () => runCatalogCleanup().then(() => loadLibraryRemoved()).catch((e) => toast(e.message, 'error')));
+        click('btn-library-scan-local', () => runCatalogLocalScan().then(() => loadLibraryRemoved()).catch((e) => toast(e.message, 'error')));
         click('btn-add-special', () => openSpecialPresentationForm().catch((e) => toast(e.message, 'error')));
         change('special-channel-select', loadSpecialPresentations);
 
@@ -7276,10 +7993,25 @@
         click('btn-run-catalog-cleanup', () => runCatalogCleanup().catch((e) => toast(e.message, 'error')));
         click('btn-scan-local-catalog', () => runCatalogLocalScan().catch((e) => toast(e.message, 'error')));
 
-        qa('.btn-copy').forEach((btn) => btn.onclick = () => copyText(btn.dataset.copyTarget));
+        click('btn-copy-m3u', () => copySetupUrl('m3u'));
+        click('btn-copy-xmltv', () => copySetupUrl('xmltv'));
         click('btn-save-general', saveGeneralSettings);
-        click('btn-copy-api-key', copyPluginApiKey);
-        click('btn-generate-api-key', () => generatePluginApiKey().catch((e) => toast(e.message, 'error')));
+        click('btn-create-quick-pin', () => createQuickPin().catch((e) => toast(e.message, 'error')));
+        click('btn-copy-quick-pin', () => {
+            if (!quickPinValue) {
+                toast('Create a quick pin first.', 'error');
+                return;
+            }
+            copyToClipboard(quickPinValue, 'Copied quick pin.');
+        });
+        click('btn-copy-quick-pin-url', () => {
+            const url = $('quick-pin-pair-url')?.value || '';
+            if (!url) {
+                toast('Create a quick pin first.', 'error');
+                return;
+            }
+            copyToClipboard(url, 'Copied pairing URL.');
+        });
         click('btn-save-ebs', () => saveEbsSettings().catch((e) => toast(e.message, 'error')));
         const musicPacks = $('ebs-music-packs');
         if (musicPacks) {
@@ -7340,6 +8072,16 @@
         change('ebs-music-source', updateEbsFieldVisibility);
         click('btn-apply-presets', () => { void applyPresets(); });
         change('preset-numbering-mode', loadPresets);
+        click('catalog-sync-dismiss', () => {
+            catalogSyncClosed = true;
+            catalogSyncSeenRunning = false;
+            if (catalogSyncHideTimer) {
+                clearTimeout(catalogSyncHideTimer);
+                catalogSyncHideTimer = null;
+            }
+
+            hideCatalogSyncPopup();
+        });
         click('modal-close', closeModal);
         const modalBackdrop = $('modal-backdrop');
         if (modalBackdrop) {
@@ -7381,6 +8123,7 @@
         bindEvents();
         applyTabFromLocation();
         startAppClock();
+        startCatalogSyncPolling();
         return refresh().then(() => {
             const editorId = channelEditorIdFromPath(location.pathname);
             if (editorId) {

@@ -181,14 +181,14 @@ public class LogosController : ControllerBase
     }
 
     /// <summary>
-    /// Imports or refreshes the Binarygeek119 logo set from GitHub.
+    /// Re-copies the bundled Binarygeek119 logo set from this install into config.
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The synced logo set.</returns>
     [HttpPost("sets/binarygeek119/sync")]
     public async Task<ActionResult<object>> SyncBinarygeek119(CancellationToken cancellationToken)
     {
-        var set = await _logoSets.SyncBinarygeek119FromGitHubAsync(cancellationToken);
+        var set = await _logoSets.SyncBinarygeek119FromBundledAsync(cancellationToken);
         return Ok(MapLogoSet(set));
     }
 

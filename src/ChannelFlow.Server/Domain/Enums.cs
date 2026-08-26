@@ -67,7 +67,8 @@ public enum VirtualContentSource
     WeatherStar = 1,
     MusicArtSlide = 2,
     News = 3,
-    LogoBumper = 4
+    LogoBumper = 4,
+    BundledVideo = 5
 }
 
 public enum CommercialSource

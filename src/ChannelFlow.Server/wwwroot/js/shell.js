@@ -53,7 +53,7 @@
         presets: 'Presets',
         lineups: 'Lineups',
         list: 'Lists',
-        jellyfin: 'Jellyfin Library',
+        jellyfin: 'Library',
         special: 'Special Presentation',
         commercials: 'Commercials',
         commercialbrainz: 'CommercialBrainz',
@@ -76,7 +76,7 @@
         presets: 'Create the Binarygeek119 ready-made lineup',
         lineups: 'Edit 24-hour schedules and playout',
         list: 'Register Jellyfin playlists as ChannelFlow lists',
-        jellyfin: 'Choose which Jellyfin libraries to sync from',
+        jellyfin: 'Media servers, libraries, remaps, and removed items',
         special: 'Recurring blocks that override the normal lineup',
         commercials: 'Jellyfin commercials, saved playlists, and channel mapping',
         commercialbrainz: 'YouTube commercial pool from CommercialBrainz',
@@ -170,24 +170,60 @@
         history.replaceState({}, '', dest);
     }
 
-    function showLogin(needsSetup, userName) {
+    function showLogin(status, userName) {
+        const needsDatabase = !!status && !!status.needsDatabase;
+        const needsSetup = !!status && !!status.needsSetup && !needsDatabase;
         document.getElementById('login-screen').classList.remove('hidden');
         document.getElementById('app-shell').classList.add('hidden');
-        document.getElementById('auth-title').textContent = needsSetup ? 'Create admin' : 'Sign in';
-        document.getElementById('login-submit').textContent = needsSetup ? 'Create account' : 'Sign in';
+        const dbFields = document.getElementById('db-setup-fields');
+        const adminFields = document.getElementById('admin-setup-fields');
+        dbFields.classList.toggle('hidden', !needsDatabase);
+        adminFields.classList.toggle('hidden', needsDatabase);
+        document.getElementById('auth-title').textContent = needsDatabase
+            ? 'PostgreSQL'
+            : (needsSetup ? 'Create admin' : 'Sign in');
+        document.getElementById('login-submit').textContent = needsDatabase
+            ? 'Connect database'
+            : (needsSetup ? 'Create account' : 'Sign in');
         const subtitle = document.getElementById('auth-subtitle');
-        subtitle.textContent = needsSetup
-            ? 'First launch — choose a username and password for ChannelFlow-Server'
-            : '';
-        subtitle.classList.toggle('hidden', !needsSetup);
+        subtitle.textContent = needsDatabase
+            ? (status.databaseFromEnvironment
+                ? 'POSTGRES_* is set but ChannelFlow could not connect. Fix those variables and retry, or clear POSTGRES_HOST to configure here.'
+                : 'Enter a PostgreSQL server ChannelFlow can reach. The database is created if it does not exist.')
+            : (needsSetup
+                ? 'First launch — choose a username and password for ChannelFlow-Server'
+                : '');
+        subtitle.classList.toggle('hidden', !needsDatabase && !needsSetup);
+        const dbHost = document.getElementById('db-host');
+        const dbPort = document.getElementById('db-port');
+        const dbName = document.getElementById('db-name');
+        const dbUser = document.getElementById('db-user');
+        const dbPass = document.getElementById('db-pass');
+        const saved = status && status.database;
+        if (saved) {
+            dbHost.value = saved.host || dbHost.value;
+            dbPort.value = saved.port || dbPort.value;
+            dbName.value = saved.database || dbName.value;
+            dbUser.value = saved.username || dbUser.value;
+        }
+        dbHost.required = needsDatabase;
+        dbPort.required = needsDatabase;
+        dbName.required = needsDatabase;
+        dbUser.required = needsDatabase;
+        dbPass.required = needsDatabase && !saved;
         const confirmField = document.getElementById('login-pass-confirm-field');
         const confirmInput = document.getElementById('login-pass-confirm');
         const passInput = document.getElementById('login-pass');
+        const userInput = document.getElementById('login-user');
         confirmField.classList.toggle('hidden', !needsSetup);
         confirmInput.required = !!needsSetup;
         confirmInput.minLength = needsSetup ? 8 : 0;
+        userInput.required = !needsDatabase;
+        passInput.required = !needsDatabase;
         passInput.minLength = needsSetup ? 8 : 0;
         passInput.autocomplete = needsSetup ? 'new-password' : 'current-password';
+        const err = document.getElementById('login-error');
+        err.textContent = (status && status.databaseError) || '';
         if (userName) {
             document.getElementById('topbar-user').textContent = userName;
         }
@@ -196,7 +232,7 @@
         if (path === '/' || path === '/index.html') {
             history.replaceState({}, '', withAppBase('/login'));
         }
-        document.title = (needsSetup ? 'Create admin' : 'Sign in') + ' · ChannelFlow-Server';
+        document.title = (needsDatabase ? 'PostgreSQL' : (needsSetup ? 'Create admin' : 'Sign in')) + ' · ChannelFlow-Server';
     }
 
     function showApp(userName) {
@@ -209,7 +245,6 @@
         if (page && window.ChannelFlow) {
             window.ChannelFlow.init(page);
         }
-        bindPathMappings();
     }
 
     function buildDrawer() {
@@ -242,93 +277,67 @@
         syncDrawer(current);
     }
 
-    function bindPathMappings() {
-        const general = document.getElementById('tab-general');
-        if (!general || document.getElementById('path-map-card')) {
-            return;
-        }
-        const card = document.createElement('div');
-        card.className = 'section-card';
-        card.id = 'path-map-card';
-        card.innerHTML = '<div class="section-header"><h3>Library path remaps</h3></div>' +
-            '<p class="muted">Jellyfin path prefix → local ChannelFlow-Server mount prefix</p>' +
-            '<textarea id="path-mappings" rows="6" placeholder="/data/media = /media"></textarea>' +
-            '<div class="toolbar"><button type="button" id="btn-save-paths" class="raised button-submit">Save remaps</button>' +
-            '<button type="button" id="btn-test-paths" class="raised">Test remaps</button></div>' +
-            '<pre id="path-test-result"></pre>';
-        general.appendChild(card);
-        fetch(withAppBase('/api/settings/path-mappings'), { credentials: 'same-origin' })
-            .then((r) => r.json())
-            .then((rows) => {
-                document.getElementById('path-mappings').value = (rows || [])
-                    .map((r) => r.jellyfinPrefix + ' = ' + r.localPrefix)
-                    .join('\n');
-            })
-            .catch(() => { });
-        document.getElementById('btn-save-paths').onclick = async () => {
-            const mappings = document.getElementById('path-mappings').value.split('\n')
-                .map((line) => line.split('='))
-                .filter((p) => p.length >= 2)
-                .map((p, i) => ({ jellyfinPrefix: p[0].trim(), localPrefix: p.slice(1).join('=').trim(), sortOrder: i }));
-            await fetch(withAppBase('/api/settings/path-mappings'), {
-                method: 'PUT',
-                credentials: 'same-origin',
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify(mappings)
-            });
-        };
-        document.getElementById('btn-test-paths').onclick = async () => {
-            const res = await fetch(withAppBase('/api/settings/path-mappings/test'), { method: 'POST', credentials: 'same-origin' });
-            document.getElementById('path-test-result').textContent = JSON.stringify(await res.json(), null, 2);
-        };
-    }
-
     async function boot() {
         buildDrawer();
+        let status = { needsDatabase: false, needsSetup: false, authenticated: false };
         try {
-            const status = await api('/api/auth/status');
+            status = await api('/api/auth/status');
             if (!status.authenticated) {
-                showLogin(status.needsSetup);
+                showLogin(status);
             } else {
                 showApp(status.userName);
             }
+        } catch (ex) {
+            status = { needsDatabase: true, needsSetup: true, databaseError: ex.message || String(ex) };
+            showLogin(status);
+        }
 
-            document.getElementById('login-form').addEventListener('submit', async (e) => {
-                e.preventDefault();
-                const password = document.getElementById('login-pass').value;
-                const confirm = document.getElementById('login-pass-confirm').value;
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const password = document.getElementById('login-pass').value;
+            const confirm = document.getElementById('login-pass-confirm').value;
+            const err = document.getElementById('login-error');
+            try {
+                if (status.needsDatabase) {
+                    const result = await postJson('/api/auth/database', {
+                        host: document.getElementById('db-host').value,
+                        port: Number(document.getElementById('db-port').value) || 5432,
+                        database: document.getElementById('db-name').value,
+                        username: document.getElementById('db-user').value,
+                        password: document.getElementById('db-pass').value
+                    });
+                    status = Object.assign({}, status, result, { databaseError: '' });
+                    showLogin(status);
+                    err.textContent = '';
+                    return;
+                }
+                const needsSetup = status.needsSetup && !status.authenticated;
+                if (needsSetup && password !== confirm) {
+                    throw new Error('Passwords do not match.');
+                }
                 const body = {
                     userName: document.getElementById('login-user').value,
                     password,
                     rememberMe: !!document.getElementById('login-remember')?.checked
                 };
-                const err = document.getElementById('login-error');
-                try {
-                    const needsSetup = status.needsSetup && !status.authenticated;
-                    if (needsSetup && password !== confirm) {
-                        throw new Error('Passwords do not match.');
-                    }
-                    const path = needsSetup ? '/api/auth/setup' : '/api/auth/login';
-                    const result = await postJson(path, body);
-                    showApp(result.userName);
-                    err.textContent = '';
-                } catch (ex) {
-                    err.textContent = ex.message;
-                }
-            });
-            document.getElementById('btn-logout').addEventListener('click', async () => {
-                await fetch(withAppBase('/api/auth/logout'), { method: 'POST', credentials: 'same-origin' });
-                location.reload();
-            });
-            window.addEventListener('channelflow-auth-required', () => showLogin(false));
-            window.addEventListener('channelflow-tabchange', (e) => {
-                if (e.detail && e.detail.tab) {
-                    syncDrawer(e.detail.tab, e.detail);
-                }
-            });
-        } catch (ex) {
-            showLogin(true);
-        }
+                const path = needsSetup ? '/api/auth/setup' : '/api/auth/login';
+                const result = await postJson(path, body);
+                showApp(result.userName);
+                err.textContent = '';
+            } catch (ex) {
+                err.textContent = ex.message;
+            }
+        });
+        document.getElementById('btn-logout').addEventListener('click', async () => {
+            await fetch(withAppBase('/api/auth/logout'), { method: 'POST', credentials: 'same-origin' });
+            location.reload();
+        });
+        window.addEventListener('channelflow-auth-required', () => showLogin({ needsSetup: false, needsDatabase: false }));
+        window.addEventListener('channelflow-tabchange', (e) => {
+            if (e.detail && e.detail.tab) {
+                syncDrawer(e.detail.tab, e.detail);
+            }
+        });
     }
 
     document.addEventListener('DOMContentLoaded', boot);

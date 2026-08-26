@@ -32,17 +32,17 @@ public class PluginConfiguration
     public string? PublicBaseUrl { get; set; }
 
     /// <summary>
-    /// Shared secret for the Jellyfin plugin and IPTV <c>?apiKey=</c> URLs.
+    /// Shared secret for IPTV <c>?apiKey=</c> on M3U and XMLTV URLs.
     /// Generated at startup when missing and edited on the General page.
     /// </summary>
     public string? ApiKey { get; set; }
 
     /// <summary>
-    /// Jellyfin base URL the ChannelFlow plugin registered for Live TV guide refresh callbacks.
+    /// Jellyfin base URL used for Live TV guide refresh callbacks (legacy plugin installs; optional).
     /// </summary>
     public string? JellyfinPluginUrl { get; set; }
 
-    public EbsBackgroundMusicSource EbsBackgroundMusicSource { get; set; } = EbsBackgroundMusicSource.NamedLibrary;
+    public EbsBackgroundMusicSource EbsBackgroundMusicSource { get; set; } = EbsBackgroundMusicSource.LocalPacks;
 
     public string EbsBackgroundMusicLibraryName { get; set; } = "Background Music";
 
@@ -56,13 +56,12 @@ public class PluginConfiguration
 
     public bool AutoRegisterLiveTv { get; set; }
 
-    public string Binarygeek119LogoSetUrl { get; set; } =
-        "https://github.com/FlowMeadow01/ChannelFlow-logo";
+    public string Binarygeek119LogoSetUrl { get; set; } = "bundled";
 
     public string WeatherStarBaseUrl { get; set; } = "http://127.0.0.1:8080";
 
     public string WeatherStarPermalinkQuery { get; set; } =
-        "hazards=true&current-weather=true&latest-observations=true&hourly=true&hourly-graph=true&travel=true&regional-forecast=true&local-forecast=true&extended-forecast=true&almanac=true&spc-outlook=true&radar=true&stickyKiosk=true&customTextEnable=false&speed=1.00&viewMode=standard&units=us&customText=&mediaVolume=0.75&wide=false&portrait=false&enhanced=false&scanLines=false";
+        "hazards=true&current-weather=true&latest-observations=true&hourly=true&hourly-graph=true&travel=true&regional-forecast=true&local-forecast=true&extended-forecast=true&almanac=true&spc-outlook=true&radar=true&stickyKiosk=true&customTextEnable=false&speed=1.00&viewMode=standard&units=us&customText=&mediaVolume=0.75&wide=false&portrait=false&enhanced=false";
 
     public string? WeatherDefaultLocationQuery { get; set; }
 
@@ -79,7 +78,7 @@ public class PluginConfiguration
 
     public string? WeatherMusicLibraryId { get; set; }
 
-    public string WeatherMusicLibraryName { get; set; } = "Background Music";
+    public string WeatherMusicLibraryName { get; set; } = "";
 
     /// <summary>
     /// How weather alerts appear on non-weather channels: <c>off</c>, <c>cutin</c>, or <c>ticker</c>.
@@ -377,7 +376,7 @@ public class JellyfinLibrarySettings
     public List<Guid> HomeVideoLibraryIds { get; set; } = new();
 
     /// <summary>
-    /// Jellyfin libraries reported by the plugin (name, id, and type).
+    /// Libraries selected for catalog import (kept in sync from Library → Connections).
     /// </summary>
     public List<JellyfinLibraryInfo> Libraries { get; set; } = new();
 

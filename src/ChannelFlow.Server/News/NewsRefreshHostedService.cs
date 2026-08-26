@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using FinTv.Data;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -8,20 +9,32 @@ public sealed class NewsRefreshHostedService : BackgroundService
 {
     private readonly NewsHeadlineService _headlines;
     private readonly IServiceScopeFactory _scopes;
+    private readonly DatabaseInitializer _database;
     private readonly ILogger<NewsRefreshHostedService> _logger;
 
     public NewsRefreshHostedService(
         NewsHeadlineService headlines,
         IServiceScopeFactory scopes,
+        DatabaseInitializer database,
         ILogger<NewsRefreshHostedService> logger)
     {
         _headlines = headlines;
         _scopes = scopes;
+        _database = database;
         _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        try
+        {
+            await _database.WaitUntilReadyAsync(stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            return;
+        }
+
         await SafeRefreshAsync(stoppingToken);
         while (!stoppingToken.IsCancellationRequested)
         {

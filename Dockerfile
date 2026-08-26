@@ -1,15 +1,10 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0-noble-amd64 AS build
 WORKDIR /src
-RUN apt-get update && apt-get install -y --no-install-recommends python3 ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
 COPY global.json ./
 COPY src/ChannelFlow.Server/ src/ChannelFlow.Server/
-COPY scripts/ scripts/
 COPY logo.png logo-plane.png ./
-COPY favicon_io/ favicon_io/
 COPY logo.png src/ChannelFlow.Server/wwwroot/logo.png
 COPY logo-plane.png src/ChannelFlow.Server/wwwroot/logo-plane.png
-COPY favicon_io/favicon.ico favicon_io/favicon-16x16.png favicon_io/favicon-32x32.png favicon_io/apple-touch-icon.png favicon_io/android-chrome-192x192.png favicon_io/android-chrome-512x512.png src/ChannelFlow.Server/wwwroot/
 COPY vendor/ws4kp/server/fonts vendor/ws4kp/server/fonts
 COPY vendor/ws4kp/server/images/backgrounds vendor/ws4kp/server/images/backgrounds
 COPY vendor/ws4kp/server/images/icons/current-conditions vendor/ws4kp/server/images/icons/current-conditions
@@ -17,11 +12,9 @@ COPY vendor/ws4kp/server/images/maps/radar vendor/ws4kp/server/images/maps/radar
 COPY vendor/ws4kp/server/music/default vendor/ws4kp/server/music/default
 COPY vendor/ws3kp/server/fonts vendor/ws3kp/server/fonts
 COPY vendor/ws3kp/server/images/backgrounds vendor/ws3kp/server/images/backgrounds
-RUN python3 scripts/fetch-binarygeek119-logos.py src/ChannelFlow.Server/wwwroot/logos/binarygeek119 \
-    || echo "Logo fetch skipped (offline or rate-limited)"
 ARG CHANNELFLOW_VERSION=1.0.0
 ARG CHANNELFLOW_REVISION=dev
-RUN dotnet publish src/ChannelFlow.Server/ChannelFlow.Server.csproj -c Release -o /app/publish /p:SkipLogoFetch=true \
+RUN dotnet publish src/ChannelFlow.Server/ChannelFlow.Server.csproj -c Release -o /app/publish \
     /p:Version=1.0.0 \
     /p:InformationalVersion=${CHANNELFLOW_VERSION}+${CHANNELFLOW_REVISION}
 

@@ -64,12 +64,7 @@ public class ChannelUpsertRequest
 
         if (channel.ContentType == ChannelContentType.Weather)
         {
-            var location = channel.WeatherLocationQuery?.Trim();
-            if (string.IsNullOrWhiteSpace(location))
-            {
-                location = WeatherStarChannelService.ResolveDefaultLocationQuery();
-            }
-
+            var location = WeatherStarChannelService.ResolveLocationQuery(channel.WeatherLocationQuery);
             channel.WeatherLocationQuery = string.IsNullOrWhiteSpace(location) ? null : location;
         }
 

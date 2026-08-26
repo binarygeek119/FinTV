@@ -30,7 +30,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/flowmeadow01/channelflow
+          images: ghcr.io/binarygeek119/channelflow
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=
@@ -54,9 +54,9 @@ jobs:
         run: |
           visibility=$(gh api \
             -H "Accept: application/vnd.github+json" \
-            "/orgs/${{ github.repository_owner }}/packages/container/channelflow" \
+            "/users/${{ github.repository_owner }}/packages/container/channelflow" \
             --jq .visibility)
           echo "GHCR package visibility: ${visibility}"
           if [ "${visibility}" != "public" ]; then
-            echo "::warning::GitHub has no API to change GHCR visibility. Set the package to Public at https://github.com/orgs/${{ github.repository_owner }}/packages/container/channelflow/settings"
+            echo "::warning::GitHub has no API to change GHCR visibility. Set the package to Public at https://github.com/${{ github.repository_owner }}?tab=packages"
           fi

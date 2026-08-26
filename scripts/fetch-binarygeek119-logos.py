@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Download ChannelFlow channel logos from FlowMeadow01/ChannelFlow-logo."""
+"""One-shot helper to copy ChannelFlow artwork from FlowMeadow01/ChannelFlow-logo.
+
+Artwork is committed under src/ChannelFlow.Server/wwwroot/images, wwwroot/audio, and wwwroot/videos.
+Builds and runtime no longer fetch from GitHub. Run this only when vendoring new files, then sort them into those folders.
+"""
 
 from __future__ import annotations
 
@@ -99,7 +103,7 @@ def download_file(repo_path: str, destination: Path) -> None:
 
 
 def main() -> int:
-    output_dir = Path(sys.argv[1] if len(sys.argv) > 1 else "Jellyfin.Plugin.FinTV/Assets/logos/binarygeek119")
+    output_dir = Path(sys.argv[1] if len(sys.argv) > 1 else "src/ChannelFlow.Server/wwwroot/images/logos")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     files = [

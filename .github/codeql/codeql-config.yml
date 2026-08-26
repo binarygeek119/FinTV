@@ -9,4 +9,4 @@ paths:
 
 paths-ignore:
   - vendor
-  - Jellyfin.Plugin.FinTV
+  - legacy

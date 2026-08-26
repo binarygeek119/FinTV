@@ -1,0 +1,16 @@
+{
+  "profiles": {
+    "ChannelFlow.Server": {
+      "commandName": "Project",
+      "applicationUrl": "http://127.0.0.1:8097",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "DOTNET_hostBuilder__reloadConfigOnChange": "false",
+        "PORT": "8097",
+        "TZ": "America/Chicago",
+        "FFMPEG_HWACCEL": "vaapi",
+        "FFMPEG_VAAPI_DEVICE": "/dev/dri/renderD128"
+      }
+    }
+  }
+}

@@ -10,19 +10,75 @@ namespace FinTv.Data;
 public class DatabaseInitializer : IHostedService
 {
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly PostgresConnectionStore _postgres;
     private readonly ILogger<DatabaseInitializer> _logger;
+    private readonly SemaphoreSlim _init = new(1, 1);
+    private volatile bool _ready;
 
-    public DatabaseInitializer(IServiceScopeFactory scopeFactory, ILogger<DatabaseInitializer> logger)
+    public DatabaseInitializer(
+        IServiceScopeFactory scopeFactory,
+        PostgresConnectionStore postgres,
+        ILogger<DatabaseInitializer> logger)
     {
         _scopeFactory = scopeFactory;
+        _postgres = postgres;
         _logger = logger;
+    }
+
+    public bool IsReady => _ready;
+
+    public async Task WaitUntilReadyAsync(CancellationToken cancellationToken)
+    {
+        while (!_ready)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+        }
     }
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
-        await db.Database.EnsureCreatedAsync(cancellationToken);
+        try
+        {
+            if (!await TryInitializeAsync(cancellationToken))
+            {
+                _logger.LogInformation(
+                    "PostgreSQL is not configured yet. Open the ChannelFlow web UI to finish first-run database setup.");
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                ex,
+                "PostgreSQL is not reachable yet. Open the ChannelFlow web UI to finish database setup.");
+        }
+    }
+
+    public async Task<bool> TryInitializeAsync(CancellationToken cancellationToken)
+    {
+        if (!_postgres.IsConfigured)
+        {
+            return false;
+        }
+
+        if (_ready)
+        {
+            return true;
+        }
+
+        await _init.WaitAsync(cancellationToken);
+        try
+        {
+            if (_ready)
+            {
+                return true;
+            }
+
+            try
+            {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
+            await db.Database.EnsureCreatedAsync(cancellationToken);
         await CatalogSchema.EnsureEpisodesTableAsync(db, cancellationToken);
         await EnsureNewsColumnsAsync(db, cancellationToken);
         await RenameFlowWireChannelAsync(db, cancellationToken);
@@ -33,6 +89,7 @@ public class DatabaseInitializer : IHostedService
         await EnsureCatalogTablesAsync(db, cancellationToken);
         await UpgradeTvShowsToEpisodesAsync(db, cancellationToken);
         await EnsureCatalogMissingColumnsAsync(db, cancellationToken);
+        await EnsureMediaServerSchemaAsync(db, cancellationToken);
         var typedCatalog = scope.ServiceProvider.GetRequiredService<CatalogTypedStore>();
         await typedCatalog.BackfillFromMediaItemsAsync(cancellationToken);
         await typedCatalog.NormalizeAspectRatiosAsync(cancellationToken);
@@ -73,6 +130,7 @@ public class DatabaseInitializer : IHostedService
             runtime.Configuration.Normalization ?? Configuration.NormalizationSettings.CreateDefault(),
             encoding.Describe().HardwareAcceleration);
         normalization.ApplyFromSaved(clampedNorm);
+        await AssignRandomWeatherLocationsAsync(db, runtime, cancellationToken);
 
         try
         {
@@ -85,9 +143,58 @@ public class DatabaseInitializer : IHostedService
         }
 
         _logger.LogInformation("ChannelFlow-Server database initialized");
+            _ready = true;
+            return true;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException and not InvalidOperationException)
+            {
+                _logger.LogWarning(ex, "PostgreSQL initialize failed");
+                throw new InvalidOperationException("Could not initialize the database. " + ex.Message, ex);
+            }
+        }
+        finally
+        {
+            _init.Release();
+        }
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    private static async Task AssignRandomWeatherLocationsAsync(
+        FinTvDbContext db,
+        FinTvRuntime runtime,
+        CancellationToken cancellationToken)
+    {
+        var channels = await db.Channels
+            .Where(c => c.ContentType == Domain.ChannelContentType.Weather)
+            .ToListAsync(cancellationToken);
+        var used = new List<string>();
+        foreach (var channel in channels)
+        {
+            if (!WeatherStarChannelService.IsUnsetOrLegacyLocation(channel.WeatherLocationQuery))
+            {
+                used.Add(channel.WeatherLocationQuery!.Trim());
+                continue;
+            }
+
+            var location = WeatherStarChannelService.PickRandomLocation(used);
+            channel.WeatherLocationQuery = location;
+            used.Add(location);
+        }
+
+        if (WeatherStarChannelService.IsUnsetOrLegacyLocation(runtime.Configuration.WeatherDefaultLocationQuery))
+        {
+            runtime.Configuration.WeatherDefaultLocationQuery = used.Count > 0
+                ? used[0]
+                : WeatherStarChannelService.PickRandomLocation();
+            runtime.SaveConfiguration();
+        }
+
+        if (db.ChangeTracker.HasChanges())
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+    }
 
     private async Task EnsureNewsColumnsAsync(FinTvDbContext db, CancellationToken cancellationToken)
     {
@@ -337,8 +444,10 @@ public class DatabaseInitializer : IHostedService
                 $"""ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS "Width" integer NULL""",
                 $"""ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS "Height" integer NULL""",
                 $"""ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS "AspectRatio" text NULL""",
+                $"""ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS "SourceConnectionId" uuid NULL""",
                 $"""CREATE INDEX IF NOT EXISTS "IX_{table}_IsMissing" ON "{table}" ("IsMissing")""",
-                $"""CREATE INDEX IF NOT EXISTS "IX_{table}_AspectRatio" ON "{table}" ("AspectRatio")"""
+                $"""CREATE INDEX IF NOT EXISTS "IX_{table}_AspectRatio" ON "{table}" ("AspectRatio")""",
+                $"""CREATE INDEX IF NOT EXISTS "IX_{table}_SourceConnectionId" ON "{table}" ("SourceConnectionId")"""
             };
 
             foreach (var sql in statements)
@@ -405,6 +514,62 @@ public class DatabaseInitializer : IHostedService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "TV catalog episode table upgrade failed");
+        }
+    }
+
+    private async Task EnsureMediaServerSchemaAsync(FinTvDbContext db, CancellationToken cancellationToken)
+    {
+        var statements = new[]
+        {
+            """ALTER TABLE "PathMappings" ADD COLUMN IF NOT EXISTS "ConnectionId" uuid NULL""",
+            """CREATE INDEX IF NOT EXISTS "IX_PathMappings_ConnectionId" ON "PathMappings" ("ConnectionId")""",
+            """
+            CREATE TABLE IF NOT EXISTS "MediaServerConnections" (
+                "Id" uuid NOT NULL,
+                "Kind" integer NOT NULL,
+                "Name" text NOT NULL,
+                "BaseUrl" text NULL,
+                "AccessToken" text NULL,
+                "UserId" text NULL,
+                "SidecarRoot" text NULL,
+                "Enabled" boolean NOT NULL DEFAULT TRUE,
+                "SortOrder" integer NOT NULL DEFAULT 0,
+                "LastHealthUtc" timestamp with time zone NULL,
+                "LastHealthOk" boolean NULL,
+                "LastHealthMessage" text NULL,
+                "CreatedAt" timestamp with time zone NOT NULL DEFAULT NOW(),
+                CONSTRAINT "PK_MediaServerConnections" PRIMARY KEY ("Id")
+            )
+            """,
+            """CREATE INDEX IF NOT EXISTS "IX_MediaServerConnections_Kind" ON "MediaServerConnections" ("Kind")""",
+            """
+            CREATE TABLE IF NOT EXISTS "MediaServerLibraries" (
+                "Id" uuid NOT NULL,
+                "ConnectionId" uuid NOT NULL,
+                "ExternalId" text NOT NULL,
+                "Name" text NOT NULL,
+                "CollectionType" text NULL,
+                "SyncEnabled" boolean NOT NULL DEFAULT TRUE,
+                "ItemCount" integer NOT NULL DEFAULT 0,
+                "SortOrder" integer NOT NULL DEFAULT 0,
+                CONSTRAINT "PK_MediaServerLibraries" PRIMARY KEY ("Id"),
+                CONSTRAINT "FK_MediaServerLibraries_Connections" FOREIGN KEY ("ConnectionId")
+                    REFERENCES "MediaServerConnections" ("Id") ON DELETE CASCADE
+            )
+            """,
+            """CREATE UNIQUE INDEX IF NOT EXISTS "IX_MediaServerLibraries_ConnectionId_ExternalId" ON "MediaServerLibraries" ("ConnectionId", "ExternalId")"""
+        };
+
+        foreach (var sql in statements)
+        {
+            try
+            {
+                await CatalogSchema.ExecuteAsync(db, sql, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Media server schema ensure skipped for {Sql}", sql);
+            }
         }
     }
 }

@@ -41,7 +41,7 @@ jobs:
 
       - name: Build ChannelFlow-Server
         if: matrix.language == 'csharp'
-        run: dotnet build src/ChannelFlow.Server/ChannelFlow.Server.csproj -c Release /p:SkipLogoFetch=true
+        run: dotnet build src/ChannelFlow.Server/ChannelFlow.Server.csproj -c Release
 
       - uses: github/codeql-action/analyze@v4
         with:
@@ -122,7 +122,7 @@ jobs:
           scan-ref: .
           severity: CRITICAL,HIGH
           ignore-unfixed: true
-          skip-dirs: vendor,Jellyfin.Plugin.FinTV
+          skip-dirs: vendor,legacy
           format: sarif
           output: trivy-results.sarif
           exit-code: "1"

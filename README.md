@@ -6,54 +6,57 @@
 
 Simulated live TV for [Jellyfin](https://jellyfin.org). This repository is **ChannelFlow-Server** — a .NET 10 app with a red Jellyfin-style Web UI, PostgreSQL, local library playback, WeatherStar, and news.
 
-Home: [github.com/FlowMeadow01/ChannelFlow](https://github.com/FlowMeadow01/ChannelFlow)
+Home: [github.com/binarygeek119/ChannelFlow](https://github.com/binarygeek119/ChannelFlow)
 
-The Jellyfin plugin (GUID `f4e8a2b1-3c5d-4e6f-9a8b-7c6d5e4f3a2b`) syncs library metadata/paths/chapters, registers Live TV M3U + XMLTV, and runs blackframe chapter detection.
+ChannelFlow talks to media servers itself (Jellyfin now; Emby and Plex connections are placeholders). Add Live TV in Jellyfin with this server's M3U and XMLTV URLs from the **Copy M3U** and **Copy XMLTV** buttons at the top of the web UI.
 
 ## What runs where
 
-| ChannelFlow-Server (this repo) | ChannelFlow Plugin |
+| ChannelFlow-Server | Jellyfin / other players |
 | --- | --- |
-| Channels, lineups, playout, FFmpeg MPEG-TS | Server URL + API key |
-| Commercials / CommercialBrainz | Catalog metadata sync (IDs, tags, duration, **path**, **chapters**) |
-| EBS, logos, AI lineups | Live TV tuner + XMLTV registration |
-| WeatherStar 4000/3000 (native compositor, vendored ws4kp/ws3kp) | Blackframe scan + optional write chapters |
+| Channels, lineups, playout, FFmpeg MPEG-TS | Add M3U + XMLTV as a Live TV tuner |
+| Library connections (Jellyfin, sidecar .nfo, Emby/Plex later) | Same media files ChannelFlow can read |
+| Commercials / CommercialBrainz | |
+| EBS, logos, AI lineups | |
+| WeatherStar 4000/3000 (native compositor, vendored ws4kp/ws3kp) | |
 | News RSS + TTS channel | |
 | Web UI (username/password) | |
 
-Playback reads **local files**. Configure **path remaps** in Settings (Jellyfin prefix → ChannelFlow-Server prefix), for example `/data/media` → `/media`.
+Playback reads **local files**. On **Library → Connections**, set path remaps per server (media-server prefix → ChannelFlow mount), for example `/data/media` → `/media`.
 
 ## Requirements
 
 - .NET 10 SDK to build, or a self-contained publish from `scripts/publish-native.sh`
 - PostgreSQL (your own instance)
 - FFmpeg on PATH (or set `FFMPEG_PATH`). The Docker image is based on [ersatztv-ffmpeg](https://github.com/ErsatzTV/ErsatzTV-ffmpeg) (`/usr/local/bin/ffmpeg`), same stack as [ErsatzTV/legacy](https://github.com/ErsatzTV/legacy).
-- Jellyfin 12 + the ChannelFlow plugin
+- Jellyfin 10+ (or sidecar folders). Emby and Plex connections can be saved now; catalog sync for those comes later
 - The same media paths readable by Jellyfin and ChannelFlow-Server
 
 ## Run
 
 ```bash
 cp .env.example .env
-# set POSTGRES_* and JELLYFIN_URL for your host
+# optional: set JELLYFIN_URL. PostgreSQL can be configured in the web UI on first launch.
 dotnet publish src/ChannelFlow.Server/ChannelFlow.Server.csproj -c Release
 # or: bash scripts/publish-native.sh linux-x64
 ```
 
-Load the `.env` values into the process environment, then run `ChannelFlow.Server` (from `bin/.../publish` or `artifacts/native/linux-x64`). Listen port is `PORT` (default `8097`). Config, logos, weather, and news files live under `CHANNELFLOW_CONFIG` (default `config` next to the app).
+Load the `.env` values into the process environment, then run `ChannelFlow.Server` (from `bin/.../publish` or `artifacts/native/linux-x64`). Listen port is `PORT` (default `8097`). Config, logos, weather, and news files live under `CHANNELFLOW_CONFIG` (default `config` next to the app). Postgres connection details are stored in `database.json` in that folder unless `POSTGRES_HOST` is set (Docker/Unraid). Channel bugs ship in `src/ChannelFlow.Server/wwwroot/images/logos` (copied into the config logos folder on startup). EBS graphics and Off Air slates are in `wwwroot/images/media`, alert/news audio in `wwwroot/audio`, and bundled bumpers in `wwwroot/videos`.
+
+Local from source (Fedora/podman): `bash scripts/dev.sh` starts Postgres on `127.0.0.1:5433` and `dotnet run` on `http://127.0.0.1:8097`.
 
 Then:
 
-1. Open `http://<host>:8097` and create the admin username and password on first launch
-2. Copy the plugin API key from **General** (created automatically on first boot)
-3. Add path remaps under General (Jellyfin prefix → the local path ChannelFlow-Server can read)
-4. Install the ChannelFlow plugin, set Server URL + API key, run **ChannelFlow Catalog Sync**
+1. Open `http://<host>:8097`. On first launch, enter PostgreSQL host/port/database/user/password, then create the admin username and password
+2. Open **Library → Connections**. Add a Jellyfin server (URL + API key) or a sidecar folder of local files with `.nfo` metadata. Use **Test server**, refresh libraries, then **Sync catalog**
+3. Set path remaps on that server card so ChannelFlow can open the same files
+4. Copy the M3U and XMLTV URLs from the top of the web UI. In Jellyfin Live TV, add those as a tuner and guide
 
-Items removed from Jellyfin, or whose remapped local file is gone, are marked missing, then deleted by **Tasks → Catalog cleanup** after the grace period (default 7 days). **Scan Local Files** checks each catalog path after remap.
+Items removed from a media server, or whose remapped local file is gone, are marked missing, then deleted by **Library → Removed items** (or Tasks) after the grace period (default 7 days). **Scan local files** checks each catalog path after remap.
 
 Set `FFMPEG_HWACCEL=vaapi` or `qsv` and pass `/dev/dri` access for Intel VAAPI / Quick Sync. The container ships ersatztv-ffmpeg 8.1.2 (VAAPI, QSV, NVENC, libva 2.23).
 
-The plugin registers the Live TV tuner and XMLTV guide automatically when you set the ChannelFlow-Server URL and API key.
+In Jellyfin, add ChannelFlow's M3U and XMLTV URLs from the top of the web UI under Live TV (tuner + guide).
 
 ## Reverse proxy
 

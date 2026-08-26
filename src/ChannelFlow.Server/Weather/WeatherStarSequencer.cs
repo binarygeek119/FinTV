@@ -5,7 +5,6 @@ namespace FinTv.Weather;
 public sealed class WeatherStarSequencer
 {
     private readonly IReadOnlyList<Slot> _slots;
-    private readonly bool _scanlines;
     public readonly WeatherStarDockerVariant Skin;
     public readonly bool Wide;
 
@@ -13,14 +12,12 @@ public sealed class WeatherStarSequencer
         string? permalinkQuery,
         WeatherStarDockerVariant skin,
         bool wide,
-        bool channelScanlines,
         bool hasAlerts = true,
         int localForecastPages = 1)
     {
         Skin = skin;
         Wide = wide;
         var flags = Parse(permalinkQuery);
-        _scanlines = channelScanlines || Flag(flags, "scanLines", false);
         var speed = 1.0;
         if (flags.TryGetValue("speed", out var speedRaw) && double.TryParse(speedRaw, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsed))
         {
@@ -63,8 +60,6 @@ public sealed class WeatherStarSequencer
             ? [new Slot(WeatherStarScreen.Current, screen), new Slot(WeatherStarScreen.LocalForecast, week)]
             : slots;
     }
-
-    public bool Scanlines => _scanlines;
 
     public (WeatherStarScreen Screen, int RadarIndex, int Repeat) At(TimeSpan elapsed)
     {

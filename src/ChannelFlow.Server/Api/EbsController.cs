@@ -42,7 +42,7 @@ public class EbsController : ControllerBase
             ebsDisplayMode = (int)(config?.EbsDisplayMode ?? EbsDisplayMode.SlateImage),
             ebsAudioMode = (int)(config?.EbsAudioMode ?? EbsAudioMode.BackgroundMusic),
             ebsSlateVariant = (int)(config?.EbsSlateVariant ?? EbsSlateVariant.Usa),
-            ebsBackgroundMusicSource = (int)(config?.EbsBackgroundMusicSource ?? EbsBackgroundMusicSource.NamedLibrary),
+            ebsBackgroundMusicSource = (int)(config?.EbsBackgroundMusicSource ?? EbsBackgroundMusicSource.LocalPacks),
             ebsBackgroundMusicLibraryName = config?.EbsBackgroundMusicLibraryName ?? "Background Music",
             ebsBackgroundMusicLibraryId = config?.EbsBackgroundMusicLibraryId ?? string.Empty,
             customSlates = _ebs.GetCustomSlateStatus(),

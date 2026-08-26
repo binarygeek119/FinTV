@@ -1,0 +1,23 @@
+# Local development Postgres. System PostgreSQL already occupies 5432, so this
+# listens on 127.0.0.1:5433. Start with: podman run (see scripts/dev.sh) or
+# `podman compose up -d` if the compose plugin is installed.
+services:
+  postgres:
+    image: docker.io/library/postgres:16-alpine
+    container_name: channelflow-postgres
+    environment:
+      POSTGRES_DB: fintv
+      POSTGRES_USER: fintv
+      POSTGRES_PASSWORD: fintv
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - channelflow-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fintv -d fintv"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  channelflow-pgdata:
