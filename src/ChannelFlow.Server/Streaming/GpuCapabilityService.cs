@@ -286,6 +286,14 @@ public sealed class GpuCapabilityService
         var hasH264Vaapi = encoders.Contains("h264_vaapi");
         var hasMpeg2Vaapi = encoders.Contains("mpeg2_vaapi");
         var hasH264Nvenc = encoders.Contains("h264_nvenc");
+        _logger.LogInformation(
+            "ffmpeg at {Path} listed {Count} encoders (h264_vaapi={Vaapi}, mpeg2_vaapi={Mpeg2}, h264_nvenc={Nvenc}, libx264={X264})",
+            _ffmpeg.EncoderPath,
+            encoders.Count,
+            hasH264Vaapi,
+            hasMpeg2Vaapi,
+            hasH264Nvenc,
+            hasLibx264);
 
         var software = new GpuFormatLimits(
             Filter(AllVideoCodecs, hasMpeg2Video ? ["h264", "mpeg2"] : ["h264"]),
@@ -327,9 +335,7 @@ public sealed class GpuCapabilityService
                         string.Join(", ", vainfo.DecodeCodecs.OrderBy(item => item, StringComparer.OrdinalIgnoreCase)));
                 }
 
-                var vaapi = hasH264Vaapi
-                    ? await ProbeVaapiDeviceAsync(path, hasMpeg2Vaapi, vainfo, cancellationToken)
-                    : null;
+                var vaapi = await ProbeVaapiDeviceAsync(path, hasMpeg2Vaapi, vainfo, cancellationToken);
                 if (vaapi is not null)
                 {
                     _encodeVaapiDevices.Add(path);
@@ -346,7 +352,7 @@ public sealed class GpuCapabilityService
                         : $"{path} ({vainfo.Driver}, no H.264 encode)"));
             }
 
-            if (vaapiDevices.Count > 0 && hasH264Vaapi)
+            if (vaapiDevices.Count > 0 && (_encodeVaapiDevices.Count > 0 || hasH264Vaapi))
             {
                 if (!formats.ContainsKey("vaapi"))
                 {
@@ -359,6 +365,12 @@ public sealed class GpuCapabilityService
                     true,
                     FilterEncoders(["auto", "h264_vaapi"]),
                     vaapiDevices));
+            }
+            else if (discovered.Count > 0 && !hasH264Vaapi)
+            {
+                _logger.LogWarning(
+                    "Render nodes exist but ffmpeg did not list h264_vaapi and no device encoded a test frame. Encoder={Path}",
+                    _ffmpeg.EncoderPath);
             }
         }
 
@@ -429,6 +441,11 @@ public sealed class GpuCapabilityService
             h264.UnionWith(["baseline", "main", "high"]);
         }
 
+        var deviceArgs = HardwareVaapiArgs(device);
+        // Live encode omits -profile:v (Intel iHD rejects an explicit Main/High on
+        // real surfaces). Probe the same way first so a working GPU is not marked
+        // software-only.
+        var canEncode = await CanEncodeAsync(deviceArgs, "h264_vaapi", null, 640, 360, "30", cancellationToken);
         var confirmed = new List<string>();
         foreach (var profile in AllH264Profiles.Select(item => item.Value))
         {
@@ -438,40 +455,31 @@ public sealed class GpuCapabilityService
             }
 
             var ffmpegProfile = profile == "baseline" ? "constrained_baseline" : profile;
-            if (await CanEncodeAsync(
-                    HardwareVaapiArgs(device),
-                    "h264_vaapi",
-                    ffmpegProfile,
-                    640,
-                    360,
-                    "30",
-                    cancellationToken))
+            if (await CanEncodeAsync(deviceArgs, "h264_vaapi", ffmpegProfile, 640, 360, "30", cancellationToken))
             {
                 confirmed.Add(profile);
             }
         }
 
-        if (confirmed.Count == 0)
+        if (!canEncode && confirmed.Count == 0)
         {
-            _logger.LogWarning("VAAPI device {Device} has no usable H.264 encode profile", device);
+            _logger.LogWarning("VAAPI device {Device} has no usable H.264 encode", device);
             return null;
         }
 
-        var workingProfile = confirmed.Contains("main") ? "main"
-            : confirmed.Contains("high") ? "high"
-            : confirmed[0];
-        var ffmpegWorking = workingProfile == "baseline" ? "constrained_baseline" : workingProfile;
-        var allow1080 = await CanEncodeAsync(
-            HardwareVaapiArgs(device), "h264_vaapi", ffmpegWorking, 1920, 1080, "30", cancellationToken);
-        var allow720 = allow1080 || await CanEncodeAsync(
-            HardwareVaapiArgs(device), "h264_vaapi", ffmpegWorking, 1280, 720, "30", cancellationToken);
-        var allow60 = allow1080 && await CanEncodeAsync(
-            HardwareVaapiArgs(device), "h264_vaapi", ffmpegWorking, 1920, 1080, "60", cancellationToken);
+        if (confirmed.Count == 0)
+        {
+            confirmed.AddRange(h264.Contains("main") ? ["main"] : h264);
+        }
+
+        var allow1080 = await CanEncodeAsync(deviceArgs, "h264_vaapi", null, 1920, 1080, "30", cancellationToken);
+        var allow720 = allow1080 || await CanEncodeAsync(deviceArgs, "h264_vaapi", null, 1280, 720, "30", cancellationToken);
+        var allow60 = allow1080 && await CanEncodeAsync(deviceArgs, "h264_vaapi", null, 1920, 1080, "60", cancellationToken);
 
         if (mpeg2 && hasMpeg2Vaapi)
         {
             mpeg2 = await CanEncodeAsync(
-                HardwareVaapiArgs(device), "mpeg2_vaapi", null, 640, 360, "30", cancellationToken);
+                deviceArgs, "mpeg2_vaapi", null, 640, 360, "30", cancellationToken);
         }
         else
         {
@@ -559,14 +567,27 @@ public sealed class GpuCapabilityService
         var (ok, stderr) = await RunAsync(_ffmpeg.EncoderPath, args, TimeSpan.FromSeconds(8), cancellationToken);
         if (!ok)
         {
-            _logger.LogDebug(
-                "Encode probe failed encoder={Encoder} profile={Profile} {Width}x{Height}@{Rate}: {Error}",
-                encoder,
-                profile,
-                width,
-                height,
-                frameRate,
-                TrimError(stderr));
+            if (profile is null)
+            {
+                _logger.LogWarning(
+                    "Encode probe failed encoder={Encoder} {Width}x{Height}@{Rate}: {Error}",
+                    encoder,
+                    width,
+                    height,
+                    frameRate,
+                    TrimError(stderr));
+            }
+            else
+            {
+                _logger.LogDebug(
+                    "Encode probe failed encoder={Encoder} profile={Profile} {Width}x{Height}@{Rate}: {Error}",
+                    encoder,
+                    profile,
+                    width,
+                    height,
+                    frameRate,
+                    TrimError(stderr));
+            }
         }
 
         return ok;
@@ -578,7 +599,7 @@ public sealed class GpuCapabilityService
         var (_, text) = await RunAsync(
             _ffmpeg.EncoderPath,
             ["-hide_banner", "-encoders"],
-            TimeSpan.FromSeconds(8),
+            TimeSpan.FromSeconds(20),
             cancellationToken);
         foreach (var line in text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
         {
@@ -586,6 +607,14 @@ public sealed class GpuCapabilityService
             if (match.Success)
             {
                 names.Add(match.Groups[1].Value);
+            }
+        }
+
+        foreach (var known in new[] { "h264_vaapi", "mpeg2_vaapi", "h264_nvenc", "libx264", "mpeg2video" })
+        {
+            if (text.Contains(known, StringComparison.OrdinalIgnoreCase))
+            {
+                names.Add(known);
             }
         }
 
