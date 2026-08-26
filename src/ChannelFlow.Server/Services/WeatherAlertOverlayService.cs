@@ -156,17 +156,39 @@ public sealed class WeatherAlertOverlayService
 
         BeginBackgroundPrerender();
 
-        byte[] jpeg;
+        byte[] jpeg = [];
+        byte[] tickerPng = [];
+        var tickerHasText = false;
         try
         {
-            jpeg = await RenderHazardsPreviewAsync(alerts, cancellationToken);
+            if (mode == WeatherAlertOverlayMode.CutIn)
+            {
+                jpeg = await RenderHazardsPreviewAsync(alerts, cancellationToken);
+            }
+            else
+            {
+                var graphic = await GetPrerenderedGraphicAsync(cancellationToken);
+                if (!string.IsNullOrWhiteSpace(graphic) && File.Exists(graphic))
+                {
+                    tickerPng = await File.ReadAllBytesAsync(graphic, cancellationToken);
+                    tickerHasText = true;
+                }
+                else
+                {
+                    var strip = EbsService.ResolveGraphic(EbsService.StripFileName);
+                    if (!string.IsNullOrWhiteSpace(strip) && File.Exists(strip))
+                    {
+                        tickerPng = await File.ReadAllBytesAsync(strip, cancellationToken);
+                    }
+                }
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            jpeg = [];
+            _logger.LogWarning(ex, "EBS test preview graphic failed");
         }
 
-        return new WeatherAlertTestPreview(mode, duration, alerts, ticker, jpeg);
+        return new WeatherAlertTestPreview(mode, duration, alerts, ticker, jpeg, tickerPng, tickerHasText);
     }
 
     public bool HasActiveTest => GetActiveSimulation() is not null;
@@ -400,9 +422,12 @@ public sealed class WeatherAlertOverlayService
             var output = Path.Combine(folder, "alert-ticker.png");
             var barH = TickerBarHeight(PrerenderHeight);
             var fontSize = TickerFontSize(PrerenderHeight);
-            var canvasW = Even(Math.Max(PrerenderWidth, PrerenderWidth + (int)(ticker.Length * fontSize * 0.55)));
+            var canvasW = Even(Math.Max(PrerenderWidth * 2, PrerenderWidth + (int)(ticker.Length * fontSize * 0.55)));
             var vf =
-                $"scale=-2:{barH},pad={canvasW}:{barH}:0:(oh-ih)/2:color=0xc41e3a," +
+                $"scale=-2:{barH}," +
+                "split=4[sa][sb][sc][sd];[sa][sb][sc][sd]hstack=inputs=4," +
+                $"pad=w='max(iw\\,{canvasW})':h={barH}:x=0:y=0:color=0xc41e3a," +
+                $"crop={canvasW}:{barH}:0:0," +
                 $"drawtext=fontfile='{EscapeFilterPath(font)}':textfile='{EscapeFilterPath(textPath)}':expansion=none:" +
                 $"fontcolor=white:fontsize={fontSize}:x=48:y=(h-text_h)/2";
             return await RunStillPrerenderAsync(ffmpeg, strip, vf, output, cancellationToken);
@@ -714,4 +739,6 @@ public sealed record WeatherAlertTestPreview(
     TimeSpan Duration,
     IReadOnlyList<WeatherAlert> Alerts,
     string? TickerText,
-    byte[] HazardsJpeg);
+    byte[] HazardsJpeg,
+    byte[] TickerPng,
+    bool TickerHasText);

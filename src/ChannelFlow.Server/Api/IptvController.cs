@@ -118,13 +118,15 @@ public class IptvController : ControllerBase
     /// </summary>
     /// <param name="itemId">Jellyfin item identifier (movie, series, or episode).</param>
     /// <param name="guideMetadata">Guide metadata service.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Poster image file.</returns>
     [HttpGet("poster/{itemId:guid}")]
-    public IActionResult GetPoster(
+    public async Task<IActionResult> GetPoster(
         Guid itemId,
-        [FromServices] GuideMetadataService guideMetadata)
+        [FromServices] GuideMetadataService guideMetadata,
+        CancellationToken cancellationToken)
     {
-        var path = guideMetadata.GetPosterImagePath(itemId);
+        var path = await guideMetadata.GetOrFetchPosterImagePathAsync(itemId, cancellationToken);
         if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path))
         {
             return NotFound();

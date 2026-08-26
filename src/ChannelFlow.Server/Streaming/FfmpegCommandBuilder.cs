@@ -136,7 +136,8 @@ public class FfmpegCommandBuilder
 
         args.AddRange(context.HardwareDeviceArgs);
         var isPipe = string.Equals(inputPath, "pipe:0", StringComparison.Ordinal);
-        if (!isPipe)
+        // YouTube/HLS pipes and googlevideo URLs are not safe for QSV/VAAPI decode (SIGSEGV 139).
+        if (!isPipe && !isRemoteInput)
         {
             args.AddRange(context.HardwareDecodeArgs);
         }
@@ -146,8 +147,8 @@ public class FfmpegCommandBuilder
             args.AddRange(new[]
             {
                 "-fflags", "+genpts+discardcorrupt",
-                "-probesize", "32768",
-                "-analyzeduration", "500000"
+                "-probesize", "5000000",
+                "-analyzeduration", "10000000"
             });
         }
         else
@@ -861,7 +862,9 @@ public class FfmpegCommandBuilder
             : encoder.Contains("vaapi", StringComparison.OrdinalIgnoreCase) ? "vaapi"
             : null;
         var codec = ResolveSourceVideoCodec(mediaPath, sourceVideoCodec);
-        var decodeArgs = _encoding.DecodeArgsForSource(codec, stayOnGpu: filterKind is not null);
+        var decodeArgs = LooksLikeLocalVideo(mediaPath)
+            ? _encoding.DecodeArgsForSource(codec, stayOnGpu: filterKind is not null)
+            : [];
         if ((_encoding.UseVaapi || _encoding.UseQsv)
             && _encoding.HardwareDecodeArgs.Count > 0
             && decodeArgs.Count == 0
@@ -1177,8 +1180,8 @@ public class FfmpegCommandBuilder
         if (tickerPng && gpuFilters is null)
         {
             graph = graph.Replace("[vout]", "[vpre]", StringComparison.Ordinal)
-                + $";{BuildCpuTickerMovie(alertTickerPath!)}[ticker]"
-                + $";[vpre][ticker]overlay=x='W-mod(t*90\\,W+w)':y=H-h:eof_action=repeat:repeatlast=1[vout]";
+                + $";{BuildCpuTickerMovie(width, height, alertTickerPath!)}[ticker]"
+                + $";[vpre][ticker]overlay=x=0:y=H-h:eof_action=repeat:repeatlast=1[vout]";
         }
 
         if (!string.IsNullOrEmpty(skipExpr) && sandwich is null)
@@ -1281,7 +1284,7 @@ public class FfmpegCommandBuilder
         if (gpuTicker)
         {
             graph += ";" + BuildGpuTickerSource(width, height, alertTickerPath!);
-            graph += $";[{current}][ticker]overlay_vaapi=x='W-mod(t*90\\,W+w)':y=H-h{GpuEncodeMap(gpuFilters)}[vout]";
+            graph += $";[{current}][ticker]overlay_vaapi=x=0:y=H-h{GpuEncodeMap(gpuFilters)}[vout]";
         }
 
         return graph;
@@ -1289,18 +1292,31 @@ public class FfmpegCommandBuilder
 
     private string BuildGpuTickerSource(int width, int height, string alertTickerPath)
     {
-        _ = width;
-        _ = height;
         var fps = _normalization.Current.FpsOutput;
         var escaped = EscapeFilterPath(alertTickerPath);
-        return $"movie='{escaped}':loop=-1,fps={fps},format=nv12,hwupload=extra_hw_frames=64[ticker]";
+        return $"movie='{escaped}':loop=0,{TickerFillScroll(width, height, fps)},format=nv12,hwupload=extra_hw_frames=64[ticker]";
     }
 
-    private string BuildCpuTickerMovie(string alertTickerPath)
+    private string BuildCpuTickerMovie(int width, int height, string alertTickerPath)
     {
         var fps = _normalization.Current.FpsOutput;
         var escaped = EscapeFilterPath(alertTickerPath);
-        return $"movie='{escaped}':loop=-1,fps={fps}";
+        return $"movie='{escaped}':loop=0,{TickerFillScroll(width, height, fps)}";
+    }
+
+    /// <summary>
+    /// Fit the seamless ticker PNG to bar height, stretch only if it is narrower than
+    /// the frame, duplicate it so the crop can wrap, then slide a full-width window.
+    /// </summary>
+    private static string TickerFillScroll(int width, int height, string fps)
+    {
+        var barH = TickerBarHeight(height);
+        return
+            $"fps={fps}," +
+            $"scale=-2:{barH}," +
+            $"scale=w='max(iw\\,{width})':h={barH}," +
+            "split[ta][tb];[ta][tb]hstack," +
+            $"crop={width}:{barH}:'mod(t*90\\,max(iw/2\\,1))':0";
     }
 
     private static int TickerBarHeight(int height)
@@ -1456,8 +1472,8 @@ public class FfmpegCommandBuilder
             {
                 var escaped = EscapeFilterPath(alertTickerPath!);
                 baseFilter = baseFilter.Replace("[vout]", "[vpre]")
-                    + $";movie='{escaped}':loop=-1,fps=30[ticker]"
-                    + $";[vpre][ticker]overlay=x='W-mod(t*90\\,W+w)':y=H-h:eof_action=repeat:repeatlast=1[vout]";
+                    + $";movie='{escaped}':loop=0,{TickerFillScroll(width, height, "30")}[ticker]"
+                    + $";[vpre][ticker]overlay=x=0:y=H-h:eof_action=repeat:repeatlast=1[vout]";
             }
             else
             {

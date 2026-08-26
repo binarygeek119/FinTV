@@ -224,6 +224,8 @@ public class WeatherController : ControllerBase
                 eventName = first?.Event,
                 headline = first?.Headline,
                 hazardsJpeg = preview.HazardsJpeg,
+                tickerPng = preview.TickerPng,
+                tickerHasText = preview.TickerHasText,
                 message = $"Sample {first?.Event ?? "weather alert"} preview. {liveHint}"
             });
         }

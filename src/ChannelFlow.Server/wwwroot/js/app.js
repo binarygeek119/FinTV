@@ -4780,7 +4780,19 @@
         }
         if (data?.mode === 'ticker') {
             const text = escapeHtml(data.tickerText || data.headline || 'WEATHER ALERT');
-            parts.push('<div class="weather-alert-ticker-preview" role="img" aria-label="Sample scrolling weather alert"><span>' + text + '</span></div>');
+            const png = data.tickerPng;
+            let inner = '';
+            if (png) {
+                const src = 'data:image/png;base64,' + png;
+                inner += '<div class="weather-alert-ticker-track">'
+                    + '<img alt="" src="' + src + '">'
+                    + '<img alt="" src="' + src + '">'
+                    + '</div>';
+            }
+            if (!png || !data.tickerHasText) {
+                inner += '<span>' + text + '</span>';
+            }
+            parts.push('<div class="weather-alert-ticker-preview' + (png ? ' weather-alert-ticker-preview-graphic' : '') + '" role="img" aria-label="Sample scrolling weather alert">' + inner + '</div>');
         }
         preview.innerHTML = parts.join('');
         preview.hidden = parts.length === 0;

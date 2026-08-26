@@ -158,8 +158,11 @@ public sealed class ApiKeyMiddleware
     public async Task InvokeAsync(HttpContext context)
     {
         var path = context.Request.Path.Value ?? string.Empty;
-        var needsApiKey = path.StartsWith("/iptv", StringComparison.OrdinalIgnoreCase)
-            || path.StartsWith("/api/plugin", StringComparison.OrdinalIgnoreCase);
+        // Programme posters are <img> URLs in XMLTV; the browser cannot send the IPTV API key.
+        var isIptvPoster = path.StartsWith("/iptv/poster/", StringComparison.OrdinalIgnoreCase);
+        var needsApiKey = !isIptvPoster
+            && (path.StartsWith("/iptv", StringComparison.OrdinalIgnoreCase)
+                || path.StartsWith("/api/plugin", StringComparison.OrdinalIgnoreCase));
 
         if (needsApiKey)
         {

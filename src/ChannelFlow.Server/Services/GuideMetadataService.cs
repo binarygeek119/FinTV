@@ -1,5 +1,7 @@
 using System.Globalization;
 using System.Security;
+using FinTv;
+using FinTv.Auth;
 using FinTv.Domain;
 
 namespace FinTv.Services;
@@ -19,11 +21,13 @@ public class GuideMetadataService
     ];
 
     private readonly ILibraryManager _libraryManager;
+    private readonly IHttpClientFactory _http;
     private readonly Dictionary<Guid, string?> _posterPathCache = [];
 
-    public GuideMetadataService(ILibraryManager libraryManager)
+    public GuideMetadataService(ILibraryManager libraryManager, IHttpClientFactory http)
     {
         _libraryManager = libraryManager;
+        _http = http;
     }
 
     /// <summary>
@@ -119,6 +123,34 @@ public class GuideMetadataService
     }
 
     /// <summary>
+    /// Resolves a poster file on disk, downloading it from Jellyfin when the sidecar is missing.
+    /// </summary>
+    public async Task<string?> GetOrFetchPosterImagePathAsync(Guid itemId, CancellationToken cancellationToken)
+    {
+        var local = GetPosterImagePath(itemId);
+        if (IsExistingFile(local))
+        {
+            return local;
+        }
+
+        var source = GetPosterSourceItem(itemId);
+        var fetchId = source?.Id is { } id && id != Guid.Empty ? id : itemId;
+        if (fetchId != itemId)
+        {
+            local = GetPosterImagePath(fetchId);
+            if (IsExistingFile(local))
+            {
+                return local;
+            }
+        }
+
+        return await CacheJellyfinPosterAsync(fetchId, cancellationToken).ConfigureAwait(false)
+            ?? (fetchId != itemId
+                ? await CacheJellyfinPosterAsync(itemId, cancellationToken).ConfigureAwait(false)
+                : null);
+    }
+
+    /// <summary>
     /// Builds a same-origin poster URL for the ChannelFlow Web UI (cookie auth).
     /// </summary>
     public static string? GetUiPosterUrl(Guid? posterItemId)
@@ -142,6 +174,79 @@ public class GuideMetadataService
         }
 
         return $"{baseUrl.TrimEnd('/')}/iptv/poster/{posterItemId.Value:N}";
+    }
+
+    private async Task<string?> CacheJellyfinPosterAsync(Guid itemId, CancellationToken cancellationToken)
+    {
+        if (itemId == Guid.Empty)
+        {
+            return null;
+        }
+
+        var dataFolder = FinTvRuntime.Current?.DataFolder;
+        var jellyfinUrl = FinTvRuntime.Current?.Configuration.JellyfinPluginUrl?.Trim().TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(dataFolder) || string.IsNullOrWhiteSpace(jellyfinUrl))
+        {
+            return null;
+        }
+
+        var folder = Path.Combine(dataFolder, "posters");
+        Directory.CreateDirectory(folder);
+        foreach (var existing in Directory.EnumerateFiles(folder, itemId.ToString("N") + ".*"))
+        {
+            if (new FileInfo(existing).Length > 0)
+            {
+                _posterPathCache[itemId] = existing;
+                return existing;
+            }
+        }
+
+        try
+        {
+            var client = _http.CreateClient("JellyfinPlugin");
+            var url = $"{jellyfinUrl}/Items/{itemId:N}/Images/Primary?maxHeight=720&quality=90";
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            var apiKey = PluginApiKey.Resolve();
+            if (!string.IsNullOrWhiteSpace(apiKey))
+            {
+                request.Headers.TryAddWithoutValidation("X-Emby-Token", apiKey);
+                request.Headers.TryAddWithoutValidation("X-Api-Key", apiKey);
+            }
+
+            using var response = await client.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            var mediaType = response.Content.Headers.ContentType?.MediaType;
+            if (!string.IsNullOrWhiteSpace(mediaType) && !mediaType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+            if (bytes.Length < 32)
+            {
+                return null;
+            }
+
+            var extension = mediaType?.ToLowerInvariant() switch
+            {
+                "image/png" => ".png",
+                "image/webp" => ".webp",
+                "image/gif" => ".gif",
+                _ => ".jpg"
+            };
+            var dest = Path.Combine(folder, itemId.ToString("N") + extension);
+            await File.WriteAllBytesAsync(dest, bytes, cancellationToken).ConfigureAwait(false);
+            _posterPathCache[itemId] = dest;
+            return dest;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -352,7 +457,7 @@ public class GuideMetadataService
                 return item.PrimaryImagePath;
             }
 
-            var sidecar = FindSidecarPoster(item.Path, walkParents: item is Episode or Series);
+            var sidecar = FindSidecarPoster(item.Path, walkParents: true);
             if (!string.IsNullOrWhiteSpace(sidecar))
             {
                 return sidecar;

@@ -13,8 +13,16 @@ public class YouTubeCommercialStreamService
 {
     private const string TestVideoUrl = "https://www.youtube.com/watch?v=jNQXAC9IVRw";
 
-    private static readonly string[] StreamFormats = ["b", "bv*+ba/b", "best[ext=mp4]/best"];
-    private static readonly string[] PremiumFormats = ["bv*[height<=1080]+ba/b", "b", "best"];
+    // tv / tv_downgraded currently return "The page needs to be reloaded".
+    private static readonly string[] PlayerClientAttempts =
+    [
+        "youtube:player_client=default,web_embedded,-tv_downgraded,-tv",
+        "youtube:player_client=web_safari,web_embedded,-tv_downgraded,-tv",
+        "youtube:player_client=android_vr,web_embedded,-tv_downgraded,-tv"
+    ];
+
+    private static readonly string[] StreamFormats = ["bv*+ba/b", "b"];
+    private static readonly string[] PremiumFormats = ["bv*[height<=1080]+ba/b", "bv*+ba/b", "b"];
 
     private readonly ILogger<YouTubeCommercialStreamService> _logger;
     private readonly YtDlpLocator _ytDlpLocator;
@@ -80,7 +88,14 @@ public class YouTubeCommercialStreamService
             }
         }
 
-        if (ytDlp is not null)
+        if (ytDlp is null)
+        {
+            throw new InvalidOperationException(
+                "yt-dlp was not found. Install yt-dlp or set CHANNELFLOW_YTDLP_PATH; ffmpeg cannot open a YouTube watch page.");
+        }
+
+        Exception? pipeError = null;
+        foreach (var clientArgs in PlayerClientAttempts)
         {
             try
             {
@@ -93,30 +108,38 @@ public class YouTubeCommercialStreamService
                     durationSeconds,
                     skipRanges,
                     settings,
+                    clientArgs,
                     output,
                     cancellationToken);
                 return;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogWarning(ex, "yt-dlp pipe stream failed for {Title}; trying direct stream URL", commercial.Title);
-            }
+                pipeError = ex;
+                if (!ShouldRetryYouTubeExtract(ex))
+                {
+                    _logger.LogWarning(ex, "yt-dlp pipe stream failed for {Title}; trying a direct stream URL", commercial.Title);
+                    break;
+                }
 
-            var streamUrl = prefetched?.StreamUrl
-                ?? await ResolveStreamUrlAsync(ytDlp, commercial.YouTubeUrl, settings, cancellationToken);
-            if (!string.IsNullOrWhiteSpace(streamUrl))
-            {
-                var args = ffmpeg.BuildRemoteMediaCommand(channel, streamUrl, 0, durationSeconds, null, skipRanges, overlayBug: false);
-                await RunFfmpegToStreamAsync(ffmpegPath, args, output, cancellationToken);
-                return;
+                _logger.LogWarning(
+                    ex,
+                    "yt-dlp pipe failed for {Title} with {Clients}; trying another YouTube client",
+                    commercial.Title,
+                    clientArgs);
             }
         }
 
-        _logger.LogWarning(
-            "yt-dlp is unavailable; attempting direct YouTube URL for {Title} (may fail)",
-            commercial.Title);
-        var fallbackArgs = ffmpeg.BuildRemoteMediaCommand(channel, commercial.YouTubeUrl, 0, durationSeconds, null, skipRanges, overlayBug: false);
-        await RunFfmpegToStreamAsync(ffmpegPath, fallbackArgs, output, cancellationToken);
+        var streamUrl = await ResolveStreamUrlAsync(ytDlp, commercial.YouTubeUrl, settings, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(streamUrl))
+        {
+            var args = ffmpeg.BuildRemoteMediaCommand(channel, streamUrl, 0, durationSeconds, null, skipRanges, overlayBug: false);
+            await RunFfmpegToStreamAsync(ffmpegPath, args, output, cancellationToken);
+            return;
+        }
+
+        throw pipeError ?? new InvalidOperationException(
+            "yt-dlp could not resolve a YouTube stream. Update yt-dlp or paste a fresh cookies.txt from a signed-in browser.");
     }
 
     public async Task<object> TestAccountAsync(CancellationToken cancellationToken)
@@ -135,7 +158,10 @@ public class YouTubeCommercialStreamService
         var cookieStatus = _cookies.GetStatus();
         var stdout = new StringBuilder();
         var stderr = new StringBuilder();
-        var args = BuildYtDlpArgs(settings, ["--skip-download", "--print", "%(id)s", "--print", "%(title)s", TestVideoUrl]);
+        var args = BuildYtDlpArgs(
+            settings,
+            PlayerClientAttempts[0],
+            ["--skip-download", "--print", "%(id)s", "--print", "%(title)s", TestVideoUrl]);
         var result = await Cli.Wrap(ytDlp)
             .WithArguments(args)
             .WithStandardOutputPipe(PipeTarget.ToStringBuilder(stdout))
@@ -220,15 +246,17 @@ public class YouTubeCommercialStreamService
         double durationSeconds,
         IReadOnlyList<SponsorSkipRange> skipRanges,
         YouTubeSettings settings,
+        string playerClients,
         Stream output,
         CancellationToken cancellationToken)
     {
         var ytDlpError = new StringBuilder();
         var ytDlp = Cli.Wrap(ytDlpPath)
-            .WithArguments(BuildYtDlpArgs(settings, [
+            .WithArguments(BuildYtDlpArgs(settings, playerClients, [
                 "-f", GetPipeFormat(settings),
                 "--merge-output-format", "mkv",
                 "--remux-video", "mkv",
+                "--hls-use-mpegts",
                 "-o", "-",
                 youtubeUrl
             ]))
@@ -333,8 +361,8 @@ public class YouTubeCommercialStreamService
 
     private string GetPipeFormat(YouTubeSettings settings)
         => settings.PreferPremium && _cookies.GetPathIfUsable() is not null
-            ? "b[ext=mp4]/b/bv*[height<=1080]+ba/b"
-            : "b[ext=mp4]/b/bv*+ba/b";
+            ? "bv*[height<=1080]+ba/b"
+            : "bv*+ba/b";
 
     private async Task<string?> ResolveStreamUrlAsync(
         string ytDlpPath,
@@ -348,45 +376,51 @@ public class YouTubeCommercialStreamService
 
         foreach (var format in formats)
         {
-            var stdout = new StringBuilder();
-            var result = await Cli.Wrap(ytDlpPath)
-                .WithArguments(BuildYtDlpArgs(settings, ["-g", "-f", format, youtubeUrl]))
-                .WithStandardOutputPipe(PipeTarget.ToStringBuilder(stdout))
-                .WithValidation(CommandResultValidation.None)
-                .ExecuteAsync(cancellationToken);
-
-            if (result.ExitCode != 0)
+            foreach (var clientArgs in PlayerClientAttempts)
             {
-                continue;
-            }
+                var stdout = new StringBuilder();
+                var result = await Cli.Wrap(ytDlpPath)
+                    .WithArguments(BuildYtDlpArgs(settings, clientArgs, ["-g", "-f", format, youtubeUrl]))
+                    .WithStandardOutputPipe(PipeTarget.ToStringBuilder(stdout))
+                    .WithValidation(CommandResultValidation.None)
+                    .ExecuteAsync(cancellationToken);
 
-            var lines = stdout.ToString()
-                .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            if (lines.Length == 1)
-            {
-                return lines[0];
-            }
+                if (result.ExitCode != 0)
+                {
+                    continue;
+                }
 
-            if (lines.Length >= 2)
-            {
-                _logger.LogDebug(
-                    "yt-dlp returned separate audio/video URLs for {Url}; prefer pipe streaming",
-                    youtubeUrl);
+                var lines = stdout.ToString()
+                    .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (lines.Length == 1 && !lines[0].Contains("youtube.com/watch", StringComparison.OrdinalIgnoreCase))
+                {
+                    return lines[0];
+                }
+
+                if (lines.Length >= 2)
+                {
+                    _logger.LogDebug(
+                        "yt-dlp returned separate audio/video URLs for {Url}; prefer pipe streaming",
+                        youtubeUrl);
+                    break;
+                }
             }
         }
 
         return null;
     }
 
-    private List<string> BuildYtDlpArgs(YouTubeSettings settings, IReadOnlyList<string> tail)
+    private List<string> BuildYtDlpArgs(YouTubeSettings settings, string playerClients, IReadOnlyList<string> tail)
     {
+        _ = settings;
         var args = new List<string>
         {
             "--no-playlist",
             "--no-part",
             "--no-cache-dir",
             "--no-warnings",
-            "--no-progress"
+            "--no-progress",
+            "--extractor-retries", "3"
         };
 
         var cookiePath = _cookies.GetPathIfUsable();
@@ -401,14 +435,20 @@ public class YouTubeCommercialStreamService
                 "Saved YouTube cookies are not a usable Netscape cookies.txt; commercials will play without cookies until you paste a fresh export");
         }
 
-        if (settings.PreferPremium || cookiePath is not null)
-        {
-            args.Add("--extractor-args");
-            args.Add("youtube:player_client=tv,android,web");
-        }
+        args.Add("--extractor-args");
+        args.Add(playerClients);
 
         args.AddRange(tail);
         return args;
+    }
+
+    private static bool ShouldRetryYouTubeExtract(Exception ex)
+    {
+        var text = ex.Message;
+        return text.Contains("page needs to be reloaded", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("UNPLAYABLE", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("Sign in to confirm", StringComparison.OrdinalIgnoreCase)
+            || text.Contains("exited 139", StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task RunFfmpegToStreamAsync(

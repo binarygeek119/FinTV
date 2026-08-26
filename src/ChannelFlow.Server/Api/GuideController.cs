@@ -87,10 +87,14 @@ public class GuideController : ControllerBase
     /// Serves a library poster for the TV Guide programme details modal.
     /// </summary>
     [HttpGet("poster/{itemId:guid}")]
+    [AllowAnonymous]
     [ResponseCache(Duration = 3600, Location = ResponseCacheLocation.Client)]
-    public IActionResult GetPoster(Guid itemId, [FromServices] GuideMetadataService guideMetadata)
+    public async Task<IActionResult> GetPoster(
+        Guid itemId,
+        [FromServices] GuideMetadataService guideMetadata,
+        CancellationToken cancellationToken)
     {
-        var path = guideMetadata.GetPosterImagePath(itemId);
+        var path = await guideMetadata.GetOrFetchPosterImagePathAsync(itemId, cancellationToken);
         if (string.IsNullOrWhiteSpace(path) || !System.IO.File.Exists(path))
         {
             return NotFound();

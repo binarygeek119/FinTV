@@ -647,7 +647,7 @@ public class EpgService
 
         var posterUrl = !string.IsNullOrWhiteSpace(metadata?.IconUrl)
             ? metadata.IconUrl
-            : _guideMetadata.GetPosterUrlIfAvailable(baseUrl, metadata?.PosterItemId);
+            : GuideMetadataService.GetPosterUrl(baseUrl, metadata?.PosterItemId ?? item.JellyfinItemId);
         if (!string.IsNullOrWhiteSpace(posterUrl))
         {
             programme.Add(new XElement("icon", new XAttribute("src", posterUrl)));

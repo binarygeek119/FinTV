@@ -447,9 +447,10 @@ input, select, textarea {
 .weather-zip-row { display: grid; grid-template-columns: minmax(140px, 1fr) 140px; gap: 0.65rem; align-items: end; }
 .weather-zip-row .wx-channel-label { color: var(--muted); font-size: 0.85rem; padding-bottom: 0.45rem; }
 .weather-alert-test-preview {
-    margin-top: 0.85rem;
-    border: 1px solid var(--border);
-    border-radius: 8px;
+    margin: 0.85rem -1.1rem 0;
+    width: calc(100% + 2.2rem);
+    border: none;
+    border-radius: 0;
     overflow: hidden;
     background: #001428;
 }
@@ -460,7 +461,8 @@ input, select, textarea {
 }
 .weather-alert-ticker-preview {
     position: relative;
-    height: 2.35rem;
+    width: 100%;
+    height: 3.25rem;
     overflow: hidden;
     background: #c41e3a;
     color: #fff;
@@ -468,16 +470,37 @@ input, select, textarea {
     font-size: 0.92rem;
     letter-spacing: 0.03em;
 }
+.weather-alert-ticker-track {
+    display: flex;
+    height: 100%;
+    width: max-content;
+    animation: weather-alert-ticker-graphic 22s linear infinite;
+}
+.weather-alert-ticker-preview-graphic img,
+.weather-alert-ticker-track img {
+    height: 100%;
+    width: auto;
+    max-width: none;
+    flex-shrink: 0;
+    object-fit: cover;
+    object-position: left center;
+}
 .weather-alert-ticker-preview span {
     position: absolute;
+    top: 0;
     white-space: nowrap;
-    line-height: 2.35rem;
+    line-height: 3.25rem;
     padding-left: 1rem;
     animation: weather-alert-ticker 18s linear infinite;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
 }
 @keyframes weather-alert-ticker {
     from { transform: translateX(100%); }
     to { transform: translateX(-100%); }
+}
+@keyframes weather-alert-ticker-graphic {
+    from { transform: translateX(0); }
+    to { transform: translateX(-50%); }
 }
 .about-hero { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.35rem; }
 .about-hero img { width: 220px; height: auto; max-width: 100%; border-radius: 0; object-fit: contain; background: transparent; }

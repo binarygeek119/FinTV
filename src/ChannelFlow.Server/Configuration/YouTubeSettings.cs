@@ -26,8 +26,9 @@ public class YouTubeSettings
     ];
 
     /// <summary>
-    /// Prefer TV/Android player clients and higher-quality formats when cookies are present.
+    /// Prefer higher-quality formats when cookies are present.
     /// A YouTube Premium account cookie can unlock Premium formats; ChannelFlow cannot enable Premium itself.
+    /// Do not force the TV player client — YouTube currently returns "The page needs to be reloaded" for tv/tv_downgraded.
     /// </summary>
     public bool PreferPremium { get; set; } = true;
 
