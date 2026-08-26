@@ -27,6 +27,7 @@ public class GuideMetadataService
     private readonly IHttpClientFactory _http;
     private readonly FinTvDbContext _db;
     private readonly Dictionary<Guid, string?> _posterPathCache = [];
+    private readonly object _posterGate = new();
 
     public GuideMetadataService(ILibraryManager libraryManager, IHttpClientFactory http, FinTvDbContext db)
     {
@@ -99,13 +100,20 @@ public class GuideMetadataService
     /// </summary>
     public string? GetPosterImagePath(Guid itemId)
     {
-        if (_posterPathCache.TryGetValue(itemId, out var cached))
+        lock (_posterGate)
         {
-            return cached;
+            if (_posterPathCache.TryGetValue(itemId, out var cached))
+            {
+                return cached;
+            }
         }
 
         var path = ResolvePosterImagePath(itemId);
-        _posterPathCache[itemId] = path;
+        lock (_posterGate)
+        {
+            _posterPathCache[itemId] = path;
+        }
+
         return path;
     }
 
@@ -156,6 +164,48 @@ public class GuideMetadataService
     }
 
     /// <summary>
+    /// Downloads missing programme posters for scheduled items so the TV guide and XMLTV icons are ready.
+    /// Series episodes share one series poster. Already-cached files are skipped.
+    /// </summary>
+    public async Task<int> WarmPostersAsync(IEnumerable<Guid> itemIds, CancellationToken cancellationToken)
+    {
+        var fetchIds = new HashSet<Guid>();
+        foreach (var id in itemIds.Where(id => id != Guid.Empty).Distinct())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var source = GetPosterSourceItem(id);
+            fetchIds.Add(source?.Id is Guid sid && sid != Guid.Empty ? sid : id);
+        }
+
+        if (fetchIds.Count == 0)
+        {
+            return 0;
+        }
+
+        var cached = 0;
+        await Parallel.ForEachAsync(
+            fetchIds,
+            new ParallelOptions { MaxDegreeOfParallelism = 4, CancellationToken = cancellationToken },
+            async (id, ct) =>
+            {
+                try
+                {
+                    var path = await GetOrFetchPosterImagePathAsync(id, ct).ConfigureAwait(false);
+                    if (!string.IsNullOrWhiteSpace(path))
+                    {
+                        Interlocked.Increment(ref cached);
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // Keep playout; the guide will retry on demand.
+                }
+            }).ConfigureAwait(false);
+
+        return cached;
+    }
+
+    /// <summary>
     /// Builds a same-origin poster URL for the ChannelFlow Web UI (cookie auth).
     /// </summary>
     public static string? GetUiPosterUrl(Guid? posterItemId)
@@ -201,7 +251,11 @@ public class GuideMetadataService
         {
             if (new FileInfo(existing).Length > 0)
             {
-                _posterPathCache[itemId] = existing;
+                lock (_posterGate)
+                {
+                    _posterPathCache[itemId] = existing;
+                }
+
                 return existing;
             }
         }
@@ -246,7 +300,11 @@ public class GuideMetadataService
             };
             var dest = Path.Combine(folder, itemId.ToString("N") + extension);
             await File.WriteAllBytesAsync(dest, bytes, cancellationToken).ConfigureAwait(false);
-            _posterPathCache[itemId] = dest;
+            lock (_posterGate)
+            {
+                _posterPathCache[itemId] = dest;
+            }
+
             return dest;
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or IOException)

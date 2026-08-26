@@ -154,6 +154,8 @@ builder.Services.AddSingleton<WeatherAlertOverlayService>();
 builder.Services.AddSingleton<AiChannelGenerateJobService>();
 builder.Services.AddSingleton<AiLineupAutoApplyTask>();
 builder.Services.AddSingleton<CatalogCleanupTask>();
+builder.Services.AddSingleton<CatalogLibraryScanService>();
+builder.Services.AddSingleton<CatalogLibraryScanTask>();
 builder.Services.AddSingleton<PlayoutBuilderService>();
 builder.Services.AddSingleton<GuideUpdateTracker>();
 builder.Services.AddSingleton<BlackframeChapterTask>();
@@ -222,6 +224,7 @@ builder.Services.AddHostedService<CommercialBrainzRefreshHostedService>();
 builder.Services.AddHostedService<MusicPackStartupHostedService>();
 builder.Services.AddHostedService<LogRetentionHostedService>();
 builder.Services.AddHostedService<MediaServerHealthHostedService>();
+builder.Services.AddHostedService<CatalogLibraryScanHostedService>();
 
 var app = builder.Build();
 

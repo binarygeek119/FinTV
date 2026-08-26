@@ -18,6 +18,7 @@ public class LineupGeneratorService
     private readonly StreamService _stream;
     private readonly LogoBumperService _bumpers;
     private readonly OriginalBroadcastSimulator _originalBroadcast;
+    private readonly GuideMetadataService _guideMetadata;
     private readonly ILogger<LineupGeneratorService> _logger;
 
     public LineupGeneratorService(
@@ -31,6 +32,7 @@ public class LineupGeneratorService
         StreamService stream,
         LogoBumperService bumpers,
         OriginalBroadcastSimulator originalBroadcast,
+        GuideMetadataService guideMetadata,
         ILogger<LineupGeneratorService> logger)
     {
         _db = db;
@@ -43,6 +45,7 @@ public class LineupGeneratorService
         _stream = stream;
         _bumpers = bumpers;
         _originalBroadcast = originalBroadcast;
+        _guideMetadata = guideMetadata;
         _logger = logger;
     }
 
@@ -387,6 +390,7 @@ public class LineupGeneratorService
                 setters => setters.SetProperty(c => c.LastPlayoutBuiltAt, DateTime.UtcNow),
                 cancellationToken);
         await _db.SaveChangesAsync(cancellationToken);
+        await CachePlayoutPostersAsync(channel, startUtc, endUtc, cancellationToken);
         NotifyPlayoutChanged(channel, mode, interruptStream);
     }
 
@@ -399,6 +403,48 @@ public class LineupGeneratorService
         }
 
         _stream.InterruptCurrentItem(channel.Id);
+    }
+
+    private async Task CachePlayoutPostersAsync(
+        Channel channel,
+        DateTime startUtc,
+        DateTime endUtc,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var rows = await _db.PlayoutItems.AsNoTracking()
+                .Where(p =>
+                    p.ChannelId == channel.Id
+                    && p.Finish > startUtc
+                    && p.Start < endUtc
+                    && p.JellyfinItemId != null
+                    && !p.IsVirtual
+                    && p.CommercialId == null)
+                .Select(p => new { Id = p.JellyfinItemId!.Value, p.GuideGroup })
+                .ToListAsync(cancellationToken)
+                .ConfigureAwait(false);
+            var itemIds = rows
+                .Where(row => !LogoBumperService.IsHiddenFromGuide(row.GuideGroup))
+                .Select(row => row.Id)
+                .Distinct()
+                .ToList();
+            if (itemIds.Count == 0)
+            {
+                return;
+            }
+
+            var cached = await _guideMetadata.WarmPostersAsync(itemIds, cancellationToken).ConfigureAwait(false);
+            _logger.LogInformation(
+                "Cached {Cached} programme poster(s) for {Channel} ({Items} scheduled item(s))",
+                cached,
+                channel.Name,
+                itemIds.Count);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Programme poster cache failed for {Channel}", channel.Name);
+        }
     }
 
     private static bool IsSlotConsumedByEarlierSpan(IReadOnlyList<LineupSlot> slots, int slotIndex)

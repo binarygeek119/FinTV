@@ -244,6 +244,7 @@ public class TasksController : ControllerBase
     private readonly StreamService _streams;
     private readonly CommercialService _commercials;
     private readonly FinTvDbContext _db;
+    private readonly CatalogLibraryScanService _libraryScan;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TasksController"/> class.
@@ -252,6 +253,7 @@ public class TasksController : ControllerBase
         PlayoutBuilderService playoutBuilder,
         IServiceScopeFactory scopeFactory,
         CatalogCleanupService catalogCleanup,
+        CatalogLibraryScanService libraryScan,
         NewsBulletinService newsBulletins,
         StreamService streams,
         CommercialService commercials,
@@ -260,6 +262,7 @@ public class TasksController : ControllerBase
         _playoutBuilder = playoutBuilder;
         _scopeFactory = scopeFactory;
         _catalogCleanup = catalogCleanup;
+        _libraryScan = libraryScan;
         _newsBulletins = newsBulletins;
         _streams = streams;
         _commercials = commercials;
@@ -480,6 +483,39 @@ public class TasksController : ControllerBase
         });
 
         return Accepted(new { queued = true, status = await BuildCatalogCleanupStatusAsync(cancellationToken) });
+    }
+
+    /// <summary>
+    /// Gets the six-hour library connection scan status.
+    /// </summary>
+    [HttpGet("library-scan")]
+    public ActionResult<object> GetLibraryScan()
+        => Ok(_libraryScan.Describe());
+
+    /// <summary>
+    /// Queues a catalog sync of every enabled library connection.
+    /// </summary>
+    [HttpPost("library-scan")]
+    public ActionResult<object> RunLibraryScan()
+    {
+        if (_libraryScan.IsRunning)
+        {
+            return Ok(new { queued = false, alreadyRunning = true, status = _libraryScan.Describe() });
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _libraryScan.RunAllAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // Admin polls status for errors.
+            }
+        });
+
+        return Accepted(new { queued = true, status = _libraryScan.Describe() });
     }
 }
 

@@ -87,6 +87,9 @@
     let catalogSyncKind = null;
     let catalogSyncSeenRunning = false;
     let catalogSyncClosed = false;
+    let catalogSyncWasRunning = false;
+    let catalogSyncExpectingStart = 0;
+    const CATALOG_SYNC_SNAP_KEY = 'channelflow.catalogSync.snap';
     let appClockTimer = null;
     const GUIDE_PX_PER_MIN = 4;
     const GUIDE_CHANNEL_COL = 168;
@@ -5436,6 +5439,96 @@
         await loadCatalogCleanup();
     }
 
+    let libraryScanPollTimer = null;
+
+    function renderLibraryScanStatus(status) {
+        const el = $('library-connection-scan-status');
+        const runBtn = $('btn-run-library-scan');
+        if (!el || !status) {
+            return;
+        }
+
+        if (runBtn) {
+            runBtn.disabled = !!status.isRunning;
+            runBtn.textContent = status.isRunning ? 'Scanning…' : 'Scan Libraries Now';
+        }
+
+        const next = status.nextRunAt ? new Date(status.nextRunAt).toLocaleString() : 'the next 6-hour mark';
+        if (status.isRunning) {
+            el.textContent = 'Library scan is running… syncing each enabled connection for new files.';
+            return;
+        }
+
+        if (status.lastError) {
+            el.textContent =
+                `Last run failed: ${status.lastError}` +
+                (status.lastCompletedAt ? ` · finished ${new Date(status.lastCompletedAt).toLocaleString()}` : '') +
+                ` · next at ${next}.`;
+            return;
+        }
+
+        if (status.lastCompletedAt) {
+            el.textContent =
+                `Last run ${new Date(status.lastCompletedAt).toLocaleString()}: synced ${status.lastSynced} connection(s), ` +
+                `imported ${status.lastImported} item(s), skipped ${status.lastSkipped}. Next at ${next}.`;
+            return;
+        }
+
+        el.textContent = `Next library scan at ${next}.`;
+    }
+
+    async function loadLibraryScan() {
+        if (!syncConfigPage()) {
+            return;
+        }
+
+        try {
+            const status = await api('/tasks/library-scan');
+            renderLibraryScanStatus(status);
+            if (status.isRunning) {
+                startLibraryScanPolling();
+            } else {
+                stopLibraryScanPolling();
+            }
+        } catch (err) {
+            const el = $('library-connection-scan-status');
+            if (el) {
+                el.textContent = 'Could not load library scan status.';
+            }
+        }
+    }
+
+    function startLibraryScanPolling() {
+        if (libraryScanPollTimer) {
+            return;
+        }
+
+        libraryScanPollTimer = setInterval(() => {
+            loadLibraryScan().catch(() => {});
+        }, 3000);
+    }
+
+    function stopLibraryScanPolling() {
+        if (libraryScanPollTimer) {
+            clearInterval(libraryScanPollTimer);
+            libraryScanPollTimer = null;
+        }
+    }
+
+    async function runLibraryScan() {
+        const result = await api('/tasks/library-scan', { method: 'POST' });
+        if (result.alreadyRunning) {
+            toast('A library scan is already running.', 'info');
+        } else {
+            toast('Library scan started.', 'success');
+        }
+        if (result.status) {
+            renderLibraryScanStatus(result.status);
+        }
+        startLibraryScanPolling();
+        await loadLibraryScan();
+    }
+
     function renderAboutDl(elementId, rows) {
         const el = $(elementId);
         if (!el) {
@@ -6417,9 +6510,43 @@
         return Number(value || 0).toLocaleString();
     }
 
+    function catalogSyncFinishedRecently(snap) {
+        const at = Date.parse(snap && snap.finishedAt ? snap.finishedAt : '');
+        return Number.isFinite(at) && (Date.now() - at) < 120000;
+    }
+
+    function readCatalogSyncSnap() {
+        try {
+            const raw = sessionStorage.getItem(CATALOG_SYNC_SNAP_KEY);
+            return raw ? JSON.parse(raw) : null;
+        } catch (ignore) {
+            return null;
+        }
+    }
+
+    function writeCatalogSyncSnap(snap) {
+        try {
+            if (!snap || (!snap.running && snap.phase !== 'done' && snap.phase !== 'error')) {
+                sessionStorage.removeItem(CATALOG_SYNC_SNAP_KEY);
+                return;
+            }
+
+            sessionStorage.setItem(CATALOG_SYNC_SNAP_KEY, JSON.stringify(snap));
+        } catch (ignore) {
+            // Private mode or quota — polling still works after load.
+        }
+    }
+
     function startCatalogSyncPolling() {
         if (catalogSyncPollTimer) {
             return;
+        }
+
+        const cached = readCatalogSyncSnap();
+        if (cached && (cached.running || catalogSyncFinishedRecently(cached))) {
+            catalogSyncSeenRunning = true;
+            catalogSyncClosed = false;
+            renderCatalogSyncPopup(cached);
         }
 
         void pollCatalogSyncProgress();
@@ -6445,6 +6572,7 @@
         el.hidden = true;
         el.classList.add('hidden');
         el.classList.remove('is-done', 'is-error');
+        writeCatalogSyncSnap(null);
     }
 
     function setCatalogSyncButtonsDisabled(disabled) {
@@ -6478,12 +6606,21 @@
         return '';
     }
 
+    function refreshCatalogAfterSync() {
+        loadMediaServers().then(() => {
+            if (catalogSyncKind) {
+                renderKindPanel(catalogSyncKind);
+            }
+        }).catch(() => {});
+    }
+
     function renderCatalogSyncPopup(snap) {
         const el = $('catalog-sync-popup');
         if (!el) {
             return;
         }
 
+        snap = snap || {};
         const running = !!snap.running;
         const phase = snap.phase || 'idle';
         const dismiss = $('catalog-sync-dismiss');
@@ -6492,10 +6629,20 @@
         const meta = $('catalog-sync-meta');
         const bar = $('catalog-sync-bar');
         const fill = $('catalog-sync-bar-fill');
+        const finished = phase === 'done' || phase === 'error';
+        const showFinished = finished && !catalogSyncClosed && (catalogSyncSeenRunning || catalogSyncFinishedRecently(snap));
+
+        if (catalogSyncWasRunning && !running) {
+            refreshCatalogAfterSync();
+        }
+        catalogSyncWasRunning = running;
 
         if (running) {
             catalogSyncSeenRunning = true;
             catalogSyncClosed = false;
+            if (phase && phase !== 'starting') {
+                catalogSyncExpectingStart = 0;
+            }
             if (catalogSyncHideTimer) {
                 clearTimeout(catalogSyncHideTimer);
                 catalogSyncHideTimer = null;
@@ -6504,12 +6651,15 @@
             el.hidden = false;
             el.classList.remove('hidden', 'is-done', 'is-error');
             setCatalogSyncButtonsDisabled(true);
-        } else if (catalogSyncSeenRunning && !catalogSyncClosed && (phase === 'done' || phase === 'error')) {
+            writeCatalogSyncSnap(snap);
+        } else if (showFinished) {
+            catalogSyncSeenRunning = true;
             el.hidden = false;
             el.classList.remove('hidden');
             el.classList.toggle('is-error', phase === 'error');
             el.classList.toggle('is-done', phase === 'done');
             setCatalogSyncButtonsDisabled(false);
+            writeCatalogSyncSnap(snap);
             if (!catalogSyncHideTimer) {
                 catalogSyncHideTimer = setTimeout(() => {
                     catalogSyncHideTimer = null;
@@ -6517,8 +6667,13 @@
                     hideCatalogSyncPopup();
                 }, phase === 'error' ? 8000 : 4500);
             }
-        } else if (!running && !catalogSyncSeenRunning) {
+        } else if (!running && !showFinished) {
             setCatalogSyncButtonsDisabled(false);
+            const expecting = catalogSyncExpectingStart && (Date.now() - catalogSyncExpectingStart) < 8000;
+            if (phase === 'idle' && !expecting && catalogSyncSeenRunning) {
+                catalogSyncSeenRunning = false;
+                hideCatalogSyncPopup();
+            }
         }
 
         if (title) {
@@ -6540,7 +6695,7 @@
         }
 
         if (dismiss) {
-            const canDismiss = !running && (phase === 'done' || phase === 'error');
+            const canDismiss = !running && finished;
             dismiss.classList.toggle('hidden', !canDismiss);
             dismiss.hidden = !canDismiss;
         }
@@ -6550,6 +6705,7 @@
         catalogSyncKind = kind;
         catalogSyncClosed = false;
         catalogSyncSeenRunning = true;
+        catalogSyncExpectingStart = Date.now();
         if (catalogSyncHideTimer) {
             clearTimeout(catalogSyncHideTimer);
             catalogSyncHideTimer = null;
@@ -6569,11 +6725,13 @@
         try {
             await api('/media-servers/' + id + '/sync', { method: 'POST' });
             await pollCatalogSyncProgress();
-            await loadMediaServers();
-            renderKindPanel(kind);
         } catch (err) {
             await pollCatalogSyncProgress().catch(() => {});
-            toast(err.message, 'error');
+            if (/already running/i.test(err.message || '')) {
+                toast('A catalog sync is already running.', 'info');
+            } else {
+                toast(err.message, 'error');
+            }
         }
     }
 
@@ -7753,6 +7911,7 @@
         }
         if (name === 'tasks') {
             loadCatalogCleanup();
+            loadLibraryScan();
             api('/news/settings').then((settings) => renderNewsBulletinStatus(settings.bulletin)).catch(() => {});
         }
         if (name === 'special') loadSpecialPresentations();
@@ -7975,6 +8134,7 @@
         click('btn-save-catalog-cleanup', () => saveCatalogCleanupSettings().catch((e) => toast(e.message, 'error')));
         click('btn-run-catalog-cleanup', () => runCatalogCleanup().catch((e) => toast(e.message, 'error')));
         click('btn-scan-local-catalog', () => runCatalogLocalScan().catch((e) => toast(e.message, 'error')));
+        click('btn-run-library-scan', () => runLibraryScan().catch((e) => toast(e.message, 'error')));
 
         click('btn-copy-m3u', () => copySetupUrl('m3u'));
         click('btn-copy-xmltv', () => copySetupUrl('xmltv'));

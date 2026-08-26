@@ -1203,6 +1203,14 @@
                     </div>
                     <p id="catalog-local-scan-status" class="hint">Loading local file scan status…</p>
                 </div>
+                <div class="card section-card">
+                    <h2>Library scan</h2>
+                    <p class="hint">Every 6 hours (00:00, 06:00, 12:00, 18:00 local) ChannelFlow syncs each enabled library connection so new files show up in the catalog. Jellyfin and local-folder connections are included. Emby and Plex placeholders are skipped until they can sync.</p>
+                    <p id="library-connection-scan-status" class="hint">Loading library scan status…</p>
+                    <div class="actions">
+                        <button type="button" id="btn-run-library-scan" class="raised button-submit emby-button">Scan Libraries Now</button>
+                    </div>
+                </div>
             </section>
             <section id="tab-about" class="tab-panel hidden" hidden>
                 <div class="card section-card">
@@ -1410,7 +1418,7 @@
     </div>
     <p class="catalog-sync-meta" id="catalog-sync-meta"></p>
   </div>
-  <script src="js/app.js?v=assets9"></script>
+  <script src="js/app.js?v=assets11"></script>
   <script src="js/shell.js?v=library5"></script>
 </body>
 </html>

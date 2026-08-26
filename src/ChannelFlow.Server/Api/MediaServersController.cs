@@ -11,10 +11,12 @@ namespace FinTv.Api;
 public class MediaServersController : ControllerBase
 {
     private readonly MediaServerService _servers;
+    private readonly IServiceScopeFactory _scopeFactory;
 
-    public MediaServersController(MediaServerService servers)
+    public MediaServersController(MediaServerService servers, IServiceScopeFactory scopeFactory)
     {
         _servers = servers;
+        _scopeFactory = scopeFactory;
     }
 
     [HttpGet]
@@ -123,17 +125,33 @@ public class MediaServersController : ControllerBase
     {
         try
         {
-            return Ok(await _servers.SyncAsync(id, cancellationToken));
+            await _servers.EnsureCanSyncAsync(id, cancellationToken);
         }
         catch (InvalidOperationException ex)
         {
             if (ex.Message.Contains("already running", StringComparison.OrdinalIgnoreCase))
             {
-                return Conflict(new { message = ex.Message });
+                return Conflict(new { message = ex.Message, status = _servers.GetSyncProgress() });
             }
 
             return BadRequest(new { message = ex.Message });
         }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var servers = scope.ServiceProvider.GetRequiredService<MediaServerService>();
+                await servers.SyncAsync(id, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // Progress snapshot holds the error; the admin popup polls it.
+            }
+        });
+
+        return Accepted(_servers.GetSyncProgress());
     }
 
     [HttpGet("{id:guid}/path-mappings")]

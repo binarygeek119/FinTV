@@ -162,7 +162,40 @@ public sealed class MediaServerService
         return Public(row);
     }
 
-    public async Task<object> SyncAsync(Guid id, CancellationToken cancellationToken)
+    public async Task<List<(Guid Id, string Name)>> ListEnabledSyncableAsync(CancellationToken cancellationToken)
+    {
+        var rows = await _db.MediaServerConnections.AsNoTracking()
+            .Where(c => c.Enabled)
+            .OrderBy(c => c.SortOrder)
+            .ThenBy(c => c.Name)
+            .Select(c => new { c.Id, c.Name, c.Kind })
+            .ToListAsync(cancellationToken);
+        return rows
+            .Where(row => _providers.TryGetValue(row.Kind, out var provider) && provider.CanSync)
+            .Select(row => (row.Id, row.Name))
+            .ToList();
+    }
+
+    public bool IsSyncRunning => _progress.IsRunning;
+
+    public async Task EnsureCanSyncAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var row = await _db.MediaServerConnections.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == id, cancellationToken)
+            ?? throw new InvalidOperationException("Media server not found.");
+        var provider = Provider(row.Kind);
+        if (!provider.CanSync)
+        {
+            throw new InvalidOperationException(row.Kind + " catalog sync is not available yet.");
+        }
+
+        if (_progress.IsRunning)
+        {
+            throw new InvalidOperationException("A catalog sync is already running.");
+        }
+    }
+
+    public async Task<MediaServerSyncResult> SyncAsync(Guid id, CancellationToken cancellationToken)
     {
         var row = await _db.MediaServerConnections.Include(c => c.Libraries).FirstOrDefaultAsync(c => c.Id == id, cancellationToken)
             ?? throw new InvalidOperationException("Media server not found.");
@@ -213,7 +246,12 @@ public sealed class MediaServerService
                 SyncLegacyJellyfinSettings();
                 _progress.Complete(0);
                 _logger.LogWarning("Catalog sync for {Server} imported 0 items; existing catalog was left unchanged", row.Name);
-                return new { count = 0, server = Public(row), message = "Jellyfin returned no items. Existing catalog was left unchanged." };
+                return new MediaServerSyncResult
+                {
+                    Count = 0,
+                    Server = Public(row),
+                    Message = "Jellyfin returned no items. Existing catalog was left unchanged."
+                };
             }
 
             await _ingest.FinishMissingAsync(incomingIds, row.Id, cancellationToken);
@@ -227,7 +265,7 @@ public sealed class MediaServerService
             SyncLegacyJellyfinSettings();
             _progress.Complete(count);
             _logger.LogInformation("Catalog sync for {Server} saved {Count} items", row.Name, count);
-            return new { count, server = Public(row) };
+            return new MediaServerSyncResult { Count = count, Server = Public(row) };
         }
         catch (Exception ex)
         {
@@ -613,6 +651,15 @@ public sealed class MediaServerService
 
         return "other";
     }
+}
+
+public sealed class MediaServerSyncResult
+{
+    public int Count { get; init; }
+
+    public object? Server { get; init; }
+
+    public string? Message { get; init; }
 }
 
 public sealed class MediaServerWriteRequest

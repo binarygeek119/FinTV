@@ -5,6 +5,17 @@ public sealed class CatalogSyncProgress
     private readonly object _gate = new();
     private State _state = State.Idle();
 
+    public bool IsRunning
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _state.Running;
+            }
+        }
+    }
+
     public object Snapshot()
     {
         lock (_gate)
