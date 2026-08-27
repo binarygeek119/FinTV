@@ -79,6 +79,16 @@ public class MediaItem
     /// </summary>
     public string? AspectRatio { get; set; }
 
+    /// <summary>
+    /// Active picture ratio from a midnight cropdetect pass. Overrides <see cref="AspectRatio"/> when set.
+    /// </summary>
+    public string? TrueAspectRatio { get; set; }
+
+    /// <summary>
+    /// UTC time the active-picture scan last wrote <see cref="TrueAspectRatio"/>. Null means never scanned.
+    /// </summary>
+    public DateTime? TrueAspectProbedAt { get; set; }
+
     public DateTime SyncedAt { get; set; } = DateTime.UtcNow;
 
     /// <summary>
@@ -95,6 +105,11 @@ public class MediaItem
     /// UTC time the item was first marked missing. Cleared if it returns in a later sync.
     /// </summary>
     public DateTime? MissingSince { get; set; }
+
+    /// <summary>
+    /// UTC time ffprobe last read chapter metadata from the local file. Null means never probed.
+    /// </summary>
+    public DateTime? FfprobeChaptersAt { get; set; }
 
     public ICollection<MediaChapter> Chapters { get; set; } = new List<MediaChapter>();
 }

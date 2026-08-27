@@ -419,6 +419,7 @@ public sealed class CatalogLibraryManager : ILibraryManager, IChapterManager
         item.Width = row.Width;
         item.Height = row.Height;
         item.VideoCodec = row.VideoCodec;
+        item.TrueAspectRatio = row.TrueAspectRatio;
         item.AspectRatio = row.AspectRatio;
         item.Tags = ReadStringArray(row.TagsJson);
         item.Genres = ReadStringArray(row.GenresJson);
@@ -485,6 +486,7 @@ public sealed class CatalogLibraryManager : ILibraryManager, IChapterManager
         item.PrimaryImagePath = _remap.ResolveExistingPath(row.PrimaryImagePath, row.SourceConnectionId) ?? row.PrimaryImagePath;
         item.Width = row.Width;
         item.Height = row.Height;
+        item.TrueAspectRatio = row.TrueAspectRatio;
         item.AspectRatio = row.AspectRatio;
         item.Tags = ReadStringArray(row.TagsJson);
         item.Genres = ReadStringArray(row.GenresJson);

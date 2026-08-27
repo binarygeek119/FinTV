@@ -190,6 +190,7 @@ public class CatalogController : ControllerBase
                 item.Width,
                 item.Height,
                 item.AspectRatio,
+                item.TrueAspectRatio,
                 ChapterCount = item.Chapters.Count
             })
             .ToListAsync(cancellationToken);
@@ -210,7 +211,7 @@ public class CatalogController : ControllerBase
             var mapped = MapMediaRow(row.Id, row.Name, row.Kind, row.Overview, row.OfficialRating, row.CommunityRating,
                 row.Runtime, row.RuntimeTicks, row.Path, row.SeriesName, row.SeasonName, row.IndexNumber,
                 row.ParentIndexNumber, row.LibraryName, row.Album, row.PeopleJson, row.ProviderIdsJson,
-                row.ArtistsJson, row.AspectRatio, row.ChapterCount);
+                row.ArtistsJson, VideoAspectFormat.Prefer(row.TrueAspectRatio, row.AspectRatio, row.Width, row.Height), row.ChapterCount);
 
             if (IsNewsItem(row.Kind, row.CollectionType, row.LibraryName))
             {
@@ -495,7 +496,7 @@ public class CatalogController : ControllerBase
             "movies" or "movie" => "movies",
             "music" or "audio" => "music",
             "musicvideos" or "musicvideo" => "musicvideos",
-            "homevideos" or "homevideo" or "news" => "news",
+            "homevideos" or "homevideo" or "homemovies" or "homemovie" or "news" => "news",
             _ => null
         };
     }

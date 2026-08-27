@@ -361,7 +361,7 @@ public sealed class CatalogTypedStore
             PrimaryImagePath = item.PrimaryImagePath,
             Width = item.Width,
             Height = item.Height,
-            AspectRatio = item.AspectRatio,
+            AspectRatio = VideoAspectFormat.Prefer(item.TrueAspectRatio, item.AspectRatio, item.Width, item.Height),
             Genres = ReadJsonArray(item.GenresJson),
             Tags = ReadJsonArray(item.TagsJson),
             Studios = ReadJsonArray(item.StudiosJson),

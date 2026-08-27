@@ -46,6 +46,7 @@ public class FfmpegCommandBuilder
         string? sourceAspectRatio = null,
         int? sourceWidth = null,
         int? sourceHeight = null,
+        string? trueAspectRatio = null,
         bool overlayBug = true,
         bool fadeBugIn = false,
         bool fadeBugOut = false,
@@ -86,6 +87,7 @@ public class FfmpegCommandBuilder
             sourceAspectRatio: sourceAspectRatio,
             sourceWidth: sourceWidth,
             sourceHeight: sourceHeight,
+            trueAspectRatio: trueAspectRatio,
             overlayBug: overlayBug,
             fadeBugIn: fadeBugIn,
             fadeBugOut: fadeBugOut,
@@ -108,6 +110,7 @@ public class FfmpegCommandBuilder
         string? sourceAspectRatio = null,
         int? sourceWidth = null,
         int? sourceHeight = null,
+        string? trueAspectRatio = null,
         bool overlayBug = true,
         string? sourceVideoCodec = null)
     {
@@ -176,6 +179,7 @@ public class FfmpegCommandBuilder
             sourceAspectRatio,
             sourceWidth,
             sourceHeight,
+            trueAspectRatio,
             overlayBug);
         AppendVideoEncoderArgs(args, context);
         if (!string.IsNullOrEmpty(skipExpr) && !args.Contains("-filter_complex"))
@@ -1087,6 +1091,7 @@ public class FfmpegCommandBuilder
         string? sourceAspectRatio = null,
         int? sourceWidth = null,
         int? sourceHeight = null,
+        string? trueAspectRatio = null,
         bool overlayBug = true,
         bool fadeBugIn = false,
         bool fadeBugOut = false,
@@ -1145,7 +1150,7 @@ public class FfmpegCommandBuilder
             if (!string.IsNullOrWhiteSpace(bug))
             {
                 bugWidth = Math.Clamp(width / 8, 140, 260);
-                var position = GetBugOverlay(channel, width, height, sourceAspectRatio, sourceWidth, sourceHeight);
+                var position = GetBugOverlay(channel, width, height, sourceAspectRatio, sourceWidth, sourceHeight, trueAspectRatio);
                 alpha = ChannelBugLayout.AlphaFilters(fadeBugIn, fadeBugOut, durationSeconds);
                 (overlayX, overlayY) = SplitOverlayXy(position);
             }
@@ -1170,7 +1175,7 @@ public class FfmpegCommandBuilder
         else
         {
             var bugWidth = Math.Clamp(width / 8, 140, 260);
-            var position = GetBugOverlay(channel, width, height, sourceAspectRatio, sourceWidth, sourceHeight);
+            var position = GetBugOverlay(channel, width, height, sourceAspectRatio, sourceWidth, sourceHeight, trueAspectRatio);
             var alpha = ChannelBugLayout.AlphaFilters(fadeBugIn, fadeBugOut, durationSeconds);
             graph =
                 $"[0:v]{linear}[base];" +
@@ -1521,7 +1526,8 @@ public class FfmpegCommandBuilder
         int height,
         string? sourceAspectRatio,
         int? sourceWidth,
-        int? sourceHeight)
+        int? sourceHeight,
+        string? trueAspectRatio)
         => ChannelBugLayout.OverlayExpression(
             channel.BugPlacement,
             channel.AspectRatio,
@@ -1529,7 +1535,8 @@ public class FfmpegCommandBuilder
             height,
             sourceAspectRatio,
             sourceWidth,
-            sourceHeight);
+            sourceHeight,
+            trueAspectRatio);
 
     private (int Width, int Height) GetResolution(Channel channel)
         => _normalization.ResolveSize(channel.AspectRatio);

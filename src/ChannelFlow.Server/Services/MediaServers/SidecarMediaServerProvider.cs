@@ -411,6 +411,11 @@ public sealed class SidecarMediaServerProvider : MediaServerProviderBase
 
     private static string GuessCollectionType(string name)
     {
+        if (PastTenseNewsCatalog.MatchesLibraryName(name))
+        {
+            return "homevideos";
+        }
+
         if (name.Contains("tv", StringComparison.OrdinalIgnoreCase)
             || name.Contains("show", StringComparison.OrdinalIgnoreCase)
             || name.Contains("series", StringComparison.OrdinalIgnoreCase))

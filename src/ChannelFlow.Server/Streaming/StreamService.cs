@@ -828,7 +828,8 @@ public class StreamService : IDisposable
             fadeBugIn: fadeBugIn,
             fadeBugOut: fadeBugOut,
             alertTones: alertTones,
-            sourceVideoCodec: mediaItem.VideoCodec);
+            sourceVideoCodec: mediaItem.VideoCodec,
+            trueAspectRatio: mediaItem.TrueAspectRatio);
 
         await RunFfmpegToStreamAsync(ffmpegPath, args, output, cancellationToken);
     }
@@ -879,7 +880,8 @@ public class StreamService : IDisposable
                 sourceWidth: mediaItem.Width,
                 sourceHeight: mediaItem.Height,
                 overlayBug: false,
-                sourceVideoCodec: mediaItem.VideoCodec);
+                sourceVideoCodec: mediaItem.VideoCodec,
+                trueAspectRatio: mediaItem.TrueAspectRatio);
             await RunFfmpegToStreamAsync(ffmpegPath, args, output, cancellationToken);
             return;
         }

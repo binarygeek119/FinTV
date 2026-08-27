@@ -21,7 +21,7 @@ public sealed class CatalogSyncProgress
         lock (_gate)
         {
             var total = _state.Total;
-            var current = _state.Phase is "saving" or "finishing" or "done" ? _state.Saved : _state.Items;
+            var current = _state.Phase is "saving" or "finishing" or "chapters" or "done" ? _state.Saved : _state.Items;
             int? percent = null;
             if (total > 0)
             {
@@ -120,6 +120,20 @@ public sealed class CatalogSyncProgress
             s.Items = Math.Max(s.Items, count);
             s.Total = Math.Max(s.Total, count);
             s.Message = "Marking removed items…";
+        });
+
+    public void Probing(int processed, int total, int withChapters)
+        => Set(s =>
+        {
+            s.Phase = "chapters";
+            s.Saved = processed;
+            s.Total = Math.Max(total, processed);
+            s.Items = Math.Max(s.Items, total);
+            s.Message = total == 0
+                ? "No videos to probe for chapters."
+                : withChapters == 0
+                    ? "Reading chapters with ffprobe…"
+                    : "Reading chapters with ffprobe (" + withChapters + " found)…";
         });
 
     public void Complete(int count)

@@ -18,12 +18,18 @@ public class PluginBridgeController : ControllerBase
     private readonly FinTvDbContext _db;
     private readonly CatalogTypedStore _typedCatalog;
     private readonly CatalogCleanupService _catalogCleanup;
+    private readonly CatalogChapterProbeService _chapters;
 
-    public PluginBridgeController(FinTvDbContext db, CatalogTypedStore typedCatalog, CatalogCleanupService catalogCleanup)
+    public PluginBridgeController(
+        FinTvDbContext db,
+        CatalogTypedStore typedCatalog,
+        CatalogCleanupService catalogCleanup,
+        CatalogChapterProbeService chapters)
     {
         _db = db;
         _typedCatalog = typedCatalog;
         _catalogCleanup = catalogCleanup;
+        _chapters = chapters;
     }
 
     [HttpPost("catalog/sync/begin")]
@@ -131,6 +137,14 @@ public class PluginBridgeController : ControllerBase
 
         await _typedCatalog.UpsertAsync(request.Items, request.ReplaceAll, cancellationToken);
         await _db.SaveChangesIgnoringGoneRowsAsync(cancellationToken);
+        try
+        {
+            await _chapters.ProbeAsync(incomingIds, missingOnly: false, onProgress: null, cancellationToken);
+        }
+        catch (Exception)
+        {
+            // Catalog import already saved; chapter probe is best-effort.
+        }
         if (request.ReplaceAll)
         {
             await _catalogCleanup.MarkMissingExceptAsync(incomingIds, cancellationToken);

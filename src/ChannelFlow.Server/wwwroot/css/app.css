@@ -861,6 +861,111 @@ table.data-table tbody tr.selected {
     font-size: 0.78rem;
     color: var(--muted);
 }
+.catalog-show-list {
+    display: grid;
+    gap: 0.35rem;
+    padding: 0.35rem;
+}
+.catalog-show {
+    background: #141414;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+.catalog-show > summary {
+    display: flex;
+    align-items: baseline;
+    gap: 0.55rem;
+    cursor: pointer;
+    list-style: none;
+    padding: 0.7rem 0.85rem;
+}
+.catalog-show > summary::-webkit-details-marker,
+.catalog-show > summary::marker {
+    display: none;
+    content: "";
+}
+.catalog-show > summary::before {
+    content: "▸";
+    color: var(--muted);
+    margin-right: 0.45rem;
+}
+.catalog-show[open] > summary::before {
+    content: "▾";
+}
+.catalog-show > summary:hover {
+    background: rgba(59, 130, 246, 0.08);
+}
+.catalog-show[open] > summary {
+    border-bottom: 1px solid var(--border);
+    background: rgba(225, 29, 72, 0.10);
+}
+.catalog-show-title {
+    font-weight: 650;
+    min-width: 0;
+    flex: 1;
+}
+.catalog-show-meta {
+    color: var(--muted);
+    font-size: 0.8rem;
+    white-space: nowrap;
+}
+.catalog-show-body {
+    padding: 0.65rem 0.85rem 0.85rem;
+}
+.catalog-show-plot {
+    margin: 0 0 0.7rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+.catalog-season-list {
+    display: grid;
+    gap: 0.3rem;
+}
+.catalog-season {
+    background: #101010;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+.catalog-season > summary {
+    display: flex;
+    align-items: baseline;
+    gap: 0.55rem;
+    cursor: pointer;
+    list-style: none;
+    padding: 0.55rem 0.75rem;
+}
+.catalog-season > summary::-webkit-details-marker,
+.catalog-season > summary::marker {
+    display: none;
+    content: "";
+}
+.catalog-season > summary::before {
+    content: "▸";
+    color: var(--muted);
+}
+.catalog-season[open] > summary::before {
+    content: "▾";
+}
+.catalog-season > summary:hover {
+    background: rgba(59, 130, 246, 0.08);
+}
+.catalog-season[open] > summary {
+    border-bottom: 1px solid var(--border);
+    background: rgba(225, 29, 72, 0.08);
+}
+.catalog-season-body {
+    padding: 0.45rem 0.55rem 0.65rem;
+    overflow-x: auto;
+}
+.catalog-episode-table {
+    min-width: 640px;
+}
+.catalog-movie-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.55rem;
+    padding: 0.7rem 0.85rem;
+}
 @keyframes catalog-sync-in {
     from { opacity: 0; transform: translateY(10px); }
     to { opacity: 1; transform: none; }

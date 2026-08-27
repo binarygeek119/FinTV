@@ -57,11 +57,23 @@ public static class ChannelBugLayout
         int canvasHeight,
         string? sourceAspectRatio,
         int? sourceWidth,
-        int? sourceHeight)
+        int? sourceHeight,
+        string? trueAspectRatio = null)
     {
-        if (VideoAspectFormat.TryGetDisplayRatio(sourceAspectRatio, sourceWidth, sourceHeight, out var ratio))
+        var hasTrue = VideoAspectFormat.TryGetExactRatio(trueAspectRatio, out var trueRatio);
+        var hasRaster = VideoAspectFormat.TryGetDisplayRatio(sourceAspectRatio, sourceWidth, sourceHeight, out var rasterRatio);
+
+        if (hasTrue)
         {
-            var picture = FitInside(canvasWidth, canvasHeight, ratio);
+            var picture = hasRaster
+                ? FitInside(FitInside(canvasWidth, canvasHeight, rasterRatio), trueRatio)
+                : FitInside(canvasWidth, canvasHeight, trueRatio);
+            return InsidePicture(placement, picture);
+        }
+
+        if (hasRaster)
+        {
+            var picture = FitInside(canvasWidth, canvasHeight, rasterRatio);
             return InsidePicture(placement, picture);
         }
 
@@ -115,6 +127,12 @@ public static class ChannelBugLayout
         var x = (canvasWidth - pictureWidth) / 2;
         var y = (canvasHeight - pictureHeight) / 2;
         return new Rect(x, y, pictureWidth, pictureHeight);
+    }
+
+    private static Rect FitInside(Rect container, double sourceRatio)
+    {
+        var inner = FitInside(container.Width, container.Height, sourceRatio);
+        return new Rect(container.X + inner.X, container.Y + inner.Y, inner.Width, inner.Height);
     }
 
     private readonly record struct Rect(int X, int Y, int Width, int Height)

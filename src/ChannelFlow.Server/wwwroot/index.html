@@ -13,7 +13,7 @@
   <link rel="manifest" href="site.webmanifest?v=3d08b8f1">
   <meta name="theme-color" content="#101010">
   <link rel="stylesheet" href="css/legacy-admin.css">
-  <link rel="stylesheet" href="css/app.css?v=assets11">
+  <link rel="stylesheet" href="css/app.css?v=assets18">
 </head>
 <body>
   <div id="login-screen" class="auth-screen hidden">
@@ -1211,6 +1211,22 @@
                         <button type="button" id="btn-run-library-scan" class="raised button-submit emby-button">Scan Libraries Now</button>
                     </div>
                 </div>
+                <div class="card section-card">
+                    <h2>ffprobe chapters</h2>
+                    <p class="hint">After each library import, ChannelFlow reads chapter markers from local video files with ffprobe. At midnight it only scans videos that still have no chapter data. Run now to fill missing chapters without re-probing files that already have them.</p>
+                    <p id="ffprobe-scan-status" class="hint">Loading ffprobe chapter scan status…</p>
+                    <div class="actions">
+                        <button type="button" id="btn-run-ffprobe-scan" class="raised button-submit emby-button">Scan Missing Chapters</button>
+                    </div>
+                </div>
+                <div class="card section-card">
+                    <h2>True aspect ratio</h2>
+                    <p class="hint">At midnight ChannelFlow grabs 6 frames at five points in each video, compares the active picture inside the raster, and stores TrueAspectRatio. Playback uses that instead of the media-server aspect. Run now to measure videos that still have no TrueAspectRatio.</p>
+                    <p id="true-aspect-scan-status" class="hint">Loading true-aspect scan status…</p>
+                    <div class="actions">
+                        <button type="button" id="btn-run-true-aspect-scan" class="raised button-submit emby-button">Scan Missing True Aspect</button>
+                    </div>
+                </div>
             </section>
             <section id="tab-about" class="tab-panel hidden" hidden>
                 <div class="card section-card">
@@ -1418,7 +1434,7 @@
     </div>
     <p class="catalog-sync-meta" id="catalog-sync-meta"></p>
   </div>
-  <script src="js/app.js?v=assets11"></script>
+  <script src="js/app.js?v=assets18"></script>
   <script src="js/shell.js?v=library5"></script>
 </body>
 </html>

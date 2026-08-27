@@ -189,6 +189,31 @@ public class MediaServersController : ControllerBase
         CancellationToken cancellationToken)
         => _servers.GetCatalogAsync(connectionId, kind, cancellationToken);
 
+    [HttpGet("catalog/episodes")]
+    public Task<object> CatalogEpisodes(
+        [FromQuery] Guid? connectionId,
+        [FromQuery] MediaServerKind? kind,
+        [FromQuery] Guid? seriesId,
+        [FromQuery] string? seriesName,
+        CancellationToken cancellationToken)
+        => _servers.GetCatalogEpisodesAsync(connectionId, kind, seriesId, seriesName, cancellationToken);
+
+    [HttpGet("catalog/music")]
+    public Task<object> CatalogMusic(
+        [FromQuery] Guid? connectionId,
+        [FromQuery] MediaServerKind? kind,
+        [FromQuery] string? artist,
+        CancellationToken cancellationToken)
+        => _servers.GetCatalogMusicAsync(connectionId, kind, artist, cancellationToken);
+
+    [HttpGet("catalog/musicvideos")]
+    public Task<object> CatalogMusicVideos(
+        [FromQuery] Guid? connectionId,
+        [FromQuery] MediaServerKind? kind,
+        [FromQuery] string? artist,
+        CancellationToken cancellationToken)
+        => _servers.GetCatalogMusicVideosAsync(connectionId, kind, artist, cancellationToken);
+
     [HttpGet("removed")]
     public Task<object> Removed(CancellationToken cancellationToken)
         => _servers.GetRemovedAsync(cancellationToken);

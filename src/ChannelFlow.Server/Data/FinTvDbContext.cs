@@ -148,6 +148,9 @@ public class FinTvDbContext : DbContext
             entity.HasIndex(e => e.SourceConnectionId);
             entity.HasIndex(e => e.IsMissing);
             entity.HasIndex(e => e.AspectRatio);
+            entity.HasIndex(e => e.TrueAspectRatio);
+            entity.HasIndex(e => e.TrueAspectProbedAt);
+            entity.HasIndex(e => e.FfprobeChaptersAt);
             entity.HasMany(e => e.Chapters).WithOne(e => e.MediaItem).HasForeignKey(e => e.MediaItemId).OnDelete(DeleteBehavior.Cascade);
         });
 

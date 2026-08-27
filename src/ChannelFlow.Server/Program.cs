@@ -156,6 +156,10 @@ builder.Services.AddSingleton<AiLineupAutoApplyTask>();
 builder.Services.AddSingleton<CatalogCleanupTask>();
 builder.Services.AddSingleton<CatalogLibraryScanService>();
 builder.Services.AddSingleton<CatalogLibraryScanTask>();
+builder.Services.AddSingleton<CatalogFfprobeScanService>();
+builder.Services.AddSingleton<CatalogFfprobeScanTask>();
+builder.Services.AddSingleton<CatalogTrueAspectScanService>();
+builder.Services.AddSingleton<CatalogTrueAspectScanTask>();
 builder.Services.AddSingleton<PlayoutBuilderService>();
 builder.Services.AddSingleton<GuideUpdateTracker>();
 builder.Services.AddSingleton<BlackframeChapterTask>();
@@ -187,6 +191,8 @@ builder.Services.AddScoped<LogoSetService>();
 builder.Services.AddScoped<LogoBumperService>();
 builder.Services.AddScoped<HolidayChannelService>();
 builder.Services.AddScoped<CatalogIngestService>();
+builder.Services.AddScoped<CatalogChapterProbeService>();
+builder.Services.AddScoped<CatalogTrueAspectProbeService>();
 builder.Services.AddScoped<JellyfinCatalogService>();
 builder.Services.AddScoped<OriginalBroadcastSimulator>();
 builder.Services.AddScoped<AiCatalogManifestBuilder>();
@@ -225,6 +231,7 @@ builder.Services.AddHostedService<MusicPackStartupHostedService>();
 builder.Services.AddHostedService<LogRetentionHostedService>();
 builder.Services.AddHostedService<MediaServerHealthHostedService>();
 builder.Services.AddHostedService<CatalogLibraryScanHostedService>();
+builder.Services.AddHostedService<CatalogFfprobeScanHostedService>();
 
 var app = builder.Build();
 

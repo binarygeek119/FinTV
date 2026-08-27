@@ -220,8 +220,8 @@ public static class ChannelAiRules
     {
         ["channelflow-past-tense-news"] = new ChannelCatalogLibraryConstraints
         {
-            LibraryName = "Home Movies",
-            AlternateLibraryNames = ["Past Tense News", "Home Movie", "Home Videos", "Home Video"]
+            LibraryName = "Past Tense News",
+            AlternateLibraryNames = ["Home Movies", "Home Movie", "Home Videos", "Home Video"]
         },
         ["channelflow-youtube"] = new ChannelCatalogLibraryConstraints
         {

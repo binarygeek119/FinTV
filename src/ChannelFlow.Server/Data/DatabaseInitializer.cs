@@ -340,7 +340,13 @@ public class DatabaseInitializer : IHostedService
             """ALTER TABLE "MediaItems" ADD COLUMN IF NOT EXISTS "Width" integer NULL""",
             """ALTER TABLE "MediaItems" ADD COLUMN IF NOT EXISTS "Height" integer NULL""",
             """ALTER TABLE "MediaItems" ADD COLUMN IF NOT EXISTS "AspectRatio" text NULL""",
-            """CREATE INDEX IF NOT EXISTS "IX_MediaItems_AspectRatio" ON "MediaItems" ("AspectRatio")"""
+            """ALTER TABLE "MediaItems" ADD COLUMN IF NOT EXISTS "FfprobeChaptersAt" timestamp with time zone NULL""",
+            """ALTER TABLE "MediaItems" ADD COLUMN IF NOT EXISTS "TrueAspectRatio" text NULL""",
+            """ALTER TABLE "MediaItems" ADD COLUMN IF NOT EXISTS "TrueAspectProbedAt" timestamp with time zone NULL""",
+            """CREATE INDEX IF NOT EXISTS "IX_MediaItems_AspectRatio" ON "MediaItems" ("AspectRatio")""",
+            """CREATE INDEX IF NOT EXISTS "IX_MediaItems_FfprobeChaptersAt" ON "MediaItems" ("FfprobeChaptersAt")""",
+            """CREATE INDEX IF NOT EXISTS "IX_MediaItems_TrueAspectRatio" ON "MediaItems" ("TrueAspectRatio")""",
+            """CREATE INDEX IF NOT EXISTS "IX_MediaItems_TrueAspectProbedAt" ON "MediaItems" ("TrueAspectProbedAt")"""
         };
 
         foreach (var sql in statements)
@@ -375,6 +381,7 @@ public class DatabaseInitializer : IHostedService
             "Width" integer NULL,
             "Height" integer NULL,
             "AspectRatio" text NULL,
+            "TrueAspectRatio" text NULL,
             "Path" text NULL,
             "JellyfinItemId" uuid NOT NULL,
             "ImdbId" text NULL,
@@ -444,9 +451,11 @@ public class DatabaseInitializer : IHostedService
                 $"""ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS "Width" integer NULL""",
                 $"""ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS "Height" integer NULL""",
                 $"""ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS "AspectRatio" text NULL""",
+                $"""ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS "TrueAspectRatio" text NULL""",
                 $"""ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS "SourceConnectionId" uuid NULL""",
                 $"""CREATE INDEX IF NOT EXISTS "IX_{table}_IsMissing" ON "{table}" ("IsMissing")""",
                 $"""CREATE INDEX IF NOT EXISTS "IX_{table}_AspectRatio" ON "{table}" ("AspectRatio")""",
+                $"""CREATE INDEX IF NOT EXISTS "IX_{table}_TrueAspectRatio" ON "{table}" ("TrueAspectRatio")""",
                 $"""CREATE INDEX IF NOT EXISTS "IX_{table}_SourceConnectionId" ON "{table}" ("SourceConnectionId")"""
             };
 

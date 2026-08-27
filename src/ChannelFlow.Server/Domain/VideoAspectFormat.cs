@@ -32,9 +32,34 @@ public static class VideoAspectFormat
     private static readonly double SixteenNineRatio = 16d / 9d;
 
     /// <summary>
-    /// Prefers an explicit 16:9/4:3 label (covers anamorphic SD), then pixel dimensions.
-    /// Returns null when there is no video size or aspect metadata.
+    /// Uses a measured active-picture ratio when present, otherwise the media-server label/size.
     /// </summary>
+    public static string? Prefer(string? trueAspectRatio, string? aspectRatio, int? width, int? height)
+    {
+        if (!string.IsNullOrWhiteSpace(trueAspectRatio))
+        {
+            return Classify(trueAspectRatio, null, null);
+        }
+
+        return Classify(aspectRatio, width, height);
+    }
+
+    /// <summary>
+    /// Stores the median cropdetect size as W:H so overlay can use the real picture box
+    /// (2.39, 1.85, 9:16, …), not a snapped 4:3/16:9 label.
+    /// </summary>
+    public static string? FromActivePictureSamples(IReadOnlyList<(int Width, int Height)> crops)
+    {
+        if (crops is null || crops.Count == 0)
+        {
+            return null;
+        }
+
+        var ordered = crops.OrderBy(crop => crop.Width / (double)crop.Height).ToList();
+        var median = ordered[ordered.Count / 2];
+        return $"{median.Width}:{median.Height}";
+    }
+
     public static string? Classify(string? aspectRatio, int? width, int? height)
     {
         var fromLabel = ClassifyLabel(aspectRatio);
@@ -81,6 +106,39 @@ public static class VideoAspectFormat
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Exact picture ratio for overlay: crop W:H, decimal, or a named 4:3/16:9 label.
+    /// Does not snap 1.85 or 2.39 onto 16:9.
+    /// </summary>
+    public static bool TryGetExactRatio(string? value, out double ratio)
+    {
+        ratio = 0;
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var named = NamedBroadcastLabel(value);
+        if (named == FourThree)
+        {
+            ratio = FourThreeRatio;
+            return true;
+        }
+
+        if (named == SixteenNine)
+        {
+            ratio = SixteenNineRatio;
+            return true;
+        }
+
+        if (named == Other)
+        {
+            return false;
+        }
+
+        return TryParseRatio(value, out ratio);
     }
 
     /// <summary>

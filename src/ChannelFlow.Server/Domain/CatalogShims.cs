@@ -52,6 +52,11 @@ public class BaseItem
     /// </summary>
     public string? AspectRatio { get; set; }
 
+    /// <summary>
+    /// Active picture ratio from cropdetect. Overrides <see cref="AspectRatio"/> when set.
+    /// </summary>
+    public string? TrueAspectRatio { get; set; }
+
     public string[] Tags { get; set; } = [];
 
     public string[] Genres { get; set; } = [];

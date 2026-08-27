@@ -40,6 +40,11 @@ public abstract class CatalogMediaRow
     /// </summary>
     public string? AspectRatio { get; set; }
 
+    /// <summary>
+    /// Active picture ratio from cropdetect. Overrides <see cref="AspectRatio"/> when set.
+    /// </summary>
+    public string? TrueAspectRatio { get; set; }
+
     public string? Path { get; set; }
 
     public Guid JellyfinItemId { get; set; }

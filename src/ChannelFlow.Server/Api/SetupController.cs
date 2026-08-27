@@ -245,6 +245,8 @@ public class TasksController : ControllerBase
     private readonly CommercialService _commercials;
     private readonly FinTvDbContext _db;
     private readonly CatalogLibraryScanService _libraryScan;
+    private readonly CatalogFfprobeScanService _ffprobeScan;
+    private readonly CatalogTrueAspectScanService _trueAspectScan;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TasksController"/> class.
@@ -254,6 +256,8 @@ public class TasksController : ControllerBase
         IServiceScopeFactory scopeFactory,
         CatalogCleanupService catalogCleanup,
         CatalogLibraryScanService libraryScan,
+        CatalogFfprobeScanService ffprobeScan,
+        CatalogTrueAspectScanService trueAspectScan,
         NewsBulletinService newsBulletins,
         StreamService streams,
         CommercialService commercials,
@@ -263,6 +267,8 @@ public class TasksController : ControllerBase
         _scopeFactory = scopeFactory;
         _catalogCleanup = catalogCleanup;
         _libraryScan = libraryScan;
+        _ffprobeScan = ffprobeScan;
+        _trueAspectScan = trueAspectScan;
         _newsBulletins = newsBulletins;
         _streams = streams;
         _commercials = commercials;
@@ -516,6 +522,72 @@ public class TasksController : ControllerBase
         });
 
         return Accepted(new { queued = true, status = _libraryScan.Describe() });
+    }
+
+    /// <summary>
+    /// Gets the midnight ffprobe chapter scan status.
+    /// </summary>
+    [HttpGet("ffprobe")]
+    public ActionResult<object> GetFfprobeScan()
+        => Ok(_ffprobeScan.Describe());
+
+    /// <summary>
+    /// Queues an ffprobe pass over video files that still have no chapter data.
+    /// </summary>
+    [HttpPost("ffprobe")]
+    public ActionResult<object> RunFfprobeScan()
+    {
+        if (_ffprobeScan.IsRunning)
+        {
+            return Ok(new { queued = false, alreadyRunning = true, status = _ffprobeScan.Describe() });
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _ffprobeScan.RunMissingAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // Admin polls status for errors.
+            }
+        });
+
+        return Accepted(new { queued = true, status = _ffprobeScan.Describe() });
+    }
+
+    /// <summary>
+    /// Gets the midnight true-aspect cropdetect scan status.
+    /// </summary>
+    [HttpGet("true-aspect")]
+    public ActionResult<object> GetTrueAspectScan()
+        => Ok(_trueAspectScan.Describe());
+
+    /// <summary>
+    /// Queues a cropdetect pass over videos that still have no TrueAspectRatio.
+    /// </summary>
+    [HttpPost("true-aspect")]
+    public ActionResult<object> RunTrueAspectScan()
+    {
+        if (_trueAspectScan.IsRunning)
+        {
+            return Ok(new { queued = false, alreadyRunning = true, status = _trueAspectScan.Describe() });
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _trueAspectScan.RunMissingAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // Admin polls status for errors.
+            }
+        });
+
+        return Accepted(new { queued = true, status = _trueAspectScan.Describe() });
     }
 }
 

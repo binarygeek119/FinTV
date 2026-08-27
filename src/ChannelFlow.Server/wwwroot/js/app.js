@@ -5529,6 +5529,186 @@
         await loadLibraryScan();
     }
 
+    let ffprobeScanPollTimer = null;
+
+    function renderFfprobeScanStatus(status) {
+        const el = $('ffprobe-scan-status');
+        const runBtn = $('btn-run-ffprobe-scan');
+        if (!el || !status) {
+            return;
+        }
+
+        if (runBtn) {
+            runBtn.disabled = !!status.isRunning;
+            runBtn.textContent = status.isRunning ? 'Scanning…' : 'Scan Missing Chapters';
+        }
+
+        const next = status.nextRunAt ? new Date(status.nextRunAt).toLocaleString() : 'midnight';
+        if (status.isRunning) {
+            el.textContent = 'ffprobe is scanning videos that still have no chapter data…';
+            return;
+        }
+
+        if (status.lastError) {
+            el.textContent =
+                `Last run failed: ${status.lastError}` +
+                (status.lastCompletedAt ? ` · finished ${new Date(status.lastCompletedAt).toLocaleString()}` : '') +
+                ` · next at ${next}.`;
+            return;
+        }
+
+        if (status.lastCompletedAt) {
+            el.textContent =
+                `Last run ${new Date(status.lastCompletedAt).toLocaleString()}: probed ${status.lastProbed} video(s), ` +
+                `found chapters on ${status.lastWithChapters}, skipped ${status.lastSkipped}, failed ${status.lastFailed}. Next at ${next}.`;
+            return;
+        }
+
+        el.textContent = `Next ffprobe chapter scan at ${next}.`;
+    }
+
+    async function loadFfprobeScan() {
+        if (!syncConfigPage()) {
+            return;
+        }
+
+        try {
+            const status = await api('/tasks/ffprobe');
+            renderFfprobeScanStatus(status);
+            if (status.isRunning) {
+                startFfprobeScanPolling();
+            } else {
+                stopFfprobeScanPolling();
+            }
+        } catch (err) {
+            const el = $('ffprobe-scan-status');
+            if (el) {
+                el.textContent = 'Could not load ffprobe chapter scan status.';
+            }
+        }
+    }
+
+    function startFfprobeScanPolling() {
+        if (ffprobeScanPollTimer) {
+            return;
+        }
+
+        ffprobeScanPollTimer = setInterval(() => {
+            loadFfprobeScan().catch(() => {});
+        }, 3000);
+    }
+
+    function stopFfprobeScanPolling() {
+        if (ffprobeScanPollTimer) {
+            clearInterval(ffprobeScanPollTimer);
+            ffprobeScanPollTimer = null;
+        }
+    }
+
+    async function runFfprobeScan() {
+        const result = await api('/tasks/ffprobe', { method: 'POST' });
+        if (result.alreadyRunning) {
+            toast('An ffprobe chapter scan is already running.', 'info');
+        } else {
+            toast('ffprobe chapter scan started.', 'success');
+        }
+        if (result.status) {
+            renderFfprobeScanStatus(result.status);
+        }
+        startFfprobeScanPolling();
+        await loadFfprobeScan();
+    }
+
+    let trueAspectScanPollTimer = null;
+
+    function renderTrueAspectScanStatus(status) {
+        const el = $('true-aspect-scan-status');
+        const runBtn = $('btn-run-true-aspect-scan');
+        if (!el || !status) {
+            return;
+        }
+
+        if (runBtn) {
+            runBtn.disabled = !!status.isRunning;
+            runBtn.textContent = status.isRunning ? 'Scanning…' : 'Scan Missing True Aspect';
+        }
+
+        const next = status.nextRunAt ? new Date(status.nextRunAt).toLocaleString() : 'midnight';
+        if (status.isRunning) {
+            el.textContent = 'ffmpeg is sampling videos that still have no TrueAspectRatio…';
+            return;
+        }
+
+        if (status.lastError) {
+            el.textContent =
+                `Last run failed: ${status.lastError}` +
+                (status.lastCompletedAt ? ` · finished ${new Date(status.lastCompletedAt).toLocaleString()}` : '') +
+                ` · next at ${next}.`;
+            return;
+        }
+
+        if (status.lastCompletedAt) {
+            el.textContent =
+                `Last run ${new Date(status.lastCompletedAt).toLocaleString()}: probed ${status.lastProbed} video(s), ` +
+                `measured ${status.lastMeasured}, skipped ${status.lastSkipped}, failed ${status.lastFailed}. Next at ${next}.`;
+            return;
+        }
+
+        el.textContent = `Next true-aspect scan at ${next}.`;
+    }
+
+    async function loadTrueAspectScan() {
+        if (!syncConfigPage()) {
+            return;
+        }
+
+        try {
+            const status = await api('/tasks/true-aspect');
+            renderTrueAspectScanStatus(status);
+            if (status.isRunning) {
+                startTrueAspectScanPolling();
+            } else {
+                stopTrueAspectScanPolling();
+            }
+        } catch (err) {
+            const el = $('true-aspect-scan-status');
+            if (el) {
+                el.textContent = 'Could not load true-aspect scan status.';
+            }
+        }
+    }
+
+    function startTrueAspectScanPolling() {
+        if (trueAspectScanPollTimer) {
+            return;
+        }
+
+        trueAspectScanPollTimer = setInterval(() => {
+            loadTrueAspectScan().catch(() => {});
+        }, 3000);
+    }
+
+    function stopTrueAspectScanPolling() {
+        if (trueAspectScanPollTimer) {
+            clearInterval(trueAspectScanPollTimer);
+            trueAspectScanPollTimer = null;
+        }
+    }
+
+    async function runTrueAspectScan() {
+        const result = await api('/tasks/true-aspect', { method: 'POST' });
+        if (result.alreadyRunning) {
+            toast('A true-aspect scan is already running.', 'info');
+        } else {
+            toast('True-aspect scan started.', 'success');
+        }
+        if (result.status) {
+            renderTrueAspectScanStatus(result.status);
+        }
+        startTrueAspectScanPolling();
+        await loadTrueAspectScan();
+    }
+
     function renderAboutDl(elementId, rows) {
         const el = $(elementId);
         if (!el) {
@@ -6420,11 +6600,11 @@
                 </div>
                 <pre class="ms-remap-result hint" id="ms-remap-result-${kind}"></pre>
             </div>
-            <div class="card section-card"><h3>TV shows</h3><div id="ms-media-${kind}-tv" class="data-table-wrap catalog-media-table"></div></div>
+            <div class="card section-card"><h3>TV shows</h3><p class="hint">Click a show, then a season, to see its episodes.</p><div id="ms-media-${kind}-tv" class="data-table-wrap catalog-media-table"></div></div>
             <div class="card section-card"><h3>Movies</h3><div id="ms-media-${kind}-movies" class="data-table-wrap catalog-media-table"></div></div>
-            <div class="card section-card"><h3>Music</h3><div id="ms-media-${kind}-music" class="data-table-wrap catalog-media-table"></div></div>
-            <div class="card section-card"><h3>Music videos</h3><div id="ms-media-${kind}-musicvideos" class="data-table-wrap catalog-media-table"></div></div>
-            <div class="card section-card"><h3>Other / news</h3><div id="ms-media-${kind}-news" class="data-table-wrap catalog-media-table"></div></div>`;
+            <div class="card section-card"><h3>Music</h3><p class="hint">Click an artist to see their songs.</p><div id="ms-media-${kind}-music" class="data-table-wrap catalog-media-table"></div></div>
+            <div class="card section-card"><h3>Music videos</h3><p class="hint">Click a star to see their music videos.</p><div id="ms-media-${kind}-musicvideos" class="data-table-wrap catalog-media-table"></div></div>
+            <div class="card section-card"><h3>Past Tense News</h3><p class="hint">Jellyfin library named Past Tense News (Home Videos and Photos). Enable it under Home movies / news, then sync.</p><div id="ms-media-${kind}-news" class="data-table-wrap catalog-media-table"></div></div>`;
         renderServerLibraries(kind, selected);
         const pick = $('ms-pick-' + kind);
         if (pick) {
@@ -6452,7 +6632,7 @@
             ['movies', 'Movies'],
             ['music', 'Music'],
             ['musicvideos', 'Music videos'],
-            ['news', 'Home movies / news'],
+            ['news', 'Past Tense News'],
             ['other', 'Other']
         ];
         el.innerHTML = groups.map(([group, label]) => {
@@ -6599,6 +6779,10 @@
             return 'Saved ' + formatSyncCount(snap.saved) + ' of ' + formatSyncCount(snap.total || snap.items);
         }
 
+        if (phase === 'chapters') {
+            return 'Probed ' + formatSyncCount(snap.saved) + ' of ' + formatSyncCount(snap.total || snap.items);
+        }
+
         if (phase === 'done') {
             return snap.percent != null ? snap.percent + '%' : '';
         }
@@ -6739,10 +6923,22 @@
         try {
             const data = await api('/media-servers/catalog?connectionId=' + encodeURIComponent(connectionId)) || {};
             const totals = data.totals || {};
-            renderCatalogMediaTable('ms-media-' + kind + '-tv', data.tvShows, totals.tvShows);
-            renderCatalogMediaTable('ms-media-' + kind + '-movies', data.movies, totals.movies);
-            renderCatalogMediaTable('ms-media-' + kind + '-music', data.music, totals.music);
-            renderCatalogMediaTable('ms-media-' + kind + '-musicvideos', data.musicVideos, totals.musicVideos);
+            renderCatalogTvTable('ms-media-' + kind + '-tv', data.tvShows, totals.tvShows, connectionId, kind);
+            renderCatalogMovieList('ms-media-' + kind + '-movies', data.movies, totals.movies);
+            renderCatalogArtistTable('ms-media-' + kind + '-music', data.music, totals.music, connectionId, kind, {
+                endpoint: '/media-servers/catalog/music',
+                nounSingular: 'song',
+                nounPlural: 'songs',
+                groupLabel: 'artists',
+                emptyItems: 'No songs synced for this artist.'
+            });
+            renderCatalogArtistTable('ms-media-' + kind + '-musicvideos', data.musicVideos, totals.musicVideos, connectionId, kind, {
+                endpoint: '/media-servers/catalog/musicvideos',
+                nounSingular: 'music video',
+                nounPlural: 'music videos',
+                groupLabel: 'stars',
+                emptyItems: 'No music videos synced for this star.'
+            });
             renderCatalogMediaTable('ms-media-' + kind + '-news', data.pastTenseNews, totals.pastTenseNews);
         } catch (err) {
             reportApiError(err, 'Could not load catalog.');
@@ -6827,6 +7023,349 @@
 
     async function saveJellyfinLibraries() {
         await loadLibraryTab();
+    }
+
+    function renderCatalogTvTable(containerId, rows, total, connectionId, kind) {
+        const el = $(containerId);
+        if (!el) {
+            return;
+        }
+
+        const items = Array.isArray(rows) ? rows : [];
+        if (!items.length) {
+            el.innerHTML = '<div class="empty-state">No synced items yet. Add a connection, refresh libraries, then sync.</div>';
+            return;
+        }
+
+        const count = typeof total === 'number' ? total : items.length;
+        const note = count > items.length
+            ? `<div class="meta">Showing ${items.length} of ${count} shows</div>`
+            : '';
+
+        el.innerHTML = `${note}<div class="catalog-show-list">${items.map((row) => {
+            const episodeCount = Number(row.episodeCount) || 0;
+            const episodeLabel = episodeCount === 1 ? '1 episode' : `${episodeCount} episodes`;
+            const rating = row.rating || row.officialRating || '';
+            const meta = [episodeLabel, rating, row.libraryName].filter(Boolean).join(' · ');
+            return `<details class="catalog-show" data-series-id="${escapeHtml(row.seriesId || row.id || '')}" data-series-name="${escapeHtml(row.seriesName || row.name || '')}">
+                <summary>
+                    <span class="catalog-show-title">${escapeHtml(row.name || 'Untitled series')}</span>
+                    <span class="catalog-show-meta">${escapeHtml(meta)}</span>
+                </summary>
+                <div class="catalog-show-body">
+                    ${row.plot ? `<p class="catalog-show-plot">${escapeHtml(row.plot)}</p>` : ''}
+                    <div class="catalog-show-episodes"><div class="hint">Click to load episodes…</div></div>
+                </div>
+            </details>`;
+        }).join('')}</div>`;
+
+        el.querySelectorAll('details.catalog-show').forEach((details) => {
+            details.addEventListener('toggle', () => {
+                if (!details.open || details.dataset.loaded === 'true' || details.dataset.loading === 'true') {
+                    return;
+                }
+
+                loadCatalogShowEpisodes(details, connectionId, kind).catch((err) => {
+                    const box = details.querySelector('.catalog-show-episodes');
+                    if (box) {
+                        box.innerHTML = `<div class="empty-state">${escapeHtml(err.message || 'Could not load episodes.')}</div>`;
+                    }
+                });
+            });
+        });
+    }
+
+    async function loadCatalogShowEpisodes(details, connectionId, kind) {
+        const box = details.querySelector('.catalog-show-episodes');
+        if (!box) {
+            return;
+        }
+
+        details.dataset.loading = 'true';
+        box.innerHTML = '<div class="hint">Loading episodes…</div>';
+        const params = new URLSearchParams();
+        if (connectionId) {
+            params.set('connectionId', connectionId);
+        }
+        if (kind) {
+            params.set('kind', kind);
+        }
+
+        const seriesId = details.dataset.seriesId || '';
+        const seriesName = details.dataset.seriesName || '';
+        if (seriesId && seriesId !== '00000000-0000-0000-0000-000000000000') {
+            params.set('seriesId', seriesId);
+        } else if (seriesName) {
+            params.set('seriesName', seriesName);
+        }
+
+        try {
+            const data = await api('/media-servers/catalog/episodes?' + params.toString()) || {};
+            const episodes = Array.isArray(data.episodes) ? data.episodes : [];
+            details.dataset.loaded = 'true';
+            box.innerHTML = renderCatalogEpisodeRows(episodes);
+        } finally {
+            delete details.dataset.loading;
+        }
+    }
+
+    function catalogSeasonKey(row) {
+        if (row.season != null && row.season !== '') {
+            return 'n:' + String(row.season);
+        }
+
+        const name = (row.seasonName || '').trim();
+        if (name) {
+            return 's:' + name.toLowerCase();
+        }
+
+        return 'unknown';
+    }
+
+    function catalogSeasonLabel(row) {
+        if (row.season != null && row.season !== '') {
+            return 'Season ' + String(row.season).padStart(2, '0');
+        }
+
+        const name = (row.seasonName || '').trim();
+        if (name) {
+            return /^season\b/i.test(name) ? name : 'Season ' + name;
+        }
+
+        return 'Season unknown';
+    }
+
+    function catalogSeasonSortValue(row) {
+        if (row.season != null && row.season !== '') {
+            const n = Number(row.season);
+            return Number.isFinite(n) ? n : 9999;
+        }
+
+        return 10000;
+    }
+
+    function groupCatalogEpisodesBySeason(episodes) {
+        const groups = [];
+        const byKey = new Map();
+        episodes.forEach((row) => {
+            const key = catalogSeasonKey(row);
+            let group = byKey.get(key);
+            if (!group) {
+                group = {
+                    key,
+                    label: catalogSeasonLabel(row),
+                    sort: catalogSeasonSortValue(row),
+                    episodes: []
+                };
+                byKey.set(key, group);
+                groups.push(group);
+            }
+            group.episodes.push(row);
+        });
+
+        groups.sort((a, b) => a.sort - b.sort || a.label.localeCompare(b.label, undefined, { numeric: true, sensitivity: 'base' }));
+        groups.forEach((group) => {
+            group.episodes.sort((a, b) => {
+                const ea = Number(a.episode);
+                const eb = Number(b.episode);
+                if (Number.isFinite(ea) && Number.isFinite(eb) && ea !== eb) {
+                    return ea - eb;
+                }
+
+                return String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true, sensitivity: 'base' });
+            });
+        });
+        return groups;
+    }
+
+    function renderCatalogEpisodeRows(episodes) {
+        if (!episodes.length) {
+            return '<div class="empty-state">No episodes synced for this show.</div>';
+        }
+
+        const seasons = groupCatalogEpisodesBySeason(episodes);
+        return `<div class="catalog-season-list">${seasons.map((season) => {
+            const episodeLabel = season.episodes.length === 1 ? '1 episode' : `${season.episodes.length} episodes`;
+            const rows = season.episodes.map((row) => `<tr>
+                <td>${escapeHtml(row.code || '')}</td>
+                <td>${escapeHtml(row.name || '')}</td>
+                <td>${escapeHtml(row.runtime || '')}</td>
+                <td>${escapeHtml(row.format || '')}</td>
+                <td>${escapeHtml(row.rating || '')}</td>
+                <td class="catalog-plot" title="${escapeHtml(row.plot || '')}">${escapeHtml(row.plot || '')}</td>
+                <td class="catalog-path" title="${escapeHtml(row.path || '')}">${escapeHtml(row.path || '')}</td>
+            </tr>`).join('');
+            return `<details class="catalog-season">
+                <summary>
+                    <span class="catalog-show-title">${escapeHtml(season.label)}</span>
+                    <span class="catalog-show-meta">${escapeHtml(episodeLabel)}</span>
+                </summary>
+                <div class="catalog-season-body">
+                    <table class="data-table catalog-episode-table">
+                        <thead>
+                            <tr>
+                                <th>Episode</th>
+                                <th>Title</th>
+                                <th>Runtime</th>
+                                <th>Format</th>
+                                <th>Rating</th>
+                                <th>Plot</th>
+                                <th>Path</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
+            </details>`;
+        }).join('')}</div>`;
+    }
+
+    function renderCatalogMovieList(containerId, rows, total) {
+        const el = $(containerId);
+        if (!el) {
+            return;
+        }
+
+        const items = Array.isArray(rows) ? rows : [];
+        if (!items.length) {
+            el.innerHTML = '<div class="empty-state">No synced items yet. Add a connection, refresh libraries, then sync.</div>';
+            return;
+        }
+
+        const count = typeof total === 'number' ? total : items.length;
+        const note = count > items.length
+            ? `<div class="meta">Showing ${items.length} of ${count} movies</div>`
+            : '';
+
+        el.innerHTML = `${note}<div class="catalog-show-list catalog-movie-list">${items.map((row) => {
+            const year = row.year || row.productionYear || '';
+            const meta = [row.runtime, row.format || row.aspectRatio, year, row.rating || row.officialRating]
+                .filter(Boolean)
+                .join(' · ');
+            return `<div class="catalog-show catalog-movie">
+                <div class="catalog-movie-row">
+                    <span class="catalog-show-title">${escapeHtml(row.name || 'Untitled')}</span>
+                    <span class="catalog-show-meta">${escapeHtml(meta)}</span>
+                </div>
+            </div>`;
+        }).join('')}</div>`;
+    }
+
+    function renderCatalogArtistTable(containerId, rows, total, connectionId, kind, options) {
+        const el = $(containerId);
+        if (!el) {
+            return;
+        }
+
+        options = options || {};
+        const items = Array.isArray(rows) ? rows : [];
+        if (!items.length) {
+            el.innerHTML = '<div class="empty-state">No synced items yet. Add a connection, refresh libraries, then sync.</div>';
+            return;
+        }
+
+        const count = typeof total === 'number' ? total : items.length;
+        const groupLabel = options.groupLabel || 'artists';
+        const note = count > items.length
+            ? `<div class="meta">Showing ${items.length} of ${count} ${groupLabel}</div>`
+            : '';
+        const nounSingular = options.nounSingular || 'item';
+        const nounPlural = options.nounPlural || 'items';
+
+        el.innerHTML = `${note}<div class="catalog-show-list">${items.map((row) => {
+            const itemCount = Number(row.itemCount) || 0;
+            const itemLabel = itemCount === 1 ? '1 ' + nounSingular : `${itemCount} ${nounPlural}`;
+            const artistName = row.artistName || row.name || 'Unknown artist';
+            return `<details class="catalog-show" data-artist-name="${escapeHtml(artistName)}">
+                <summary>
+                    <span class="catalog-show-title">${escapeHtml(artistName)}</span>
+                    <span class="catalog-show-meta">${escapeHtml(itemLabel)}</span>
+                </summary>
+                <div class="catalog-show-body">
+                    <div class="catalog-show-episodes"><div class="hint">Click to load ${nounPlural}…</div></div>
+                </div>
+            </details>`;
+        }).join('')}</div>`;
+
+        el.querySelectorAll('details.catalog-show').forEach((details) => {
+            details.addEventListener('toggle', () => {
+                if (!details.open || details.dataset.loaded === 'true' || details.dataset.loading === 'true') {
+                    return;
+                }
+
+                loadCatalogArtistItems(details, connectionId, kind, options).catch((err) => {
+                    const box = details.querySelector('.catalog-show-episodes');
+                    if (box) {
+                        box.innerHTML = `<div class="empty-state">${escapeHtml(err.message || 'Could not load items.')}</div>`;
+                    }
+                });
+            });
+        });
+    }
+
+    async function loadCatalogArtistItems(details, connectionId, kind, options) {
+        const box = details.querySelector('.catalog-show-episodes');
+        if (!box) {
+            return;
+        }
+
+        details.dataset.loading = 'true';
+        box.innerHTML = '<div class="hint">Loading…</div>';
+        const params = new URLSearchParams();
+        if (connectionId) {
+            params.set('connectionId', connectionId);
+        }
+        if (kind) {
+            params.set('kind', kind);
+        }
+
+        const artistName = details.dataset.artistName || '';
+        if (artistName) {
+            params.set('artist', artistName);
+        }
+
+        try {
+            const data = await api((options.endpoint || '') + '?' + params.toString()) || {};
+            const items = Array.isArray(data.items) ? data.items : [];
+            details.dataset.loaded = 'true';
+            box.innerHTML = renderCatalogArtistItemRows(items, options.emptyItems || 'Nothing synced for this artist.');
+        } finally {
+            delete details.dataset.loading;
+        }
+    }
+
+    function renderCatalogArtistItemRows(items, emptyMessage) {
+        if (!items.length) {
+            return `<div class="empty-state">${escapeHtml(emptyMessage)}</div>`;
+        }
+
+        const showAlbum = items.some((row) => row.album);
+        return `<div class="catalog-season-body"><table class="data-table catalog-episode-table">
+            <thead>
+                <tr>
+                    <th>Title</th>
+                    ${showAlbum ? '<th>Album</th>' : ''}
+                    <th>Runtime</th>
+                    <th>Format</th>
+                    <th>Rating</th>
+                    <th>Plot</th>
+                    <th>Stars</th>
+                    <th>Path</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${items.map((row) => `<tr>
+                    <td>${escapeHtml(row.name || '')}</td>
+                    ${showAlbum ? `<td>${escapeHtml(row.album || '')}</td>` : ''}
+                    <td>${escapeHtml(row.runtime || '')}</td>
+                    <td>${escapeHtml(row.format || '')}</td>
+                    <td>${escapeHtml(row.rating || '')}</td>
+                    <td class="catalog-plot" title="${escapeHtml(row.plot || '')}">${escapeHtml(row.plot || '')}</td>
+                    <td>${escapeHtml(row.stars || '')}</td>
+                    <td class="catalog-path" title="${escapeHtml(row.path || '')}">${escapeHtml(row.path || '')}</td>
+                </tr>`).join('')}
+            </tbody>
+        </table></div>`;
     }
 
     function renderCatalogMediaTable(containerId, rows, total) {
@@ -7912,6 +8451,8 @@
         if (name === 'tasks') {
             loadCatalogCleanup();
             loadLibraryScan();
+            loadFfprobeScan();
+            loadTrueAspectScan();
             api('/news/settings').then((settings) => renderNewsBulletinStatus(settings.bulletin)).catch(() => {});
         }
         if (name === 'special') loadSpecialPresentations();
@@ -8135,6 +8676,8 @@
         click('btn-run-catalog-cleanup', () => runCatalogCleanup().catch((e) => toast(e.message, 'error')));
         click('btn-scan-local-catalog', () => runCatalogLocalScan().catch((e) => toast(e.message, 'error')));
         click('btn-run-library-scan', () => runLibraryScan().catch((e) => toast(e.message, 'error')));
+        click('btn-run-ffprobe-scan', () => runFfprobeScan().catch((e) => toast(e.message, 'error')));
+        click('btn-run-true-aspect-scan', () => runTrueAspectScan().catch((e) => toast(e.message, 'error')));
 
         click('btn-copy-m3u', () => copySetupUrl('m3u'));
         click('btn-copy-xmltv', () => copySetupUrl('xmltv'));
