@@ -468,37 +468,8 @@ public sealed class MediaServerService
         };
     }
 
-    private async Task SaveChangesRetryingAsync(CancellationToken cancellationToken)
-    {
-        for (var attempt = 0; attempt < 3; attempt++)
-        {
-            try
-            {
-                await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-                return;
-            }
-            catch (DbUpdateConcurrencyException ex) when (attempt < 2)
-            {
-                foreach (var entry in ex.Entries)
-                {
-                    if (entry.State == EntityState.Deleted)
-                    {
-                        entry.State = EntityState.Detached;
-                        continue;
-                    }
-
-                    try
-                    {
-                        await entry.ReloadAsync(cancellationToken).ConfigureAwait(false);
-                    }
-                    catch (Exception)
-                    {
-                        entry.State = EntityState.Detached;
-                    }
-                }
-            }
-        }
-    }
+    private Task SaveChangesRetryingAsync(CancellationToken cancellationToken)
+        => _db.SaveChangesIgnoringGoneRowsAsync(cancellationToken);
 
     private static bool IsUniqueViolation(DbUpdateException ex)
         => ex.InnerException is Npgsql.PostgresException postgres

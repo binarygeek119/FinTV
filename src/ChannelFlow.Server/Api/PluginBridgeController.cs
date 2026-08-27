@@ -53,9 +53,19 @@ public class PluginBridgeController : ControllerBase
 
         var incomingIds = request.Items.Select(i => i.Id).ToHashSet();
 
+        await _db.MediaChapters
+            .Where(chapter => incomingIds.Contains(chapter.MediaItemId))
+            .ExecuteDeleteAsync(cancellationToken);
+        foreach (var tracked in _db.ChangeTracker.Entries<MediaChapter>()
+            .Where(entry => incomingIds.Contains(entry.Entity.MediaItemId))
+            .ToList())
+        {
+            tracked.State = EntityState.Detached;
+        }
+
         foreach (var item in request.Items)
         {
-            var row = await _db.MediaItems.Include(i => i.Chapters).FirstOrDefaultAsync(i => i.Id == item.Id, cancellationToken);
+            var row = await _db.MediaItems.FirstOrDefaultAsync(i => i.Id == item.Id, cancellationToken);
             if (row is null)
             {
                 row = new MediaItem { Id = item.Id };
@@ -105,8 +115,6 @@ public class PluginBridgeController : ControllerBase
             row.IsMissing = false;
             row.MissingSince = null;
 
-            _db.MediaChapters.RemoveRange(row.Chapters);
-            row.Chapters.Clear();
             if (item.Chapters is { Count: > 0 })
             {
                 foreach (var chapter in item.Chapters)
@@ -122,7 +130,7 @@ public class PluginBridgeController : ControllerBase
         }
 
         await _typedCatalog.UpsertAsync(request.Items, request.ReplaceAll, cancellationToken);
-        await _db.SaveChangesAsync(cancellationToken);
+        await _db.SaveChangesIgnoringGoneRowsAsync(cancellationToken);
         if (request.ReplaceAll)
         {
             await _catalogCleanup.MarkMissingExceptAsync(incomingIds, cancellationToken);
@@ -175,13 +183,20 @@ public class PluginBridgeController : ControllerBase
         [FromBody] List<CatalogChapterDto> chapters,
         CancellationToken cancellationToken)
     {
-        var row = await _db.MediaItems.Include(i => i.Chapters).FirstOrDefaultAsync(i => i.Id == itemId, cancellationToken);
+        var row = await _db.MediaItems.FirstOrDefaultAsync(i => i.Id == itemId, cancellationToken);
         if (row is null)
         {
             return NotFound();
         }
 
-        _db.MediaChapters.RemoveRange(row.Chapters);
+        await _db.MediaChapters.Where(c => c.MediaItemId == itemId).ExecuteDeleteAsync(cancellationToken);
+        foreach (var tracked in _db.ChangeTracker.Entries<MediaChapter>()
+            .Where(entry => entry.Entity.MediaItemId == itemId)
+            .ToList())
+        {
+            tracked.State = EntityState.Detached;
+        }
+
         row.Chapters.Clear();
         foreach (var chapter in chapters ?? [])
         {
@@ -193,7 +208,7 @@ public class PluginBridgeController : ControllerBase
             });
         }
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await _db.SaveChangesIgnoringGoneRowsAsync(cancellationToken);
         return Ok(new { count = row.Chapters.Count });
     }
 

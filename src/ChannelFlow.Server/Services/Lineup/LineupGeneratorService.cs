@@ -407,26 +407,7 @@ public class LineupGeneratorService
     }
 
     private async Task SavePlayoutChangesAsync(CancellationToken cancellationToken)
-    {
-        for (var attempt = 0; attempt < 3; attempt++)
-        {
-            try
-            {
-                await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-                return;
-            }
-            catch (DbUpdateConcurrencyException ex) when (attempt < 2)
-            {
-                foreach (var entry in ex.Entries)
-                {
-                    if (entry.State == EntityState.Deleted)
-                    {
-                        entry.State = EntityState.Detached;
-                    }
-                }
-            }
-        }
-    }
+        => await _db.SaveChangesIgnoringGoneRowsAsync(cancellationToken).ConfigureAwait(false);
 
     private async Task CachePlayoutPostersAsync(
         Channel channel,

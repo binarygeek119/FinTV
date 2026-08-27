@@ -45,8 +45,8 @@ public sealed class CatalogIngestService
             for (var attempt = 0; attempt < 3; attempt++)
             {
                 _db.ChangeTracker.Clear();
+                await ReplaceChaptersAsync(ids, cancellationToken);
                 var existing = await _db.MediaItems
-                    .Include(i => i.Chapters)
                     .Where(i => ids.Contains(i.Id))
                     .ToDictionaryAsync(i => i.Id, cancellationToken);
 
@@ -59,12 +59,14 @@ public sealed class CatalogIngestService
                 await _typedCatalog.UpsertAsync(chunk.ToArray(), replaceAll: false, cancellationToken);
                 try
                 {
-                    await _db.SaveChangesAsync(cancellationToken);
+                    await _db.SaveChangesIgnoringGoneRowsAsync(cancellationToken);
                     break;
                 }
                 catch (DbUpdateConcurrencyException) when (attempt < 2)
                 {
-                    // Catalog cleanup or another sync removed a row after we loaded it.
+                }
+                catch (DbUpdateException ex) when (attempt < 2 && IsUniqueViolation(ex))
+                {
                 }
             }
 
@@ -146,8 +148,6 @@ public sealed class CatalogIngestService
         row.IsMissing = false;
         row.MissingSince = null;
 
-        _db.MediaChapters.RemoveRange(row.Chapters);
-        row.Chapters.Clear();
         if (item.Chapters is { Count: > 0 })
         {
             foreach (var chapter in item.Chapters)
@@ -159,6 +159,24 @@ public sealed class CatalogIngestService
                     Name = chapter.Name
                 });
             }
+        }
+    }
+
+    private async Task ReplaceChaptersAsync(IReadOnlyCollection<Guid> mediaItemIds, CancellationToken cancellationToken)
+    {
+        if (mediaItemIds.Count == 0)
+        {
+            return;
+        }
+
+        await _db.MediaChapters
+            .Where(chapter => mediaItemIds.Contains(chapter.MediaItemId))
+            .ExecuteDeleteAsync(cancellationToken);
+        foreach (var tracked in _db.ChangeTracker.Entries<MediaChapter>()
+            .Where(entry => mediaItemIds.Contains(entry.Entity.MediaItemId))
+            .ToList())
+        {
+            tracked.State = EntityState.Detached;
         }
     }
 
@@ -182,4 +200,8 @@ public sealed class CatalogIngestService
 
         return $"{time.Seconds}s";
     }
+
+    private static bool IsUniqueViolation(DbUpdateException ex)
+        => ex.InnerException is Npgsql.PostgresException postgres
+            && postgres.SqlState == Npgsql.PostgresErrorCodes.UniqueViolation;
 }

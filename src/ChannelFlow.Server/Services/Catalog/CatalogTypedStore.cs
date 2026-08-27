@@ -95,7 +95,7 @@ public sealed class CatalogTypedStore
         {
             var batch = rows.Skip(offset).Take(batchSize).Select(ToDto).ToList();
             await UpsertAsync(batch, replaceAll: false, cancellationToken);
-            await _db.SaveChangesAsync(cancellationToken);
+            await _db.SaveChangesIgnoringGoneRowsAsync(cancellationToken);
         }
     }
 
@@ -134,7 +134,7 @@ public sealed class CatalogTypedStore
             }
         }
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await _db.SaveChangesIgnoringGoneRowsAsync(cancellationToken);
     }
 
     private static async Task<List<T>> NormalizeRowsAsync<T>(DbSet<T> set, CancellationToken cancellationToken)
