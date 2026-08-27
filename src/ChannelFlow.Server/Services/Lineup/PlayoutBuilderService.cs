@@ -79,6 +79,7 @@ public class PlayoutBuilderService : BackgroundService
         var channels = await db.Channels.Where(c => c.Enabled).ToListAsync(cancellationToken);
         foreach (var channel in channels)
         {
+            using var gate = await ChannelApplyLocks.AcquireAsync(channel.Id, cancellationToken);
             if (holidays.IsHolidayChannel(channel))
             {
                 var scheduleDate = holidays.GetScheduleDateUtc(now);
@@ -235,6 +236,7 @@ public class PlayoutBuilderService : BackgroundService
         var channels = await db.Channels.Where(c => c.Enabled).ToListAsync(cancellationToken);
         foreach (var channel in channels)
         {
+            using var gate = await ChannelApplyLocks.AcquireAsync(channel.Id, cancellationToken);
             await generator.BuildPlayoutAsync(
                 channel,
                 rebuildStart,

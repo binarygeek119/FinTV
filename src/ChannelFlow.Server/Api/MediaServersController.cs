@@ -2,6 +2,7 @@ using FinTv.Domain;
 using FinTv.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace FinTv.Api;
 
@@ -98,6 +99,10 @@ public class MediaServersController : ControllerBase
         catch (InvalidOperationException ex)
         {
             return BadRequest(new { message = ex.Message });
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(new { message = "Libraries changed while refreshing. Try again." });
         }
     }
 

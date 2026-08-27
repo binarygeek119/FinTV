@@ -95,7 +95,7 @@ public sealed class MediaServerService
             row.UserId = result.UserId;
         }
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await SaveChangesRetryingAsync(cancellationToken);
         return new { health = result, server = Public(row) };
     }
 
@@ -109,33 +109,65 @@ public sealed class MediaServerService
 
     public async Task<object> RefreshLibrariesAsync(Guid id, CancellationToken cancellationToken)
     {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            try
+            {
+                return await RefreshLibrariesOnceAsync(id, cancellationToken).ConfigureAwait(false);
+            }
+            catch (DbUpdateConcurrencyException) when (attempt < 2)
+            {
+                _db.ChangeTracker.Clear();
+            }
+            catch (DbUpdateException ex) when (attempt < 2 && IsUniqueViolation(ex))
+            {
+                _db.ChangeTracker.Clear();
+            }
+        }
+
+        throw new InvalidOperationException("Could not refresh libraries because they changed at the same time. Try again.");
+    }
+
+    private async Task<object> RefreshLibrariesOnceAsync(Guid id, CancellationToken cancellationToken)
+    {
         var row = await _db.MediaServerConnections.Include(c => c.Libraries).FirstOrDefaultAsync(c => c.Id == id, cancellationToken)
             ?? throw new InvalidOperationException("Media server not found.");
         var remote = await Provider(row.Kind).ListLibrariesAsync(row, cancellationToken);
-        var existing = row.Libraries.ToDictionary(l => l.ExternalId, StringComparer.OrdinalIgnoreCase);
+        var existing = row.Libraries
+            .GroupBy(library => library.ExternalId ?? "", StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var order = 0;
         foreach (var lib in remote)
         {
-            if (!existing.TryGetValue(lib.ExternalId, out var local))
+            var externalId = (lib.ExternalId ?? "").Trim();
+            if (externalId.Length == 0 || !seen.Add(externalId))
+            {
+                continue;
+            }
+
+            if (!existing.TryGetValue(externalId, out var local))
             {
                 local = new MediaServerLibrary
                 {
                     Id = Guid.NewGuid(),
                     ConnectionId = row.Id,
-                    ExternalId = lib.ExternalId,
+                    ExternalId = externalId,
                     SyncEnabled = true
                 };
                 row.Libraries.Add(local);
-                existing[lib.ExternalId] = local;
+                _db.MediaServerLibraries.Add(local);
+                existing[externalId] = local;
             }
 
+            local.ExternalId = externalId;
             local.Name = lib.Name;
             local.CollectionType = lib.CollectionType;
             local.ItemCount = lib.ItemCount ?? local.ItemCount;
             local.SortOrder = order++;
         }
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await SaveChangesRetryingAsync(cancellationToken);
         return Public(row);
     }
 
@@ -157,7 +189,7 @@ public sealed class MediaServerService
             local.SyncEnabled = update.SyncEnabled;
         }
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await SaveChangesRetryingAsync(cancellationToken);
         SyncLegacyJellyfinSettings();
         return Public(row);
     }
@@ -242,7 +274,7 @@ public sealed class MediaServerService
 
             if (count == 0)
             {
-                await _db.SaveChangesAsync(cancellationToken);
+                await SaveChangesRetryingAsync(cancellationToken);
                 SyncLegacyJellyfinSettings();
                 _progress.Complete(0);
                 _logger.LogWarning("Catalog sync for {Server} imported 0 items; existing catalog was left unchanged", row.Name);
@@ -261,7 +293,7 @@ public sealed class MediaServerService
                 library.ItemCount = libraryCounts.GetValueOrDefault(library.Name);
             }
 
-            await _db.SaveChangesAsync(cancellationToken);
+            await SaveChangesRetryingAsync(cancellationToken);
             SyncLegacyJellyfinSettings();
             _progress.Complete(count);
             _logger.LogInformation("Catalog sync for {Server} saved {Count} items", row.Name, count);
@@ -435,6 +467,42 @@ public sealed class MediaServerService
             })
         };
     }
+
+    private async Task SaveChangesRetryingAsync(CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            try
+            {
+                await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            catch (DbUpdateConcurrencyException ex) when (attempt < 2)
+            {
+                foreach (var entry in ex.Entries)
+                {
+                    if (entry.State == EntityState.Deleted)
+                    {
+                        entry.State = EntityState.Detached;
+                        continue;
+                    }
+
+                    try
+                    {
+                        await entry.ReloadAsync(cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception)
+                    {
+                        entry.State = EntityState.Detached;
+                    }
+                }
+            }
+        }
+    }
+
+    private static bool IsUniqueViolation(DbUpdateException ex)
+        => ex.InnerException is Npgsql.PostgresException postgres
+            && postgres.SqlState == Npgsql.PostgresErrorCodes.UniqueViolation;
 
     private IMediaServerProvider Provider(MediaServerKind kind)
         => _providers.TryGetValue(kind, out var provider)

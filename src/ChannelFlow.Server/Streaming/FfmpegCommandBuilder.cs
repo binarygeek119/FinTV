@@ -1124,6 +1124,7 @@ public class FfmpegCommandBuilder
             [
                 "-loop", "1",
                 "-framerate", _normalization.Current.FpsOutput,
+                "-pix_fmt", "rgba",
                 "-i", bug
             ]);
         }
@@ -1173,8 +1174,8 @@ public class FfmpegCommandBuilder
             var alpha = ChannelBugLayout.AlphaFilters(fadeBugIn, fadeBugOut, durationSeconds);
             graph =
                 $"[0:v]{linear}[base];" +
-                $"[1:v]format=rgba,scale={bugWidth}:-1:force_original_aspect_ratio=decrease,{alpha}[bug];" +
-                $"[base][bug]overlay={position}:format=auto:eof_action=repeat:repeatlast=1[vout]";
+                $"[1:v]{PrepareTransparentBug(bugWidth, alpha)}[bug];" +
+                $"[base][bug]{OverlayTransparentBug(position)}[vout]";
         }
 
         if (tickerPng && gpuFilters is null)
@@ -1273,18 +1274,33 @@ public class FfmpegCommandBuilder
         var current = "base";
         if (hasBug)
         {
-            var next = gpuTicker ? "withbug" : "vout";
-            var encodeMap = gpuTicker ? string.Empty : GpuEncodeMap(gpuFilters);
+            // overlay_vaapi / NV12 drops PNG alpha and fills transparent pixels.
+            // Download, composite the RGBA bug in RGB, then upload for encode.
             graph +=
-                $";[1:v]format=bgra,scale={bugWidth}:-1:force_original_aspect_ratio=decrease,{alpha},format=nv12,hwupload=extra_hw_frames=64[bug]" +
-                $";[{current}][bug]overlay_vaapi=x={overlayX}:y={overlayY}{encodeMap}[{next}]";
-            current = next;
+                $";[{current}]hwdownload,format=yuv420p[basecpu]" +
+                $";[1:v]{PrepareTransparentBug(bugWidth, alpha)}[bug]" +
+                $";[basecpu][bug]{OverlayTransparentBug($"{overlayX}:{overlayY}")}[withbug]";
+            current = "withbug";
         }
 
         if (gpuTicker)
         {
-            graph += ";" + BuildGpuTickerSource(width, height, alertTickerPath!);
-            graph += $";[{current}][ticker]overlay_vaapi=x=0:y=H-h{GpuEncodeMap(gpuFilters)}[vout]";
+            if (hasBug)
+            {
+                graph += $";{BuildCpuTickerMovie(width, height, alertTickerPath!)}[ticker]";
+                graph += $";[{current}][ticker]overlay=x=0:y=H-h:format=rgb:eof_action=repeat:repeatlast=1[vticked]";
+                current = "vticked";
+                graph += $";[{current}]format=nv12,hwupload=extra_hw_frames=64{GpuEncodeMap(gpuFilters)}[vout]";
+            }
+            else
+            {
+                graph += ";" + BuildGpuTickerSource(width, height, alertTickerPath!);
+                graph += $";[{current}][ticker]overlay_vaapi=x=0:y=H-h{GpuEncodeMap(gpuFilters)}[vout]";
+            }
+        }
+        else if (hasBug)
+        {
+            graph += $";[{current}]format=nv12,hwupload=extra_hw_frames=64{GpuEncodeMap(gpuFilters)}[vout]";
         }
 
         return graph;
@@ -1459,7 +1475,7 @@ public class FfmpegCommandBuilder
         if (!string.IsNullOrWhiteSpace(logoPath) && File.Exists(logoPath))
         {
             var logoInput = current == "[tmpv]" ? "2:v" : "1:v";
-            baseFilter += $";{current}[{logoInput}]format=rgba,scale=160:-1,colorchannelmixer=aa={ChannelBugLayout.Opacity.ToString(CultureInfo.InvariantCulture)}[logo];{current}[logo]overlay=W-w-40:40:format=auto[vout]";
+            baseFilter += $";{current}[{logoInput}]{PrepareTransparentBug(160, $"colorchannelmixer=aa={ChannelBugLayout.Opacity.ToString(CultureInfo.InvariantCulture)}")}[logo];{current}[logo]{OverlayTransparentBug("W-w-40:40")}[vout]";
         }
         else
         {
@@ -1488,6 +1504,16 @@ public class FfmpegCommandBuilder
 
         return baseFilter;
     }
+
+    private static string PrepareTransparentBug(int bugWidth, string alpha)
+        => $"format=rgba,scale={bugWidth}:-1:force_original_aspect_ratio=decrease:flags=lanczos,{alpha}";
+
+    /// <summary>
+    /// Composite a PNG bug in RGB so per-pixel alpha is kept. yuv420/auto overlay
+    /// drops the alpha plane and paints an opaque box.
+    /// </summary>
+    private static string OverlayTransparentBug(string position)
+        => $"overlay={position}:format=rgb:eof_action=repeat:repeatlast=1";
 
     private static string GetBugOverlay(
         Channel channel,

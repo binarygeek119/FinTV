@@ -42,20 +42,32 @@ public sealed class CatalogIngestService
         foreach (var chunk in items.Chunk(200))
         {
             var ids = chunk.Select(i => i.Id).ToList();
-            var existing = await _db.MediaItems
-                .Include(i => i.Chapters)
-                .Where(i => ids.Contains(i.Id))
-                .ToDictionaryAsync(i => i.Id, cancellationToken);
-
-            foreach (var item in chunk)
+            for (var attempt = 0; attempt < 3; attempt++)
             {
-                item.SourceConnectionId = connectionId ?? item.SourceConnectionId;
-                ApplyMediaItem(existing, item);
+                _db.ChangeTracker.Clear();
+                var existing = await _db.MediaItems
+                    .Include(i => i.Chapters)
+                    .Where(i => ids.Contains(i.Id))
+                    .ToDictionaryAsync(i => i.Id, cancellationToken);
+
+                foreach (var item in chunk)
+                {
+                    item.SourceConnectionId = connectionId ?? item.SourceConnectionId;
+                    ApplyMediaItem(existing, item);
+                }
+
+                await _typedCatalog.UpsertAsync(chunk.ToArray(), replaceAll: false, cancellationToken);
+                try
+                {
+                    await _db.SaveChangesAsync(cancellationToken);
+                    break;
+                }
+                catch (DbUpdateConcurrencyException) when (attempt < 2)
+                {
+                    // Catalog cleanup or another sync removed a row after we loaded it.
+                }
             }
 
-            await _typedCatalog.UpsertAsync(chunk.ToArray(), replaceAll: false, cancellationToken);
-            await _db.SaveChangesAsync(cancellationToken);
-            _db.ChangeTracker.Clear();
             saved += chunk.Length;
             _progress.Saving(saved, items.Count);
         }

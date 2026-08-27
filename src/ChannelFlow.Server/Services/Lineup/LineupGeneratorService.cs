@@ -384,12 +384,13 @@ public class LineupGeneratorService
             cursor);
 
         await _channelService.SaveAnchorAsync(channel.Id, anchor, cancellationToken);
-        await _db.Channels
-            .Where(c => c.Id == channel.Id)
-            .ExecuteUpdateAsync(
-                setters => setters.SetProperty(c => c.LastPlayoutBuiltAt, DateTime.UtcNow),
-                cancellationToken);
-        await _db.SaveChangesAsync(cancellationToken);
+        var trackedChannel = await _db.Channels.FirstOrDefaultAsync(c => c.Id == channel.Id, cancellationToken);
+        if (trackedChannel is not null)
+        {
+            trackedChannel.LastPlayoutBuiltAt = DateTime.UtcNow;
+        }
+
+        await SavePlayoutChangesAsync(cancellationToken);
         await CachePlayoutPostersAsync(channel, startUtc, endUtc, cancellationToken);
         NotifyPlayoutChanged(channel, mode, interruptStream);
     }
@@ -403,6 +404,28 @@ public class LineupGeneratorService
         }
 
         _stream.InterruptCurrentItem(channel.Id);
+    }
+
+    private async Task SavePlayoutChangesAsync(CancellationToken cancellationToken)
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            try
+            {
+                await _db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            catch (DbUpdateConcurrencyException ex) when (attempt < 2)
+            {
+                foreach (var entry in ex.Entries)
+                {
+                    if (entry.State == EntityState.Deleted)
+                    {
+                        entry.State = EntityState.Detached;
+                    }
+                }
+            }
+        }
     }
 
     private async Task CachePlayoutPostersAsync(
@@ -528,7 +551,7 @@ public class LineupGeneratorService
         }
 
         channel.LastPlayoutBuiltAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync(cancellationToken);
+        await SavePlayoutChangesAsync(cancellationToken);
     }
 
     private async Task<DateTime?> TryAddToonTakeoverBumperAsync(
