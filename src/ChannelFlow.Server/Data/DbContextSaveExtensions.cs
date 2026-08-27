@@ -12,49 +12,80 @@ public static class DbContextSaveExtensions
         this DbContext db,
         CancellationToken cancellationToken)
     {
-        for (var attempt = 0; attempt < 5; attempt++)
+        for (var attempt = 0; attempt < 8; attempt++)
         {
             try
             {
                 await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
                 return;
             }
-            catch (DbUpdateConcurrencyException ex) when (attempt < 4)
+            catch (DbUpdateConcurrencyException ex) when (attempt < 7)
             {
-                foreach (var entry in ex.Entries)
+                var recovered = 0;
+                var entries = ex.Entries.Count > 0
+                    ? ex.Entries.ToList()
+                    : db.ChangeTracker.Entries()
+                        .Where(entry => entry.State is EntityState.Deleted or EntityState.Modified)
+                        .ToList();
+
+                foreach (var entry in entries)
                 {
-                    if (entry.State == EntityState.Deleted)
+                    recovered += await RecoverGoneRowAsync(entry, cancellationToken).ConfigureAwait(false);
+                }
+
+                if (recovered == 0)
+                {
+                    foreach (var entry in db.ChangeTracker.Entries()
+                        .Where(candidate => candidate.State == EntityState.Deleted)
+                        .ToList())
                     {
                         entry.State = EntityState.Detached;
-                        continue;
-                    }
-
-                    if (entry.State == EntityState.Modified)
-                    {
-                        var databaseValues = await entry.GetDatabaseValuesAsync(cancellationToken)
-                            .ConfigureAwait(false);
-                        if (databaseValues is null)
-                        {
-                            entry.State = EntityState.Added;
-                        }
-                        else
-                        {
-                            entry.OriginalValues.SetValues(databaseValues);
-                        }
-
-                        continue;
-                    }
-
-                    try
-                    {
-                        await entry.ReloadAsync(cancellationToken).ConfigureAwait(false);
-                    }
-                    catch (Exception)
-                    {
-                        entry.State = EntityState.Detached;
+                        recovered++;
                     }
                 }
+
+                if (recovered == 0)
+                {
+                    throw;
+                }
             }
+        }
+    }
+
+    private static async Task<int> RecoverGoneRowAsync(
+        Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry,
+        CancellationToken cancellationToken)
+    {
+        if (entry.State == EntityState.Deleted)
+        {
+            entry.State = EntityState.Detached;
+            return 1;
+        }
+
+        if (entry.State == EntityState.Modified)
+        {
+            var databaseValues = await entry.GetDatabaseValuesAsync(cancellationToken).ConfigureAwait(false);
+            if (databaseValues is null)
+            {
+                entry.State = EntityState.Added;
+            }
+            else
+            {
+                entry.OriginalValues.SetValues(databaseValues);
+            }
+
+            return 1;
+        }
+
+        try
+        {
+            await entry.ReloadAsync(cancellationToken).ConfigureAwait(false);
+            return 1;
+        }
+        catch (Exception)
+        {
+            entry.State = EntityState.Detached;
+            return 1;
         }
     }
 }

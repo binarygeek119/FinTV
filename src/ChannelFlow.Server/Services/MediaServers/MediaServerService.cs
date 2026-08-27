@@ -301,7 +301,10 @@ public sealed class MediaServerService
         }
         catch (Exception ex)
         {
-            _progress.Fail(ex.Message);
+            _progress.Fail(
+                ex is DbUpdateConcurrencyException
+                    ? "Catalog changed while saving. Try sync again."
+                    : ex.Message);
             throw;
         }
     }

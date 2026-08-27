@@ -144,15 +144,17 @@ public class MediaServersController : ControllerBase
 
         _ = Task.Run(async () =>
         {
+            using var scope = _scopeFactory.CreateScope();
+            var servers = scope.ServiceProvider.GetRequiredService<MediaServerService>();
             try
             {
-                using var scope = _scopeFactory.CreateScope();
-                var servers = scope.ServiceProvider.GetRequiredService<MediaServerService>();
                 await servers.SyncAsync(id, CancellationToken.None).ConfigureAwait(false);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // Progress snapshot holds the error; the admin popup polls it.
+                scope.ServiceProvider
+                    .GetRequiredService<ILogger<MediaServersController>>()
+                    .LogError(ex, "Catalog sync failed for {ServerId}", id);
             }
         });
 

@@ -23,30 +23,34 @@ public sealed class CatalogTypedStore
     {
         _ = replaceAll;
         await CatalogSchema.EnsureEpisodesTableAsync(_db, cancellationToken);
-        var incomingIds = items.Select(item => item.Id).ToHashSet();
+        var classified = items
+            .Select(item => (Item: item, Target: Classify(item)))
+            .Where(row => row.Target is not null)
+            .ToList();
+        var incomingIds = classified.Select(row => row.Item.Id).ToHashSet();
+        var keep = classified
+            .GroupBy(row => row.Target!.Value)
+            .ToDictionary(group => group.Key, group => group.Select(row => row.Item.Id).ToHashSet());
 
-        var tv = await _db.TvShows.Where(row => incomingIds.Contains(row.Id)).ToDictionaryAsync(row => row.Id, cancellationToken);
-        var episodes = await _db.Episodes.Where(row => incomingIds.Contains(row.Id)).ToDictionaryAsync(row => row.Id, cancellationToken);
-        var movies = await _db.Movies.Where(row => incomingIds.Contains(row.Id)).ToDictionaryAsync(row => row.Id, cancellationToken);
-        var music = await _db.Music.Where(row => incomingIds.Contains(row.Id)).ToDictionaryAsync(row => row.Id, cancellationToken);
-        var videos = await _db.MusicVideos.Where(row => incomingIds.Contains(row.Id)).ToDictionaryAsync(row => row.Id, cancellationToken);
-        var news = await _db.PastTenseNews.Where(row => incomingIds.Contains(row.Id)).ToDictionaryAsync(row => row.Id, cancellationToken);
+        HashSet<Guid> Keep(CatalogTable table)
+            => keep.TryGetValue(table, out var ids) ? ids : [];
 
-        foreach (var item in items)
+        await DeleteExceptAsync(_db.TvShows, incomingIds, Keep(CatalogTable.TvShows), cancellationToken);
+        await DeleteExceptAsync(_db.Episodes, incomingIds, Keep(CatalogTable.Episodes), cancellationToken);
+        await DeleteExceptAsync(_db.Movies, incomingIds, Keep(CatalogTable.Movies), cancellationToken);
+        await DeleteExceptAsync(_db.Music, incomingIds, Keep(CatalogTable.Music), cancellationToken);
+        await DeleteExceptAsync(_db.MusicVideos, incomingIds, Keep(CatalogTable.MusicVideos), cancellationToken);
+        await DeleteExceptAsync(_db.PastTenseNews, incomingIds, Keep(CatalogTable.PastTenseNews), cancellationToken);
+
+        var tv = await LoadAsync(_db.TvShows, Keep(CatalogTable.TvShows), cancellationToken);
+        var episodes = await LoadAsync(_db.Episodes, Keep(CatalogTable.Episodes), cancellationToken);
+        var movies = await LoadAsync(_db.Movies, Keep(CatalogTable.Movies), cancellationToken);
+        var music = await LoadAsync(_db.Music, Keep(CatalogTable.Music), cancellationToken);
+        var videos = await LoadAsync(_db.MusicVideos, Keep(CatalogTable.MusicVideos), cancellationToken);
+        var news = await LoadAsync(_db.PastTenseNews, Keep(CatalogTable.PastTenseNews), cancellationToken);
+
+        foreach (var (item, target) in classified)
         {
-            var target = Classify(item);
-            if (target is null)
-            {
-                continue;
-            }
-
-            RemoveIfPresent(tv, _db.TvShows, item.Id, keep: target == CatalogTable.TvShows);
-            RemoveIfPresent(episodes, _db.Episodes, item.Id, keep: target == CatalogTable.Episodes);
-            RemoveIfPresent(movies, _db.Movies, item.Id, keep: target == CatalogTable.Movies);
-            RemoveIfPresent(music, _db.Music, item.Id, keep: target == CatalogTable.Music);
-            RemoveIfPresent(videos, _db.MusicVideos, item.Id, keep: target == CatalogTable.MusicVideos);
-            RemoveIfPresent(news, _db.PastTenseNews, item.Id, keep: target == CatalogTable.PastTenseNews);
-
             switch (target)
             {
                 case CatalogTable.TvShows:
@@ -171,16 +175,36 @@ public sealed class CatalogTypedStore
         };
     }
 
-    private static void RemoveIfPresent<T>(Dictionary<Guid, T> byId, DbSet<T> set, Guid id, bool keep)
-        where T : class
+    private async Task DeleteExceptAsync<T>(
+        DbSet<T> set,
+        HashSet<Guid> incomingIds,
+        HashSet<Guid> keepIds,
+        CancellationToken cancellationToken)
+        where T : CatalogMediaRow
     {
-        if (keep || !byId.Remove(id, out var row))
+        var removeIds = incomingIds.Where(id => !keepIds.Contains(id)).ToList();
+        if (removeIds.Count == 0)
         {
             return;
         }
 
-        set.Remove(row);
+        await set.Where(row => removeIds.Contains(row.Id)).ExecuteDeleteAsync(cancellationToken);
+        foreach (var tracked in _db.ChangeTracker.Entries<T>()
+            .Where(entry => removeIds.Contains(entry.Entity.Id))
+            .ToList())
+        {
+            tracked.State = EntityState.Detached;
+        }
     }
+
+    private static async Task<Dictionary<Guid, T>> LoadAsync<T>(
+        DbSet<T> set,
+        HashSet<Guid> ids,
+        CancellationToken cancellationToken)
+        where T : CatalogMediaRow
+        => ids.Count == 0
+            ? new Dictionary<Guid, T>()
+            : await set.Where(row => ids.Contains(row.Id)).ToDictionaryAsync(row => row.Id, cancellationToken);
 
     private static T GetOrAdd<T>(Dictionary<Guid, T> byId, DbSet<T> set, Guid id)
         where T : CatalogMediaRow, new()
