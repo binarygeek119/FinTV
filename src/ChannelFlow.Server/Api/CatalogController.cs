@@ -211,7 +211,7 @@ public class CatalogController : ControllerBase
             var mapped = MapMediaRow(row.Id, row.Name, row.Kind, row.Overview, row.OfficialRating, row.CommunityRating,
                 row.Runtime, row.RuntimeTicks, row.Path, row.SeriesName, row.SeasonName, row.IndexNumber,
                 row.ParentIndexNumber, row.LibraryName, row.Album, row.PeopleJson, row.ProviderIdsJson,
-                row.ArtistsJson, VideoAspectFormat.Prefer(row.TrueAspectRatio, row.AspectRatio, row.Width, row.Height), row.ChapterCount);
+                row.ArtistsJson, VideoAspectFormat.ForCatalog(row.TrueAspectRatio, row.AspectRatio, row.Width, row.Height), row.ChapterCount);
 
             if (IsNewsItem(row.Kind, row.CollectionType, row.LibraryName))
             {

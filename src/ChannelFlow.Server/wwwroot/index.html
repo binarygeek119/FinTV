@@ -13,7 +13,7 @@
   <link rel="manifest" href="site.webmanifest?v=3d08b8f1">
   <meta name="theme-color" content="#101010">
   <link rel="stylesheet" href="css/legacy-admin.css">
-  <link rel="stylesheet" href="css/app.css?v=assets18">
+  <link rel="stylesheet" href="css/app.css?v=assets28">
 </head>
 <body>
   <div id="login-screen" class="auth-screen hidden">
@@ -894,7 +894,7 @@
                 </div>
                 <div class="card section-card">
                     <h3>Location</h3>
-                    <p class="hint">WeatherStar looks up NWS data for US ZIPs and Open-Meteo for the rest of the world. NOAA watches and warnings on TV, movies, and music are on the <strong>Emergency Broadcast System</strong> tab.</p>
+                    <p class="hint">Saved location for WeatherStar and for new weather channels. NOAA watches and warnings on TV, movies, and music are on the <strong>Emergency Broadcast System</strong> tab.</p>
                     <label class="field" id="weather-default-location-field">
                         <span>Location</span>
                         <input id="weather-default-zip" type="text" class="emby-input" placeholder="ZIP, city, or lat,lon" autocomplete="off">
@@ -1424,8 +1424,9 @@
       </div>
     </div>
   </div>
+  <div id="task-popup-stack" class="task-popup-stack">
   <div id="catalog-sync-popup" class="catalog-sync-popup hidden" hidden role="status" aria-live="polite">
-    <button type="button" id="catalog-sync-dismiss" class="catalog-sync-dismiss hidden" aria-label="Dismiss">&times;</button>
+    <button type="button" id="catalog-sync-dismiss" class="catalog-sync-dismiss hidden" data-task-dismiss="catalog-sync" aria-label="Dismiss">&times;</button>
     <p class="catalog-sync-kicker" id="catalog-sync-kicker">Catalog sync</p>
     <p class="catalog-sync-title" id="catalog-sync-title">Starting…</p>
     <p class="catalog-sync-message" id="catalog-sync-message"></p>
@@ -1434,7 +1435,8 @@
     </div>
     <p class="catalog-sync-meta" id="catalog-sync-meta"></p>
   </div>
-  <script src="js/app.js?v=assets18"></script>
+  </div>
+  <script src="js/app.js?v=assets28"></script>
   <script src="js/shell.js?v=library5"></script>
 </body>
 </html>

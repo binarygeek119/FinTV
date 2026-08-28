@@ -90,6 +90,13 @@
     let catalogSyncWasRunning = false;
     let catalogSyncExpectingStart = 0;
     const CATALOG_SYNC_SNAP_KEY = 'channelflow.catalogSync.snap';
+    let libraryTaskKind = null;
+    let libraryTaskSeen = {};
+    let libraryTaskClosedKinds = {};
+    let libraryTaskWasRunning = {};
+    let libraryTaskExpecting = {};
+    let libraryTaskHideTimers = {};
+    const LIBRARY_TASK_SNAP_KEY = 'channelflow.libraryTask.snap';
     let appClockTimer = null;
     const GUIDE_PX_PER_MIN = 4;
     const GUIDE_CHANNEL_COL = 168;
@@ -4621,6 +4628,8 @@
         }
     }
 
+    let weatherChannelState = [];
+
     function renderWeatherStatus(status) {
         const el = $('weather-renderer-status');
         if (!el) return;
@@ -4644,10 +4653,15 @@
                 status.musicLibraries.map((lib) => `<option value="${escapeHtml(lib.id)}" ${lib.id === current ? 'selected' : ''}>${escapeHtml(lib.name)}</option>`).join('');
             if (current) select.value = current;
         }
-        if ($('weather-default-zip')) {
-            $('weather-default-zip').value = status?.weatherDefaultLocationQuery || '';
+        const zipEl = document.getElementById('weather-default-zip');
+        weatherChannelState = Array.isArray(status?.weatherChannels) ? status.weatherChannels : [];
+        if (zipEl) {
+            const fromDefault = String(status?.weatherDefaultLocationQuery || '').trim();
+            const firstChannel = weatherChannelState[0];
+            const fromChannel = String(firstChannel?.location || firstChannel?.weatherLocationQuery || '').trim();
+            zipEl.value = fromDefault || fromChannel;
         }
-        renderWeatherZipList(status?.weatherChannels || []);
+        renderWeatherZipList(weatherChannelState, zipEl ? zipEl.value : '');
         applyWeatherQueryToForm(status?.weatherStarPermalinkQuery || '');
         if ($('weather-auto-wide-169')) {
             $('weather-auto-wide-169').checked = status?.weatherStarAutoWideForSixteenNine !== false;
@@ -4865,27 +4879,31 @@
         }
     }
 
-    function renderWeatherZipList(rows) {
+    function renderWeatherZipList(rows, defaultLocation) {
         const el = $('weather-zip-list');
         const fallback = $('weather-default-location-field');
         if (fallback) {
-            fallback.classList.toggle('hidden', rows.length > 0);
+            fallback.classList.remove('hidden');
+            fallback.hidden = false;
         }
         if (!el) {
             return;
         }
+        const savedDefault = String(defaultLocation || '').trim();
         if (!rows.length) {
-            el.innerHTML = '<p class="hint">Apply a WeatherStar preset or create a Weather channel. New weather channels use this location.</p>';
+            el.innerHTML = '<p class="hint">New weather channels use this location. Apply a WeatherStar preset or create a Weather channel to add more.</p>';
+            return;
+        }
+        if (rows.length === 1) {
+            el.innerHTML = '<p class="hint">Used by ' + escapeHtml(rows[0].name || 'Weather') + '.</p>';
             return;
         }
         el.innerHTML = rows.map((ch) => {
-            const location = ch.location || ch.weatherLocationQuery || ch.zip || '';
-            const heading = rows.length > 1
-                ? '<div class="wx-channel-label">' + escapeHtml((ch.number || '') + ' · ' + (ch.name || 'Weather')) + '</div>'
-                : '';
+            const stored = String(ch.location || ch.weatherLocationQuery || ch.zip || '').trim();
+            const location = stored || savedDefault;
             return '<div class="weather-zip-row">'
-                + heading
-                + '<label class="field"><span>Location</span>'
+                + '<div class="wx-channel-label">' + escapeHtml((ch.number || '') + ' · ' + (ch.name || 'Weather')) + '</div>'
+                + '<label class="field"><span>Channel location</span>'
                 + '<input class="emby-input weather-channel-zip" data-channel-id="' + escapeHtml(ch.id)
                 + '" placeholder="ZIP, city, or lat,lon" value="' + escapeHtml(location) + '">'
                 + '</label></div>';
@@ -4905,16 +4923,25 @@
         const musicSelect = $('weather-music-library');
         const selected = musicSelect?.selectedOptions?.[0];
         try {
-            const channelZips = Array.from(qa('.weather-channel-zip'))
+            const zipEl = document.getElementById('weather-default-zip');
+            const defaultRaw = (zipEl?.value || '').trim();
+            let channelZips = Array.from(qa('.weather-channel-zip'))
                 .filter((input) => (input.value || '').trim().length >= 2)
                 .map((input) => ({
                     id: input.dataset.channelId,
                     location: readWeatherLocation(input.value, 'Location')
                 }));
-            const defaultRaw = $('weather-default-zip')?.value.trim() || '';
-            const defaultLocation = channelZips.length
-                ? channelZips[0].location
-                : (defaultRaw ? readWeatherLocation(defaultRaw, 'Location') : '');
+            const defaultLocation = defaultRaw
+                ? readWeatherLocation(defaultRaw, 'Location')
+                : (channelZips[0] ? channelZips[0].location : '');
+            if (defaultLocation && weatherChannelState.length === 1) {
+                channelZips = [{ id: weatherChannelState[0].id, location: defaultLocation }];
+            } else if (defaultLocation && weatherChannelState.length && !channelZips.length) {
+                channelZips = weatherChannelState.map((ch) => ({
+                    id: ch.id,
+                    location: defaultLocation
+                }));
+            }
             const saved = await api('/weather/settings', {
                 method: 'PUT',
                 body: JSON.stringify({
@@ -4933,7 +4960,10 @@
             });
             toast(typeof successMessage === 'string' ? successMessage : 'Weather settings saved.', 'success');
             renderWeatherStatus(saved);
-            if (channels.length) {
+            if (zipEl && defaultLocation && !(zipEl.value || '').trim()) {
+                zipEl.value = defaultLocation;
+            }
+            if (channelZips.length) {
                 await loadChannels();
             }
         } catch (err) {
@@ -5422,6 +5452,7 @@
             renderCatalogCleanupStatus(result.status);
         }
         startCatalogCleanupPolling();
+        beginLibraryTaskPopup('cleanup', 'Catalog cleanup', mapCleanupTask(result.status));
         await loadCatalogCleanup();
     }
 
@@ -5436,6 +5467,10 @@
             renderCatalogCleanupStatus(result.status);
         }
         startCatalogCleanupPolling();
+        beginLibraryTaskPopup('cleanup', 'Catalog cleanup', mapCleanupTask(result.status) || {
+            isRunning: true,
+            message: 'Scanning remapped local files…'
+        });
         await loadCatalogCleanup();
     }
 
@@ -5526,6 +5561,22 @@
             renderLibraryScanStatus(result.status);
         }
         startLibraryScanPolling();
+        catalogSyncKind = libraryPage && libraryPage !== 'connections' && libraryPage !== 'removed' ? libraryPage : catalogSyncKind;
+        catalogSyncClosed = false;
+        catalogSyncSeenRunning = true;
+        catalogSyncExpectingStart = Date.now();
+        renderCatalogSyncPopup({
+            running: true,
+            phase: 'starting',
+            kicker: 'Library scan',
+            serverName: 'Library scan',
+            message: 'Starting library scan…',
+            percent: null,
+            items: 0,
+            saved: 0,
+            total: 0
+        });
+        startCatalogSyncPolling();
         await loadLibraryScan();
     }
 
@@ -5545,7 +5596,7 @@
 
         const next = status.nextRunAt ? new Date(status.nextRunAt).toLocaleString() : 'midnight';
         if (status.isRunning) {
-            el.textContent = 'ffprobe is scanning videos that still have no chapter data…';
+            el.textContent = status.message || 'ffprobe is scanning videos that still have no chapter data…';
             return;
         }
 
@@ -5616,6 +5667,7 @@
             renderFfprobeScanStatus(result.status);
         }
         startFfprobeScanPolling();
+        beginLibraryTaskPopup('ffprobe', 'ffprobe chapters', result.status);
         await loadFfprobeScan();
     }
 
@@ -5635,7 +5687,7 @@
 
         const next = status.nextRunAt ? new Date(status.nextRunAt).toLocaleString() : 'midnight';
         if (status.isRunning) {
-            el.textContent = 'ffmpeg is sampling videos that still have no TrueAspectRatio…';
+            el.textContent = status.message || 'ffmpeg is sampling videos that still have no TrueAspectRatio…';
             return;
         }
 
@@ -5706,6 +5758,7 @@
             renderTrueAspectScanStatus(result.status);
         }
         startTrueAspectScanPolling();
+        beginLibraryTaskPopup('true-aspect', 'True aspect ratio', result.status);
         await loadTrueAspectScan();
     }
 
@@ -6470,8 +6523,8 @@
                            <label class="field"><span>API key / token</span><input class="emby-input ms-edit-token" placeholder="${server.hasToken ? 'saved · leave blank to keep' : ''}" autocomplete="off"></label>`}
                 </div>
                 <h4>Path remaps</h4>
-                <p class="hint">Server path prefix → local ChannelFlow mount. One mapping per line: <code>/data/media = /media</code></p>
-                <textarea class="ms-remap" rows="4" placeholder="/data/media = /media"></textarea>
+                <p class="hint">Jellyfin path prefix on the left, the folder this ChannelFlow can read on the right. One line: <code>/media = /srv/Tower/media</code></p>
+                <textarea class="ms-remap" rows="4" placeholder="/media = /srv/Tower/media"></textarea>
                 <div class="actions">
                     <button type="button" class="emby-button" data-ms="save-remap">Save remaps</button>
                     <button type="button" class="emby-button" data-ms="test-remap">Test remaps</button>
@@ -6695,6 +6748,442 @@
         return Number.isFinite(at) && (Date.now() - at) < 120000;
     }
 
+    let taskPopupStackBound = false;
+
+    function taskPopupStackEl() {
+        return document.getElementById('task-popup-stack');
+    }
+
+    function taskPopupEl(kind) {
+        return document.getElementById('task-run-popup-' + kind);
+    }
+
+    function hideTaskRunPopup(kind) {
+        if (!kind) {
+            Object.keys(libraryTaskHideTimers).forEach((key) => hideTaskRunPopup(key));
+            writeLibraryTaskSnaps([]);
+            return;
+        }
+
+        if (libraryTaskHideTimers[kind]) {
+            clearTimeout(libraryTaskHideTimers[kind]);
+            delete libraryTaskHideTimers[kind];
+        }
+
+        delete libraryTaskExpecting[kind];
+        delete libraryTaskSeen[kind];
+        delete libraryTaskWasRunning[kind];
+        const el = taskPopupEl(kind);
+        if (el) {
+            el.remove();
+        }
+
+        writeLibraryTaskSnaps(readLibraryTaskSnaps().filter((snap) => snap.kind !== kind));
+    }
+
+    function libraryTaskFinishedRecently(status) {
+        const at = Date.parse(status && (status.finishedAt || status.lastCompletedAt) ? (status.finishedAt || status.lastCompletedAt) : '');
+        return Number.isFinite(at) && (Date.now() - at) < 120000;
+    }
+
+    function libraryTaskCompletedAt(status) {
+        const at = Date.parse(status && (status.lastCompletedAt || status.finishedAt) ? (status.lastCompletedAt || status.finishedAt) : '');
+        return Number.isFinite(at) ? at : 0;
+    }
+
+    function libraryTaskStartedAt(status, kind) {
+        const at = Date.parse(status && status.lastStartedAt ? status.lastStartedAt : '');
+        if (Number.isFinite(at) && at > 0) {
+            return at;
+        }
+
+        return (kind && libraryTaskExpecting[kind]) || 0;
+    }
+
+    function thisLibraryTaskRunFinished(status, kind) {
+        if (!status || status.isRunning) {
+            return false;
+        }
+
+        const completed = libraryTaskCompletedAt(status);
+        if (!completed) {
+            return false;
+        }
+
+        const started = libraryTaskStartedAt(status, kind);
+        if (started && completed < started - 2000) {
+            return false;
+        }
+
+        if (kind && libraryTaskExpecting[kind] && completed < libraryTaskExpecting[kind] - 2000) {
+            return false;
+        }
+
+        return true;
+    }
+
+    function libraryTaskStillPending(status, kind) {
+        if (kind && libraryTaskClosedKinds[kind]) {
+            return false;
+        }
+
+        if (status && status.isRunning) {
+            return true;
+        }
+
+        if (kind && libraryTaskExpecting[kind] && !thisLibraryTaskRunFinished(status, kind)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    function readLibraryTaskSnaps() {
+        try {
+            const raw = sessionStorage.getItem(LIBRARY_TASK_SNAP_KEY);
+            const parsed = raw ? JSON.parse(raw) : null;
+            if (Array.isArray(parsed)) {
+                return parsed.filter((snap) => snap && snap.kind);
+            }
+
+            return parsed && parsed.kind ? [parsed] : [];
+        } catch (ignore) {
+            return [];
+        }
+    }
+
+    function writeLibraryTaskSnaps(snaps) {
+        try {
+            const keep = (snaps || []).filter((snap) => snap && snap.status && (
+                snap.status.isRunning
+                || snap.phase === 'running'
+                || snap.phase === 'done'
+                || snap.phase === 'error'
+            ));
+            if (!keep.length) {
+                sessionStorage.removeItem(LIBRARY_TASK_SNAP_KEY);
+                return;
+            }
+
+            sessionStorage.setItem(LIBRARY_TASK_SNAP_KEY, JSON.stringify(keep));
+        } catch (ignore) {
+            // Private mode or quota — polling still works after load.
+        }
+    }
+
+    function libraryTaskMeta(status) {
+        if (!status) {
+            return '';
+        }
+
+        if (status.isRunning && status.total) {
+            return formatSyncCount(status.processed) + ' of ' + formatSyncCount(status.total);
+        }
+
+        if (!status.isRunning && status.lastCompletedAt) {
+            if (status.lastWithChapters != null) {
+                return formatSyncCount(status.lastWithChapters) + ' with chapters';
+            }
+
+            if (status.lastMeasured != null) {
+                return formatSyncCount(status.lastMeasured) + ' measured';
+            }
+        }
+
+        return status.percent != null ? status.percent + '%' : '';
+    }
+
+    function mapCleanupTask(status) {
+        if (!status) {
+            return null;
+        }
+
+        const local = status.localScan || {};
+        if (local.isRunning) {
+            return {
+                isRunning: true,
+                lastStartedAt: local.lastStartedAt,
+                lastCompletedAt: local.lastCompletedAt,
+                lastError: local.lastError,
+                processed: local.processedItems,
+                total: local.totalItems,
+                percent: local.totalItems
+                    ? Math.max(0, Math.min(100, Math.round(100 * (local.processedItems || 0) / local.totalItems)))
+                    : null,
+                message: 'Scanning remapped local files…',
+                finishedAt: local.lastCompletedAt
+            };
+        }
+
+        if (status.isRunning) {
+            return {
+                isRunning: true,
+                lastStartedAt: status.lastStartedAt,
+                lastCompletedAt: status.lastCompletedAt,
+                lastError: status.lastError,
+                processed: status.removed,
+                total: status.currentlyMissing,
+                percent: null,
+                message: 'Catalog cleanup is running…',
+                finishedAt: status.lastCompletedAt
+            };
+        }
+
+        return {
+            isRunning: false,
+            lastStartedAt: status.lastStartedAt,
+            lastCompletedAt: status.lastCompletedAt || local.lastCompletedAt,
+            lastError: status.lastError || local.lastError,
+            finishedAt: status.lastCompletedAt || local.lastCompletedAt,
+            message: status.lastError || local.lastError || ''
+        };
+    }
+
+    async function fetchTaskStatus(path) {
+        try {
+            return await api(path);
+        } catch (ignore) {
+            return null;
+        }
+    }
+
+    async function listLibraryTaskSnaps() {
+        const cached = readLibraryTaskSnaps();
+        const cachedByKind = {};
+        cached.forEach((snap) => {
+            cachedByKind[snap.kind] = snap;
+        });
+        const [ffprobe, aspect, cleanupRaw] = await Promise.all([
+            fetchTaskStatus('/tasks/ffprobe'),
+            fetchTaskStatus('/tasks/true-aspect'),
+            fetchTaskStatus('/tasks/catalog-cleanup')
+        ]);
+        const cleanup = cleanupRaw ? mapCleanupTask(cleanupRaw) : null;
+        const candidates = [
+            { kind: 'true-aspect', kicker: 'True aspect ratio', title: 'True aspect ratio', status: aspect || cachedByKind['true-aspect']?.status || null },
+            { kind: 'ffprobe', kicker: 'ffprobe chapters', title: 'ffprobe chapters', status: ffprobe || cachedByKind.ffprobe?.status || null },
+            { kind: 'cleanup', kicker: 'Catalog cleanup', title: 'Catalog cleanup', status: cleanup || cachedByKind.cleanup?.status || null }
+        ];
+
+        return candidates.filter((row) => {
+            if (!row.status || libraryTaskClosedKinds[row.kind]) {
+                return false;
+            }
+
+            if (row.status.isRunning || libraryTaskStillPending(row.status, row.kind)) {
+                if (!row.status.isRunning) {
+                    row.status = Object.assign({}, row.status, {
+                        isRunning: true,
+                        message: row.status.message || cachedByKind[row.kind]?.status?.message || 'Starting…'
+                    });
+                }
+                return true;
+            }
+
+            return thisLibraryTaskRunFinished(row.status, row.kind)
+                && libraryTaskFinishedRecently(row.status)
+                && (libraryTaskSeen[row.kind] || cachedByKind[row.kind]);
+        });
+    }
+
+    function beginLibraryTaskPopup(kind, kicker, status) {
+        libraryTaskKind = kind;
+        delete libraryTaskClosedKinds[kind];
+        libraryTaskSeen[kind] = true;
+        libraryTaskExpecting[kind] = Date.now();
+        if (libraryTaskHideTimers[kind]) {
+            clearTimeout(libraryTaskHideTimers[kind]);
+            delete libraryTaskHideTimers[kind];
+        }
+
+        const snap = {
+            kind,
+            kicker,
+            title: kicker,
+            phase: 'running',
+            status: Object.assign({}, status || {}, {
+                isRunning: true,
+                lastStartedAt: new Date().toISOString(),
+                message: (status && status.message) || 'Starting…'
+            })
+        };
+        const snaps = readLibraryTaskSnaps().filter((row) => row.kind !== kind);
+        snaps.push(snap);
+        writeLibraryTaskSnaps(snaps);
+        renderLibraryTaskPopup(snap);
+        startCatalogSyncPolling();
+    }
+
+    function ensureLibraryTaskPopup(kind) {
+        let el = taskPopupEl(kind);
+        if (el) {
+            return el;
+        }
+
+        const stack = taskPopupStackEl();
+        if (!stack) {
+            return null;
+        }
+
+        el = document.createElement('div');
+        el.id = 'task-run-popup-' + kind;
+        el.className = 'catalog-sync-popup task-run-popup';
+        el.dataset.taskKind = kind;
+        el.setAttribute('role', 'status');
+        el.setAttribute('aria-live', 'polite');
+        el.innerHTML = '<button type="button" class="catalog-sync-dismiss hidden" data-task-dismiss="'
+            + kind + '" hidden aria-label="Dismiss">&times;</button>'
+            + '<p class="catalog-sync-kicker task-run-kicker">Task</p>'
+            + '<p class="catalog-sync-title task-run-title">Starting…</p>'
+            + '<p class="catalog-sync-message task-run-message"></p>'
+            + '<div class="catalog-sync-bar task-run-bar" data-indeterminate="true">'
+            + '<div class="catalog-sync-bar-fill task-run-bar-fill"></div></div>'
+            + '<p class="catalog-sync-meta task-run-meta"></p>';
+        stack.appendChild(el);
+        return el;
+    }
+
+    function renderLibraryTaskPopups(snaps) {
+        const visible = {};
+        (snaps || []).forEach((snap) => {
+            if (snap && snap.kind) {
+                visible[snap.kind] = true;
+                renderLibraryTaskPopup(snap);
+            }
+        });
+        const stack = taskPopupStackEl();
+        if (stack) {
+            stack.querySelectorAll('[data-task-kind]').forEach((el) => {
+                if (!visible[el.dataset.taskKind]) {
+                    el.remove();
+                }
+            });
+        }
+
+        writeLibraryTaskSnaps((snaps || []).map((snap) => ({
+            kind: snap.kind,
+            kicker: snap.kicker,
+            title: snap.title,
+            phase: snap.phase || ((snap.status && snap.status.isRunning) ? 'running' : 'done'),
+            status: snap.status
+        })));
+    }
+
+    function renderLibraryTaskPopup(picked) {
+        if (!picked || !picked.kind) {
+            return;
+        }
+
+        const kind = picked.kind;
+        const el = ensureLibraryTaskPopup(kind);
+        if (!el) {
+            return;
+        }
+
+        const status = picked.status || {};
+        const pending = libraryTaskStillPending(status, kind);
+        const running = !!status.isRunning || pending;
+        const runFinished = thisLibraryTaskRunFinished(status, kind);
+        const phase = running ? 'running' : (status.lastError ? 'error' : (runFinished ? 'done' : 'running'));
+        const finished = !running && (phase === 'done' || phase === 'error');
+        const showFinished = finished && !libraryTaskClosedKinds[kind]
+            && (libraryTaskSeen[kind] || libraryTaskFinishedRecently(status));
+        if (libraryTaskWasRunning[kind] && !running && runFinished) {
+            refreshCatalogAfterSync();
+        }
+        libraryTaskWasRunning[kind] = running;
+        if (running) {
+            libraryTaskSeen[kind] = true;
+            delete libraryTaskClosedKinds[kind];
+            if (libraryTaskHideTimers[kind]) {
+                clearTimeout(libraryTaskHideTimers[kind]);
+                delete libraryTaskHideTimers[kind];
+            }
+        }
+
+        const kicker = el.querySelector('.task-run-kicker');
+        const title = el.querySelector('.task-run-title');
+        const message = el.querySelector('.task-run-message');
+        const meta = el.querySelector('.task-run-meta');
+        const bar = el.querySelector('.task-run-bar');
+        const fill = el.querySelector('.task-run-bar-fill');
+        const dismiss = el.querySelector('[data-task-dismiss]');
+
+        if (running || showFinished) {
+            el.hidden = false;
+            el.classList.remove('hidden');
+            el.classList.toggle('is-error', phase === 'error');
+            el.classList.toggle('is-done', phase === 'done' && !running);
+        } else {
+            hideTaskRunPopup(kind);
+            return;
+        }
+
+        if (kicker) {
+            kicker.textContent = picked.kicker || 'Task';
+        }
+        if (title) {
+            title.textContent = picked.title || 'Task';
+        }
+        if (message) {
+            message.textContent = status.message || (running ? 'Starting…' : '');
+        }
+        if (meta) {
+            meta.textContent = libraryTaskMeta(status);
+        }
+        if (bar && fill) {
+            const indeterminate = running && (status.percent == null || status.percent === undefined);
+            bar.dataset.indeterminate = indeterminate ? 'true' : 'false';
+            fill.style.width = indeterminate ? '' : Math.max(0, Math.min(100, Number(status.percent) || 0)) + '%';
+        }
+        if (dismiss) {
+            const canDismiss = !running && finished;
+            dismiss.classList.toggle('hidden', !canDismiss);
+            dismiss.hidden = !canDismiss;
+        }
+
+        if (showFinished && !running && !libraryTaskHideTimers[kind]) {
+            libraryTaskHideTimers[kind] = setTimeout(() => {
+                delete libraryTaskHideTimers[kind];
+                delete libraryTaskSeen[kind];
+                hideTaskRunPopup(kind);
+            }, phase === 'error' ? 8000 : 4500);
+        }
+    }
+
+    function bindTaskPopupStack() {
+        const stack = taskPopupStackEl();
+        if (!stack || taskPopupStackBound) {
+            return;
+        }
+
+        taskPopupStackBound = true;
+        stack.addEventListener('click', (event) => {
+            const btn = event.target.closest('[data-task-dismiss]');
+            if (!btn) {
+                return;
+            }
+
+            const kind = btn.getAttribute('data-task-dismiss');
+            if (kind === 'catalog-sync') {
+                catalogSyncClosed = true;
+                catalogSyncSeenRunning = false;
+                if (catalogSyncHideTimer) {
+                    clearTimeout(catalogSyncHideTimer);
+                    catalogSyncHideTimer = null;
+                }
+
+                hideCatalogSyncPopup();
+                return;
+            }
+
+            if (kind) {
+                libraryTaskClosedKinds[kind] = true;
+                hideTaskRunPopup(kind);
+            }
+        });
+    }
+
     function readCatalogSyncSnap() {
         try {
             const raw = sessionStorage.getItem(CATALOG_SYNC_SNAP_KEY);
@@ -6718,6 +7207,7 @@
     }
 
     function startCatalogSyncPolling() {
+        bindTaskPopupStack();
         if (catalogSyncPollTimer) {
             return;
         }
@@ -6728,6 +7218,15 @@
             catalogSyncClosed = false;
             renderCatalogSyncPopup(cached);
         }
+
+        const libs = readLibraryTaskSnaps();
+        libs.forEach((lib) => {
+            if (lib && lib.status && (lib.status.isRunning || libraryTaskFinishedRecently(lib.status))) {
+                libraryTaskSeen[lib.kind] = true;
+                delete libraryTaskClosedKinds[lib.kind];
+                renderLibraryTaskPopup(lib);
+            }
+        });
 
         void pollCatalogSyncProgress();
         catalogSyncPollTimer = setInterval(() => {
@@ -6741,6 +7240,23 @@
         } catch (ignore) {
             // Keep the last popup state if the poll fails mid-sync.
         }
+
+        try {
+            const libraryTasks = await listLibraryTaskSnaps();
+            renderLibraryTaskPopups(libraryTasks);
+        } catch (ignore) {
+            // Keep the last task popup if the poll fails mid-run.
+        }
+    }
+
+    function catalogPopupActive(snap) {
+        snap = snap || {};
+        const running = !!snap.running;
+        const phase = snap.phase || 'idle';
+        const finished = phase === 'done' || phase === 'error';
+        const showFinished = finished && !catalogSyncClosed && (catalogSyncSeenRunning || catalogSyncFinishedRecently(snap));
+        const expecting = catalogSyncExpectingStart && (Date.now() - catalogSyncExpectingStart) < 8000;
+        return running || showFinished || (phase === 'starting') || expecting;
     }
 
     function hideCatalogSyncPopup() {
@@ -6766,6 +7282,10 @@
     }
 
     function catalogSyncMeta(snap) {
+        if (snap.metaText) {
+            return snap.metaText;
+        }
+
         const phase = snap.phase || '';
         if (phase === 'fetching') {
             let text = formatSyncCount(snap.items) + ' item' + (snap.items === 1 ? '' : 's');
@@ -6792,8 +7312,9 @@
 
     function refreshCatalogAfterSync() {
         loadMediaServers().then(() => {
-            if (catalogSyncKind) {
-                renderKindPanel(catalogSyncKind);
+            const kind = catalogSyncKind || libraryPage;
+            if (kind && kind !== 'connections' && kind !== 'removed') {
+                renderKindPanel(kind);
             }
         }).catch(() => {});
     }
@@ -6808,6 +7329,7 @@
         const running = !!snap.running;
         const phase = snap.phase || 'idle';
         const dismiss = $('catalog-sync-dismiss');
+        const kicker = $('catalog-sync-kicker');
         const title = $('catalog-sync-title');
         const message = $('catalog-sync-message');
         const meta = $('catalog-sync-meta');
@@ -6815,6 +7337,7 @@
         const fill = $('catalog-sync-bar-fill');
         const finished = phase === 'done' || phase === 'error';
         const showFinished = finished && !catalogSyncClosed && (catalogSyncSeenRunning || catalogSyncFinishedRecently(snap));
+        const persistCatalog = !snap.kicker || snap.kicker === 'Catalog sync' || snap.kicker === 'Library scan';
 
         if (catalogSyncWasRunning && !running) {
             refreshCatalogAfterSync();
@@ -6835,7 +7358,9 @@
             el.hidden = false;
             el.classList.remove('hidden', 'is-done', 'is-error');
             setCatalogSyncButtonsDisabled(true);
-            writeCatalogSyncSnap(snap);
+            if (persistCatalog) {
+                writeCatalogSyncSnap(snap);
+            }
         } else if (showFinished) {
             catalogSyncSeenRunning = true;
             el.hidden = false;
@@ -6843,7 +7368,9 @@
             el.classList.toggle('is-error', phase === 'error');
             el.classList.toggle('is-done', phase === 'done');
             setCatalogSyncButtonsDisabled(false);
-            writeCatalogSyncSnap(snap);
+            if (persistCatalog) {
+                writeCatalogSyncSnap(snap);
+            }
             if (!catalogSyncHideTimer) {
                 catalogSyncHideTimer = setTimeout(() => {
                     catalogSyncHideTimer = null;
@@ -6858,6 +7385,10 @@
                 catalogSyncSeenRunning = false;
                 hideCatalogSyncPopup();
             }
+        }
+
+        if (kicker) {
+            kicker.textContent = snap.kicker || 'Catalog sync';
         }
 
         if (title) {
@@ -7025,6 +7556,55 @@
         await loadLibraryTab();
     }
 
+    function catalogTrueAspectLabel(value) {
+        const text = String(value || '').trim();
+        if (!text) {
+            return '';
+        }
+
+        if (/^16:9$/i.test(text)) {
+            return '16:9';
+        }
+
+        if (/^4:3$/i.test(text)) {
+            return '4:3';
+        }
+
+        const parts = text.replace(/[x×\/]/gi, ':').split(':');
+        if (parts.length === 2) {
+            const width = Number(parts[0]);
+            const height = Number(parts[1]);
+            if (width > 0 && height > 0) {
+                const ratio = width / height;
+                if (Math.abs(ratio - 16 / 9) / (16 / 9) <= 0.02) {
+                    return '16:9';
+                }
+
+                if (Math.abs(ratio - 4 / 3) / (4 / 3) <= 0.02) {
+                    return '4:3';
+                }
+
+                return (Math.round(ratio * 100) / 100).toString() + ':1';
+            }
+        }
+
+        const asNumber = Number(text);
+        if (asNumber > 0) {
+            return (Math.round(asNumber * 100) / 100).toString() + ':1';
+        }
+
+        return text;
+    }
+
+    function catalogFormat(row) {
+        const measured = String((row && (row.trueAspectRatio || row.TrueAspectRatio)) || '').trim();
+        if (measured) {
+            return catalogTrueAspectLabel(measured);
+        }
+
+        return String((row && row.format) || '').trim();
+    }
+
     function renderCatalogTvTable(containerId, rows, total, connectionId, kind) {
         const el = $(containerId);
         if (!el) {
@@ -7190,7 +7770,8 @@
                 <td>${escapeHtml(row.code || '')}</td>
                 <td>${escapeHtml(row.name || '')}</td>
                 <td>${escapeHtml(row.runtime || '')}</td>
-                <td>${escapeHtml(row.format || '')}</td>
+                <td>${escapeHtml(catalogFormat(row))}</td>
+                <td>${escapeHtml(String(row.chapters ?? row.chapterCount ?? ''))}</td>
                 <td>${escapeHtml(row.rating || '')}</td>
                 <td class="catalog-plot" title="${escapeHtml(row.plot || '')}">${escapeHtml(row.plot || '')}</td>
                 <td class="catalog-path" title="${escapeHtml(row.path || '')}">${escapeHtml(row.path || '')}</td>
@@ -7208,6 +7789,7 @@
                                 <th>Title</th>
                                 <th>Runtime</th>
                                 <th>Format</th>
+                                <th>Chapters</th>
                                 <th>Rating</th>
                                 <th>Plot</th>
                                 <th>Path</th>
@@ -7238,14 +7820,30 @@
             : '';
 
         el.innerHTML = `${note}<div class="catalog-show-list catalog-movie-list">${items.map((row) => {
-            const year = row.year || row.productionYear || '';
-            const meta = [row.runtime, row.format || row.aspectRatio, year, row.rating || row.officialRating]
-                .filter(Boolean)
-                .join(' · ');
+            const chapters = row.chapters || row.chapterCount;
+            const chapterLabel = chapters
+                ? (Number(chapters) === 1 ? '1 chapter' : `${chapters} chapters`)
+                : '';
+            const meta = [
+                row.runtime,
+                catalogFormat(row),
+                chapterLabel,
+                row.year || row.productionYear,
+                row.rating || row.officialRating,
+                row.libraryName
+            ].filter(Boolean).join(' · ');
+            const plot = row.plot || row.overview || '';
+            const stars = row.stars || '';
+            const path = row.path || '';
             return `<div class="catalog-show catalog-movie">
                 <div class="catalog-movie-row">
                     <span class="catalog-show-title">${escapeHtml(row.name || 'Untitled')}</span>
                     <span class="catalog-show-meta">${escapeHtml(meta)}</span>
+                </div>
+                <div class="catalog-show-body">
+                    ${plot ? `<p class="catalog-show-plot">${escapeHtml(plot)}</p>` : ''}
+                    ${stars ? `<p class="catalog-show-meta">${escapeHtml(stars)}</p>` : ''}
+                    ${path ? `<p class="catalog-path" title="${escapeHtml(path)}">${escapeHtml(path)}</p>` : ''}
                 </div>
             </div>`;
         }).join('')}</div>`;
@@ -7347,6 +7945,7 @@
                     ${showAlbum ? '<th>Album</th>' : ''}
                     <th>Runtime</th>
                     <th>Format</th>
+                    <th>Chapters</th>
                     <th>Rating</th>
                     <th>Plot</th>
                     <th>Stars</th>
@@ -7358,7 +7957,8 @@
                     <td>${escapeHtml(row.name || '')}</td>
                     ${showAlbum ? `<td>${escapeHtml(row.album || '')}</td>` : ''}
                     <td>${escapeHtml(row.runtime || '')}</td>
-                    <td>${escapeHtml(row.format || '')}</td>
+                    <td>${escapeHtml(catalogFormat(row))}</td>
+                    <td>${escapeHtml(String(row.chapters ?? row.chapterCount ?? ''))}</td>
                     <td>${escapeHtml(row.rating || '')}</td>
                     <td class="catalog-plot" title="${escapeHtml(row.plot || '')}">${escapeHtml(row.plot || '')}</td>
                     <td>${escapeHtml(row.stars || '')}</td>
@@ -7403,7 +8003,7 @@
                 ${items.map((row) => `<tr>
                     <td>${escapeHtml(row.name || '')}</td>
                     <td>${escapeHtml(row.runtime || '')}</td>
-                    <td>${escapeHtml(row.format || row.aspectRatio || '')}</td>
+                    <td>${escapeHtml(catalogFormat(row))}</td>
                     <td>${escapeHtml(String(row.chapters ?? row.chapterCount ?? ''))}</td>
                     <td>${escapeHtml(row.rating || row.officialRating || '')}</td>
                     <td class="catalog-plot" title="${escapeHtml(row.plot || row.overview || '')}">${escapeHtml(row.plot || row.overview || '')}</td>
@@ -8764,6 +9364,7 @@
 
             hideCatalogSyncPopup();
         });
+        bindTaskPopupStack();
         click('modal-close', closeModal);
         const modalBackdrop = $('modal-backdrop');
         if (modalBackdrop) {

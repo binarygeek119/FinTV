@@ -80,14 +80,16 @@ public sealed class CatalogTrueAspectProbeService
 
         var targets = new List<ProbeTarget>();
         var skipped = 0;
+        string? skipExample = null;
         foreach (var row in rows)
         {
-            var path = _remap.ResolveExistingPath(row.Path, row.SourceConnectionId);
+            var remapped = _remap.Remap(row.Path, null, row.SourceConnectionId);
+            var path = _remap.ResolveExistingFile(row.Path, row.SourceConnectionId);
             if (string.IsNullOrWhiteSpace(path)
-                || !File.Exists(path)
                 || NonVideoExtensions.Contains(Path.GetExtension(path)))
             {
                 skipped++;
+                skipExample ??= (row.Path ?? "") + " → " + (remapped ?? "(none)");
                 continue;
             }
 
@@ -98,7 +100,15 @@ public sealed class CatalogTrueAspectProbeService
         onProgress?.Invoke(0, total, 0);
         if (total == 0)
         {
-            return new CatalogTrueAspectProbeResult(0, 0, skipped, 0);
+            if (skipped > 0)
+            {
+                _logger.LogWarning(
+                    "True-aspect skipped all {Skipped} videos; remapped files were not on disk. Example: {Example}. Check Library path remaps.",
+                    skipped,
+                    skipExample);
+            }
+
+            return new CatalogTrueAspectProbeResult(0, 0, skipped, 0, skipExample);
         }
 
         var found = new ConcurrentBag<(Guid Id, string Ratio)>();
@@ -168,7 +178,7 @@ public sealed class CatalogTrueAspectProbeService
             wrote,
             skipped,
             failed);
-        return new CatalogTrueAspectProbeResult(found.Count, wrote, skipped, failed);
+        return new CatalogTrueAspectProbeResult(found.Count, wrote, skipped, failed, skipExample);
     }
 
     private async Task WriteTypedTrueAspectAsync(Guid id, string ratio, CancellationToken cancellationToken)
@@ -321,4 +331,4 @@ public sealed class CatalogTrueAspectProbeService
     private sealed record ProbeTarget(Guid Id, string Path, Guid? SourceConnectionId, long? RuntimeTicks);
 }
 
-public sealed record CatalogTrueAspectProbeResult(int Probed, int Measured, int Skipped, int Failed);
+public sealed record CatalogTrueAspectProbeResult(int Probed, int Measured, int Skipped, int Failed, string? SkipExample = null);

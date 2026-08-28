@@ -116,7 +116,7 @@ public class PluginBridgeController : ControllerBase
             row.AlbumArtistsJson = JsonSerializer.Serialize(item.AlbumArtists ?? []);
             row.Width = item.Width;
             row.Height = item.Height;
-            row.AspectRatio = VideoAspectFormat.Classify(item.AspectRatio, item.Width, item.Height);
+            row.AspectRatio = VideoAspectFormat.ForCatalog(row.TrueAspectRatio, item.AspectRatio, item.Width, item.Height);
             row.SyncedAt = DateTime.UtcNow;
             row.IsMissing = false;
             row.MissingSince = null;

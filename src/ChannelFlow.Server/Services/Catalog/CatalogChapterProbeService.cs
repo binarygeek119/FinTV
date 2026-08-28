@@ -75,14 +75,16 @@ public sealed class CatalogChapterProbeService
 
         var targets = new List<(Guid Id, string Path)>();
         var skipped = 0;
+        string? skipExample = null;
         foreach (var row in rows)
         {
-            var path = _remap.ResolveExistingPath(row.Path, row.SourceConnectionId);
+            var remapped = _remap.Remap(row.Path, null, row.SourceConnectionId);
+            var path = _remap.ResolveExistingFile(row.Path, row.SourceConnectionId);
             if (string.IsNullOrWhiteSpace(path)
-                || !File.Exists(path)
                 || NonVideoExtensions.Contains(Path.GetExtension(path)))
             {
                 skipped++;
+                skipExample ??= (row.Path ?? "") + " → " + (remapped ?? "(none)");
                 continue;
             }
 
@@ -93,7 +95,15 @@ public sealed class CatalogChapterProbeService
         onProgress?.Invoke(0, total, 0);
         if (total == 0)
         {
-            return new CatalogChapterProbeResult(0, 0, skipped, 0);
+            if (skipped > 0)
+            {
+                _logger.LogWarning(
+                    "ffprobe skipped all {Skipped} videos; remapped files were not on disk. Example: {Example}. Check Library path remaps.",
+                    skipped,
+                    skipExample);
+            }
+
+            return new CatalogChapterProbeResult(0, 0, skipped, 0, skipExample);
         }
 
         var found = new ConcurrentBag<(Guid Id, List<ProbedChapter> Chapters)>();
@@ -184,7 +194,7 @@ public sealed class CatalogChapterProbeService
             wroteChapters,
             skipped,
             failed);
-        return new CatalogChapterProbeResult(found.Count, wroteChapters, skipped, failed);
+        return new CatalogChapterProbeResult(found.Count, wroteChapters, skipped, failed, skipExample);
     }
 
     private async Task WriteTypedChaptersJsonAsync(Guid id, string json, CancellationToken cancellationToken)
@@ -372,4 +382,4 @@ public sealed class CatalogChapterProbeService
     private sealed record ProbedChapter(long StartPositionTicks, string? Name);
 }
 
-public sealed record CatalogChapterProbeResult(int Probed, int WithChapters, int Skipped, int Failed);
+public sealed record CatalogChapterProbeResult(int Probed, int WithChapters, int Skipped, int Failed, string? SkipExample = null);

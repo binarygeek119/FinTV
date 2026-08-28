@@ -47,20 +47,7 @@ internal static class WeatherSampleLocations
     ];
 
     public static bool IsUnsetOrLegacy(string? query)
-    {
-        if (string.IsNullOrWhiteSpace(query))
-        {
-            return true;
-        }
-
-        var trimmed = query.Trim();
-        if (string.Equals(trimmed, "50317", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        return trimmed.StartsWith("50317,", StringComparison.OrdinalIgnoreCase);
-    }
+        => string.IsNullOrWhiteSpace(query);
 
     public static string PickRandom(IEnumerable<string>? exclude = null)
     {

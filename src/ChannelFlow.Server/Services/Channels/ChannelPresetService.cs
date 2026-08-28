@@ -250,7 +250,11 @@ public class ChannelPresetService
 
         if (WeatherStarChannelService.IsUnsetOrLegacyLocation(channel.WeatherLocationQuery))
         {
-            channel.WeatherLocationQuery = WeatherStarChannelService.ResolveLocationQuery(channel.WeatherLocationQuery);
+            var location = WeatherStarChannelService.ResolveLocationQuery(channel.WeatherLocationQuery);
+            if (!string.IsNullOrWhiteSpace(location))
+            {
+                channel.WeatherLocationQuery = location;
+            }
         }
     }
 

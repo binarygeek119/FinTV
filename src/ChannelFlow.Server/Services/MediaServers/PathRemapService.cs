@@ -133,6 +133,27 @@ public sealed class PathRemapService
     }
 
     /// <summary>
+    /// Remapped local file path when that file exists on disk; otherwise null.
+    /// </summary>
+    public string? ResolveExistingFile(string? jellyfinPath, Guid? connectionId = null)
+    {
+        var remapped = Remap(jellyfinPath, null, connectionId);
+        if (!string.IsNullOrWhiteSpace(remapped) && File.Exists(remapped))
+        {
+            return remapped;
+        }
+
+        if (!string.IsNullOrWhiteSpace(jellyfinPath)
+            && !string.Equals(remapped, jellyfinPath, StringComparison.Ordinal)
+            && File.Exists(jellyfinPath))
+        {
+            return jellyfinPath;
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// True when the server path, after remap, exists as a local file or folder.
     /// </summary>
     public bool ExistsAtRemappedPath(string? jellyfinPath, IReadOnlyList<PathMapping>? mappings = null, Guid? connectionId = null)

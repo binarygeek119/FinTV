@@ -411,7 +411,8 @@ public sealed class MediaServerService
                 item.AspectRatio,
                 item.TrueAspectRatio,
                 item.Width,
-                item.Height
+                item.Height,
+                ChapterCount = item.Chapters.Count
             })
             .ToListAsync(cancellationToken);
 
@@ -427,7 +428,9 @@ public sealed class MediaServerService
                 episode = row.IndexNumber,
                 kind = row.Kind,
                 runtime = string.IsNullOrWhiteSpace(row.Runtime) ? FormatRuntime(row.RuntimeTicks) : row.Runtime,
-                format = VideoAspectFormat.Prefer(row.TrueAspectRatio, row.AspectRatio, row.Width, row.Height) ?? row.AspectRatio,
+                format = CatalogFormat(row.TrueAspectRatio, row.AspectRatio, row.Width, row.Height),
+                trueAspectRatio = row.TrueAspectRatio,
+                chapters = CatalogChapters(row.ChapterCount),
                 rating = FormatRating(row.OfficialRating, row.CommunityRating),
                 plot = TruncatePlot(row.Overview),
                 stars = JoinJsonNames(row.PeopleJson, "Name"),
@@ -489,7 +492,8 @@ public sealed class MediaServerService
                 item.AspectRatio,
                 item.TrueAspectRatio,
                 item.Width,
-                item.Height
+                item.Height,
+                ChapterCount = item.Chapters.Count
             })
             .ToListAsync(cancellationToken);
 
@@ -507,7 +511,9 @@ public sealed class MediaServerService
                     album = row.Album ?? string.Empty,
                     kind = row.Kind,
                     runtime = string.IsNullOrWhiteSpace(row.Runtime) ? FormatRuntime(row.RuntimeTicks) : row.Runtime,
-                    format = VideoAspectFormat.Prefer(row.TrueAspectRatio, row.AspectRatio, row.Width, row.Height) ?? row.AspectRatio,
+                    format = CatalogFormat(row.TrueAspectRatio, row.AspectRatio, row.Width, row.Height),
+                    trueAspectRatio = row.TrueAspectRatio,
+                    chapters = CatalogChapters(row.ChapterCount),
                     rating = FormatRating(row.OfficialRating, row.CommunityRating),
                     plot = TruncatePlot(row.Overview),
                     stars = CatalogStars(row.PeopleJson, row.ArtistsJson),
@@ -732,27 +738,28 @@ public sealed class MediaServerService
                 item.AspectRatio,
                 item.TrueAspectRatio,
                 item.Width,
-                item.Height
+                item.Height,
+                ChapterCount = item.Chapters.Count
             })
             .ToListAsync(cancellationToken);
 
         return (total, rows.Select(row => (object)new
         {
             row.Id,
-            row.Name,
+            name = row.Name,
             row.Kind,
             row.Overview,
             row.OfficialRating,
             row.CommunityRating,
             runtime = string.IsNullOrWhiteSpace(row.Runtime) ? FormatRuntime(row.RuntimeTicks) : row.Runtime,
             year = row.ProductionYear,
-            row.Path,
+            path = row.Path ?? string.Empty,
             row.SeriesName,
             row.LibraryName,
-            row.AspectRatio,
-            format = VideoAspectFormat.Prefer(row.TrueAspectRatio, row.AspectRatio, row.Width, row.Height) ?? row.AspectRatio,
-            chapters = "",
-            rating = row.OfficialRating ?? row.CommunityRating?.ToString("0.#"),
+            format = CatalogFormat(row.TrueAspectRatio, row.AspectRatio, row.Width, row.Height),
+            trueAspectRatio = row.TrueAspectRatio,
+            chapters = CatalogChapters(row.ChapterCount),
+            rating = FormatRating(row.OfficialRating, row.CommunityRating),
             plot = TruncatePlot(row.Overview),
             stars = JoinJsonNames(row.PeopleJson, "Name"),
             ids = JoinJsonMap(row.ProviderIdsJson)
@@ -946,6 +953,12 @@ public sealed class MediaServerService
 
         return string.IsNullOrWhiteSpace(seasonName) ? string.Empty : seasonName.Trim();
     }
+
+    private static string CatalogFormat(string? trueAspectRatio, string? aspectRatio, int? width, int? height)
+        => VideoAspectFormat.ForCatalog(trueAspectRatio, aspectRatio, width, height) ?? string.Empty;
+
+    private static string CatalogChapters(int count)
+        => count > 0 ? count.ToString() : string.Empty;
 
     private static string FormatRating(string? official, float? community)
     {

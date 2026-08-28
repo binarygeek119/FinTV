@@ -32,10 +32,7 @@ public class WeatherStarChannelService
             return channelLocation!.Trim();
         }
 
-        var fallback = ResolveDefaultLocationQuery();
-        return string.IsNullOrWhiteSpace(fallback)
-            ? WeatherSampleLocations.PickRandom()
-            : fallback;
+        return ResolveDefaultLocationQuery();
     }
 
     public static string ResolveDefaultLocationQuery()

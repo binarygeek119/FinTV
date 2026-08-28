@@ -792,12 +792,27 @@ table.data-table tbody tr.selected {
     .jellyfin-library-grid { grid-template-columns: 1fr; }
 }
 
-.catalog-sync-popup {
+.task-popup-stack {
     position: fixed;
     right: 1.1rem;
     bottom: 1.1rem;
     z-index: 9800;
+    display: flex;
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: 0.65rem;
     width: min(360px, calc(100vw - 2rem));
+    max-height: calc(100vh - 2.2rem);
+    overflow-x: hidden;
+    overflow-y: auto;
+    pointer-events: none;
+}
+.catalog-sync-popup {
+    position: relative;
+    right: auto;
+    bottom: auto;
+    z-index: auto;
+    width: 100%;
     padding: 0.85rem 1rem 0.95rem;
     background: var(--card-bg);
     border: 1px solid var(--border);
@@ -805,6 +820,8 @@ table.data-table tbody tr.selected {
     border-radius: 10px;
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
     animation: catalog-sync-in 0.2s ease;
+    pointer-events: auto;
+    flex: 0 0 auto;
 }
 .catalog-sync-popup.is-done { border-left-color: #22c55e; }
 .catalog-sync-popup.is-error { border-left-color: #ef4444; }
@@ -965,6 +982,19 @@ table.data-table tbody tr.selected {
     align-items: baseline;
     gap: 0.55rem;
     padding: 0.7rem 0.85rem;
+}
+.catalog-movie .catalog-show-body {
+    padding-top: 0;
+    border-top: 1px solid var(--border);
+}
+.catalog-movie .catalog-show-plot {
+    margin-bottom: 0.4rem;
+}
+.catalog-path {
+    margin: 0;
+    font-size: 0.78rem;
+    color: var(--muted);
+    word-break: break-all;
 }
 @keyframes catalog-sync-in {
     from { opacity: 0; transform: translateY(10px); }

@@ -537,7 +537,7 @@ public class TasksController : ControllerBase
     [HttpPost("ffprobe")]
     public ActionResult<object> RunFfprobeScan()
     {
-        if (_ffprobeScan.IsRunning)
+        if (!_ffprobeScan.TryBegin())
         {
             return Ok(new { queued = false, alreadyRunning = true, status = _ffprobeScan.Describe() });
         }
@@ -546,7 +546,7 @@ public class TasksController : ControllerBase
         {
             try
             {
-                await _ffprobeScan.RunMissingAsync(CancellationToken.None).ConfigureAwait(false);
+                await _ffprobeScan.RunMissingAsync(begin: false, CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception)
             {
@@ -570,7 +570,7 @@ public class TasksController : ControllerBase
     [HttpPost("true-aspect")]
     public ActionResult<object> RunTrueAspectScan()
     {
-        if (_trueAspectScan.IsRunning)
+        if (!_trueAspectScan.TryBegin())
         {
             return Ok(new { queued = false, alreadyRunning = true, status = _trueAspectScan.Describe() });
         }
@@ -579,7 +579,7 @@ public class TasksController : ControllerBase
         {
             try
             {
-                await _trueAspectScan.RunMissingAsync(CancellationToken.None).ConfigureAwait(false);
+                await _trueAspectScan.RunMissingAsync(begin: false, CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception)
             {

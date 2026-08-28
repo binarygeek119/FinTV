@@ -32,7 +32,7 @@ public class WeatherController : ControllerBase
     [HttpGet("status")]
     public async Task<ActionResult<object>> GetStatus(CancellationToken cancellationToken)
     {
-        await EnsureRandomWeatherLocationsAsync(cancellationToken);
+        await EnsureWeatherLocationsAsync(cancellationToken);
 
         var config = FinTvRuntime.Current?.Configuration;
         var weatherChannels = (await _channels.GetAllAsync(cancellationToken))
@@ -84,16 +84,15 @@ public class WeatherController : ControllerBase
         });
     }
 
-    private async Task EnsureRandomWeatherLocationsAsync(CancellationToken cancellationToken)
+    private async Task EnsureWeatherLocationsAsync(CancellationToken cancellationToken)
     {
         var plugin = FinTvRuntime.Current;
+        var defaultLocation = plugin is not null
+            && !WeatherStarChannelService.IsUnsetOrLegacyLocation(plugin.Configuration.WeatherDefaultLocationQuery)
+            ? plugin.Configuration.WeatherDefaultLocationQuery!.Trim()
+            : null;
         var channels = (await _channels.GetAllAsync(cancellationToken))
             .Where(c => c.ContentType == ChannelContentType.Weather)
-            .ToList();
-        var used = channels
-            .Select(c => c.WeatherLocationQuery)
-            .Where(q => !WeatherStarChannelService.IsUnsetOrLegacyLocation(q))
-            .Select(q => q!.Trim())
             .ToList();
 
         foreach (var channel in channels)
@@ -103,17 +102,12 @@ public class WeatherController : ControllerBase
                 continue;
             }
 
-            var location = WeatherStarChannelService.PickRandomLocation(used);
-            used.Add(location);
-            await _channels.UpdateWeatherLocationAsync(channel.Id, location, cancellationToken);
-        }
+            if (string.IsNullOrWhiteSpace(defaultLocation))
+            {
+                continue;
+            }
 
-        if (plugin is not null && WeatherStarChannelService.IsUnsetOrLegacyLocation(plugin.Configuration.WeatherDefaultLocationQuery))
-        {
-            plugin.Configuration.WeatherDefaultLocationQuery = used.Count > 0
-                ? used[0]
-                : WeatherStarChannelService.PickRandomLocation();
-            plugin.SaveConfiguration();
+            await _channels.UpdateWeatherLocationAsync(channel.Id, defaultLocation, cancellationToken);
         }
     }
 

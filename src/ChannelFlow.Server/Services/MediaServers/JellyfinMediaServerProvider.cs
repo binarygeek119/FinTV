@@ -174,59 +174,129 @@ public sealed class JellyfinMediaServerProvider : MediaServerProviderBase
         foreach (var library in enabled)
         {
             libraryIndex++;
-            var start = 0;
-            const int page = 200;
-            while (true)
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                imported += await ImportLibraryAsync(
+                    client,
+                    root,
+                    token,
+                    userId,
+                    connection.Id,
+                    library,
+                    libraryIndex,
+                    enabled.Count,
+                    imported,
+                    onBatch,
+                    cancellationToken);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
                 _progress.Fetching(library.Name, libraryIndex, enabled.Count, imported, 0);
-                var url = root + "/Users/" + Uri.EscapeDataString(userId) + "/Items"
-                    + "?ParentId=" + Uri.EscapeDataString(library.ExternalId)
-                    + "&Recursive=true&EnableTotalRecordCount=true&EnableImages=false&EnableUserData=false"
-                    + "&IncludeItemTypes=Movie,Series,Episode,Audio,MusicVideo,Video"
-                    + "&Fields=Path,Overview,PremiereDate,ProviderIds,Chapters,Width,Height,Genres,Tags,Studios,People,"
-                    + "ParentId,IndexNumber,ParentIndexNumber,SeriesName,SeasonName,ProductionYear,OfficialRating,"
-                    + "CommunityRating,CriticRating,RunTimeTicks,SortName,MediaSources,ChildCount"
-                    + "&StartIndex=" + start + "&Limit=" + page;
-                using var response = await GetAsync(client, url, token, cancellationToken);
-                response.EnsureSuccessStatusCode();
-                using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
-                if (!doc.RootElement.TryGetProperty("Items", out var pageItems) || pageItems.ValueKind != JsonValueKind.Array)
-                {
-                    break;
-                }
-
-                var rawCount = 0;
-                var mapped = new List<CatalogItemDto>();
-                foreach (var raw in pageItems.EnumerateArray())
-                {
-                    rawCount++;
-                    var item = MapItem(raw, library, connection.Id);
-                    if (item is not null)
-                    {
-                        mapped.Add(item);
-                    }
-                }
-
-                if (mapped.Count > 0)
-                {
-                    await onBatch(mapped, cancellationToken);
-                    imported += mapped.Count;
-                }
-
-                start += rawCount;
-                var total = doc.RootElement.TryGetProperty("TotalRecordCount", out var totalEl) && totalEl.TryGetInt32(out var t)
-                    ? t
-                    : start;
-                _progress.Fetching(library.Name, libraryIndex, enabled.Count, imported, 0);
-                if (rawCount == 0 || start >= total)
-                {
-                    break;
-                }
+                throw new InvalidOperationException(
+                    "Jellyfin refused library \"" + library.Name + "\": " + ex.Message,
+                    ex);
             }
         }
 
         return imported;
+    }
+
+    private async Task<int> ImportLibraryAsync(
+        HttpClient client,
+        string root,
+        string? token,
+        string userId,
+        Guid connectionId,
+        MediaServerLibrary library,
+        int libraryIndex,
+        int libraryCount,
+        int importedSoFar,
+        Func<IReadOnlyList<CatalogItemDto>, CancellationToken, Task> onBatch,
+        CancellationToken cancellationToken)
+    {
+        var imported = importedSoFar;
+        var start = 0;
+        const int page = 200;
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _progress.Fetching(library.Name, libraryIndex, libraryCount, imported, 0);
+            var url = root + "/Users/" + Uri.EscapeDataString(userId) + "/Items"
+                + "?ParentId=" + Uri.EscapeDataString(library.ExternalId ?? "")
+                + "&Recursive=true&EnableTotalRecordCount=true&EnableImages=false&EnableUserData=false"
+                + "&IncludeItemTypes=Movie,Series,Episode,Audio,MusicVideo,Video"
+                + "&Fields=Path,Overview,ProviderIds,Chapters,Width,Height,Genres,Tags,Studios,People,"
+                + "ParentId,SortName,MediaSources,ChildCount,DateCreated,MediaStreams"
+                + "&StartIndex=" + start + "&Limit=" + page;
+            using var response = await GetAsync(client, url, token, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                var detail = TruncateJellyfinError(body);
+                throw new HttpRequestException(
+                    "HTTP " + (int)response.StatusCode + " fetching \"" + library.Name + "\""
+                    + (string.IsNullOrWhiteSpace(detail) ? "" : ": " + detail));
+            }
+
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+            if (!doc.RootElement.TryGetProperty("Items", out var pageItems) || pageItems.ValueKind != JsonValueKind.Array)
+            {
+                break;
+            }
+
+            var rawCount = 0;
+            var mapped = new List<CatalogItemDto>();
+            foreach (var raw in pageItems.EnumerateArray())
+            {
+                rawCount++;
+                var item = MapItem(raw, library, connectionId);
+                if (item is not null)
+                {
+                    mapped.Add(item);
+                }
+            }
+
+            if (mapped.Count > 0)
+            {
+                await onBatch(mapped, cancellationToken);
+                imported += mapped.Count;
+            }
+
+            start += rawCount;
+            var total = doc.RootElement.TryGetProperty("TotalRecordCount", out var totalEl) && totalEl.TryGetInt32(out var t)
+                ? t
+                : start;
+            _progress.Fetching(library.Name, libraryIndex, libraryCount, imported, 0);
+            if (rawCount == 0 || start >= total)
+            {
+                break;
+            }
+        }
+
+        return imported - importedSoFar;
+    }
+
+    private static string TruncateJellyfinError(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return "";
+        }
+
+        var text = body.Trim();
+        try
+        {
+            using var doc = JsonDocument.Parse(text);
+            if (doc.RootElement.TryGetProperty("message", out var message) && message.ValueKind == JsonValueKind.String)
+            {
+                text = message.GetString() ?? text;
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        return text.Length <= 240 ? text : text[..237] + "...";
     }
 
     private HttpClient CreateClient(MediaServerConnection connection)

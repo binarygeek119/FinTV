@@ -33,6 +33,7 @@ public static class VideoAspectFormat
 
     /// <summary>
     /// Uses a measured active-picture ratio when present, otherwise the media-server label/size.
+    /// Snaps to 16:9 / 4:3 for overlay and lineup filters.
     /// </summary>
     public static string? Prefer(string? trueAspectRatio, string? aspectRatio, int? width, int? height)
     {
@@ -42,6 +43,50 @@ public static class VideoAspectFormat
         }
 
         return Classify(aspectRatio, width, height);
+    }
+
+    /// <summary>
+    /// Library format column: measured TrueAspectRatio replaces the media-server value.
+    /// Does not snap 1.85/2.39 onto 16:9 so the column shows the crop, not Jellyfin's label.
+    /// </summary>
+    public static string? ForCatalog(string? trueAspectRatio, string? aspectRatio, int? width, int? height)
+    {
+        if (!string.IsNullOrWhiteSpace(trueAspectRatio))
+        {
+            return DisplayMeasured(trueAspectRatio);
+        }
+
+        return Classify(aspectRatio, width, height);
+    }
+
+    /// <summary>
+    /// Measured crop as 16:9 / 4:3 only when the picture really is that ratio; otherwise N.NN:1.
+    /// </summary>
+    public static string? DisplayMeasured(string? value)
+    {
+        var named = NamedBroadcastLabel(value);
+        if (named is SixteenNine or FourThree)
+        {
+            return named;
+        }
+
+        if (!TryParseRatio(value, out var ratio) || ratio <= 0)
+        {
+            return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        }
+
+        const double exact = 0.02;
+        if (RelativeError(ratio, SixteenNineRatio) <= exact)
+        {
+            return SixteenNine;
+        }
+
+        if (RelativeError(ratio, FourThreeRatio) <= exact)
+        {
+            return FourThree;
+        }
+
+        return ratio.ToString("0.00", CultureInfo.InvariantCulture).TrimEnd('0').TrimEnd('.') + ":1";
     }
 
     /// <summary>

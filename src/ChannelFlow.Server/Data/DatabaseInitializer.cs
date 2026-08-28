@@ -130,7 +130,7 @@ public class DatabaseInitializer : IHostedService
             runtime.Configuration.Normalization ?? Configuration.NormalizationSettings.CreateDefault(),
             encoding.Describe().HardwareAcceleration);
         normalization.ApplyFromSaved(clampedNorm);
-        await AssignRandomWeatherLocationsAsync(db, runtime, cancellationToken);
+        await EnsureSavedWeatherLocationsAsync(db, runtime, cancellationToken);
 
         try
         {
@@ -160,34 +160,30 @@ public class DatabaseInitializer : IHostedService
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-    private static async Task AssignRandomWeatherLocationsAsync(
+    private static async Task EnsureSavedWeatherLocationsAsync(
         FinTvDbContext db,
         FinTvRuntime runtime,
         CancellationToken cancellationToken)
     {
+        var defaultLocation = WeatherStarChannelService.IsUnsetOrLegacyLocation(runtime.Configuration.WeatherDefaultLocationQuery)
+            ? null
+            : runtime.Configuration.WeatherDefaultLocationQuery!.Trim();
+        if (string.IsNullOrWhiteSpace(defaultLocation))
+        {
+            return;
+        }
+
         var channels = await db.Channels
             .Where(c => c.ContentType == Domain.ChannelContentType.Weather)
             .ToListAsync(cancellationToken);
-        var used = new List<string>();
         foreach (var channel in channels)
         {
             if (!WeatherStarChannelService.IsUnsetOrLegacyLocation(channel.WeatherLocationQuery))
             {
-                used.Add(channel.WeatherLocationQuery!.Trim());
                 continue;
             }
 
-            var location = WeatherStarChannelService.PickRandomLocation(used);
-            channel.WeatherLocationQuery = location;
-            used.Add(location);
-        }
-
-        if (WeatherStarChannelService.IsUnsetOrLegacyLocation(runtime.Configuration.WeatherDefaultLocationQuery))
-        {
-            runtime.Configuration.WeatherDefaultLocationQuery = used.Count > 0
-                ? used[0]
-                : WeatherStarChannelService.PickRandomLocation();
-            runtime.SaveConfiguration();
+            channel.WeatherLocationQuery = defaultLocation;
         }
 
         if (db.ChangeTracker.HasChanges())
