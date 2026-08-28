@@ -286,8 +286,8 @@ public sealed class PostgresConnectionStore
             Database = settings.Database,
             Username = settings.Username,
             Password = settings.Password ?? "",
-            Timeout = 8,
-            CommandTimeout = 30
+            Timeout = 20,
+            CommandTimeout = 60
         }.ConnectionString;
 
     private static bool IsSafeName(string value)

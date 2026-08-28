@@ -136,8 +136,12 @@ public sealed class MediaServerService
         var row = await _db.MediaServerConnections.Include(c => c.Libraries).FirstOrDefaultAsync(c => c.Id == id, cancellationToken)
             ?? throw new InvalidOperationException("Media server not found.");
         var remote = await Provider(row.Kind).ListLibrariesAsync(row, cancellationToken);
-        var existing = row.Libraries
+        var existingById = row.Libraries
             .GroupBy(library => library.ExternalId ?? "", StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        var existingByName = row.Libraries
+            .Where(library => !string.IsNullOrWhiteSpace(library.Name))
+            .GroupBy(library => library.Name, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var order = 0;
@@ -149,7 +153,18 @@ public sealed class MediaServerService
                 continue;
             }
 
-            if (!existing.TryGetValue(externalId, out var local))
+            if (!existingById.TryGetValue(externalId, out var local)
+                && !string.IsNullOrWhiteSpace(lib.Name)
+                && existingByName.TryGetValue(lib.Name, out local)
+                && !existingById.ContainsKey(externalId))
+            {
+                var previousId = local.ExternalId ?? "";
+                existingById.Remove(previousId);
+                local.ExternalId = externalId;
+                existingById[externalId] = local;
+            }
+
+            if (local is null)
             {
                 local = new MediaServerLibrary
                 {
@@ -160,7 +175,11 @@ public sealed class MediaServerService
                 };
                 row.Libraries.Add(local);
                 _db.MediaServerLibraries.Add(local);
-                existing[externalId] = local;
+                existingById[externalId] = local;
+                if (!string.IsNullOrWhiteSpace(lib.Name))
+                {
+                    existingByName[lib.Name] = local;
+                }
             }
 
             local.ExternalId = externalId;
@@ -247,12 +266,9 @@ public sealed class MediaServerService
 
         try
         {
-            if (row.Libraries.Count == 0)
-            {
-                _progress.Libraries(row.Name, 0);
-                await RefreshLibrariesAsync(id, cancellationToken);
-                row = await _db.MediaServerConnections.Include(c => c.Libraries).FirstAsync(c => c.Id == id, cancellationToken);
-            }
+            _progress.Libraries(row.Name, 0);
+            await RefreshLibrariesAsync(id, cancellationToken);
+            row = await _db.MediaServerConnections.Include(c => c.Libraries).FirstAsync(c => c.Id == id, cancellationToken);
 
             var enabled = row.Libraries.Count(library => library.SyncEnabled);
             _progress.Libraries(row.Name, enabled);
@@ -326,14 +342,24 @@ public sealed class MediaServerService
 
     public async Task<object> GetCatalogAsync(Guid? connectionId, MediaServerKind? kind, CancellationToken cancellationToken)
     {
-        var query = await ScopedCatalogQueryAsync(connectionId, kind, cancellationToken);
+        _db.Database.SetCommandTimeout(TimeSpan.FromMinutes(2));
+        var kindIds = connectionId is null
+            ? await ConnectionIdsForKindAsync(kind, cancellationToken)
+            : null;
+        var hasTyped = await _db.TvShows.AsNoTracking().AnyAsync(cancellationToken)
+            || await _db.Episodes.AsNoTracking().AnyAsync(cancellationToken)
+            || await _db.Movies.AsNoTracking().AnyAsync(cancellationToken);
+        if (hasTyped)
+        {
+            return await GetTypedCatalogAsync(connectionId, kindIds, cancellationToken);
+        }
 
-        var newsQuery = WhereNewsCatalog(query);
-        var notNews = WhereNotNewsCatalog(query);
-        var tvQuery = notNews.Where(i => i.Kind == BaseItemKind.Episode || i.Kind == BaseItemKind.Series);
-        var tv = await LoadTvCatalogAsync(tvQuery, cancellationToken);
+        var query = await ScopedCatalogQueryAsync(connectionId, kind, cancellationToken);
+        var tv = await LoadTvCatalogAsync(
+            query.Where(i => i.Kind == BaseItemKind.Episode || i.Kind == BaseItemKind.Series),
+            cancellationToken);
         var movies = await LoadCatalogBucketAsync(
-            notNews.Where(i => i.Kind == BaseItemKind.Movie),
+            query.Where(i => i.Kind == BaseItemKind.Movie),
             cancellationToken);
         var music = await LoadArtistCatalogAsync(
             query.Where(i => i.Kind == BaseItemKind.Audio),
@@ -341,24 +367,9 @@ public sealed class MediaServerService
         var musicVideos = await LoadArtistCatalogAsync(
             query.Where(i => i.Kind == BaseItemKind.MusicVideo),
             cancellationToken);
-        var news = await LoadCatalogBucketAsync(newsQuery, cancellationToken);
+        var news = await LoadCatalogBucketAsync(WhereNewsCatalog(query), cancellationToken);
 
-        return new
-        {
-            tvShows = tv.Rows,
-            movies = movies.Rows,
-            music = music.Rows,
-            musicVideos = musicVideos.Rows,
-            pastTenseNews = news.Rows,
-            totals = new
-            {
-                tvShows = tv.Total,
-                movies = movies.Total,
-                music = music.Total,
-                musicVideos = musicVideos.Total,
-                pastTenseNews = news.Total
-            }
-        };
+        return CatalogPayload(tv, movies, music, musicVideos, news);
     }
 
     public async Task<object> GetCatalogEpisodesAsync(
@@ -370,7 +381,6 @@ public sealed class MediaServerService
     {
         var query = await ScopedCatalogQueryAsync(connectionId, kind, cancellationToken);
         query = query.Where(item => item.Kind == BaseItemKind.Episode);
-        query = WhereNotNewsCatalog(query);
 
         var name = seriesName?.Trim();
         if (seriesId is Guid id && id != Guid.Empty)
@@ -547,6 +557,282 @@ public sealed class MediaServerService
         }
 
         return query;
+    }
+
+    private async Task<List<Guid>?> ConnectionIdsForKindAsync(MediaServerKind? kind, CancellationToken cancellationToken)
+    {
+        if (kind is not MediaServerKind k)
+        {
+            return null;
+        }
+
+        return await _db.MediaServerConnections.AsNoTracking()
+            .Where(c => c.Kind == k)
+            .Select(c => c.Id)
+            .ToListAsync(cancellationToken);
+    }
+
+    private IQueryable<T> ScopeTypedCatalog<T>(
+        IQueryable<T> query,
+        Guid? connectionId,
+        IReadOnlyList<Guid>? kindIds)
+        where T : CatalogMediaRow
+    {
+        query = query.AsNoTracking().Where(row => !row.IsMissing);
+        if (connectionId is Guid cid)
+        {
+            return query.Where(row => row.SourceConnectionId == cid);
+        }
+
+        if (kindIds is { Count: > 0 })
+        {
+            return query.Where(row => row.SourceConnectionId != null && kindIds.Contains(row.SourceConnectionId.Value));
+        }
+
+        return query;
+    }
+
+    private async Task<object> GetTypedCatalogAsync(
+        Guid? connectionId,
+        IReadOnlyList<Guid>? kindIds,
+        CancellationToken cancellationToken)
+    {
+        var tv = await LoadTypedTvCatalogAsync(
+            ScopeTypedCatalog(_db.TvShows, connectionId, kindIds),
+            ScopeTypedCatalog(_db.Episodes, connectionId, kindIds),
+            cancellationToken);
+        var movies = await LoadTypedBucketAsync(
+            ScopeTypedCatalog(_db.Movies, connectionId, kindIds),
+            BaseItemKind.Movie,
+            cancellationToken);
+        var music = await LoadTypedArtistCatalogAsync(
+            ScopeTypedCatalog(_db.Music, connectionId, kindIds).Select(row => row.ArtistsJson),
+            cancellationToken);
+        var musicVideos = await LoadTypedArtistCatalogAsync(
+            ScopeTypedCatalog(_db.MusicVideos, connectionId, kindIds).Select(row => row.ArtistsJson),
+            cancellationToken);
+        var news = await LoadTypedBucketAsync(
+            ScopeTypedCatalog(_db.PastTenseNews, connectionId, kindIds),
+            BaseItemKind.Video,
+            cancellationToken);
+        return CatalogPayload(tv, movies, music, musicVideos, news);
+    }
+
+    private static object CatalogPayload(
+        (int Total, List<object> Rows) tv,
+        (int Total, List<object> Rows) movies,
+        (int Total, List<object> Rows) music,
+        (int Total, List<object> Rows) musicVideos,
+        (int Total, List<object> Rows) news)
+        => new
+        {
+            tvShows = tv.Rows,
+            movies = movies.Rows,
+            music = music.Rows,
+            musicVideos = musicVideos.Rows,
+            pastTenseNews = news.Rows,
+            totals = new
+            {
+                tvShows = tv.Total,
+                movies = movies.Total,
+                music = music.Total,
+                musicVideos = musicVideos.Total,
+                pastTenseNews = news.Total
+            }
+        };
+
+    private async Task<(int Total, List<object> Rows)> LoadTypedTvCatalogAsync(
+        IQueryable<TvShowRow> shows,
+        IQueryable<EpisodeRow> episodes,
+        CancellationToken cancellationToken)
+    {
+        var seriesRows = await shows
+            .Select(item => new
+            {
+                item.Id,
+                item.Name,
+                item.Plot,
+                item.OfficialRating,
+                item.CommunityRating,
+                item.LibraryName,
+                item.StarsJson,
+                item.ProviderIdsJson
+            })
+            .ToListAsync(cancellationToken);
+
+        var countsBySeriesId = await episodes.Where(item => item.SeriesId != null)
+            .GroupBy(item => item.SeriesId!.Value)
+            .Select(group => new
+            {
+                Id = group.Key,
+                Count = group.Count(),
+                Name = group.Max(item => item.SeriesName)
+            })
+            .ToListAsync(cancellationToken);
+
+        var countsByName = await episodes.Where(item => item.SeriesId == null || item.SeriesId == Guid.Empty)
+            .GroupBy(item => item.SeriesName ?? "")
+            .Select(group => new { Name = group.Key, Count = group.Count() })
+            .ToListAsync(cancellationToken);
+
+        return AssembleTvCatalog(
+            seriesRows.Select(series => (
+                series.Id,
+                series.Name,
+                series.Plot,
+                series.OfficialRating,
+                (float?)series.CommunityRating,
+                series.LibraryName,
+                series.StarsJson,
+                series.ProviderIdsJson)),
+            countsBySeriesId.Select(row => (row.Id, row.Count, row.Name)),
+            countsByName.Select(row => (row.Name, row.Count)));
+    }
+
+    private async Task<(int Total, List<object> Rows)> LoadTypedBucketAsync<T>(
+        IQueryable<T> query,
+        BaseItemKind kind,
+        CancellationToken cancellationToken)
+        where T : CatalogMediaRow
+    {
+        var total = await query.CountAsync(cancellationToken);
+        var rows = await query
+            .OrderBy(item => item.Name)
+            .Take(CatalogPreviewLimit)
+            .Select(item => new
+            {
+                item.Id,
+                item.Name,
+                item.Plot,
+                item.OfficialRating,
+                item.CommunityRating,
+                item.RuntimeTicks,
+                item.ProductionYear,
+                item.Path,
+                item.LibraryName,
+                item.StarsJson,
+                item.ProviderIdsJson,
+                item.AspectRatio,
+                item.TrueAspectRatio,
+                item.Width,
+                item.Height
+            })
+            .ToListAsync(cancellationToken);
+
+        return (total, rows.Select(row => (object)new
+        {
+            row.Id,
+            name = row.Name,
+            Kind = kind,
+            Overview = row.Plot,
+            row.OfficialRating,
+            row.CommunityRating,
+            runtime = FormatRuntime(row.RuntimeTicks),
+            year = row.ProductionYear,
+            path = row.Path ?? string.Empty,
+            SeriesName = (string?)null,
+            row.LibraryName,
+            format = CatalogFormat(row.TrueAspectRatio, row.AspectRatio, row.Width, row.Height),
+            trueAspectRatio = row.TrueAspectRatio,
+            chapters = CatalogChapters(0),
+            rating = FormatRating(row.OfficialRating, (float?)row.CommunityRating),
+            plot = TruncatePlot(row.Plot),
+            stars = JoinJsonNames(row.StarsJson, "Name"),
+            ids = JoinJsonMap(row.ProviderIdsJson)
+        }).ToList());
+    }
+
+    private async Task<(int Total, List<object> Rows)> LoadTypedArtistCatalogAsync(
+        IQueryable<string> artistsJson,
+        CancellationToken cancellationToken)
+    {
+        var rows = await artistsJson.ToListAsync(cancellationToken);
+        var groups = rows
+            .GroupBy(json => PrimaryArtist(json, null, null), StringComparer.OrdinalIgnoreCase)
+            .Select(group => new { Name = group.Key, Count = group.Count() })
+            .OrderBy(group => group.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var mapped = groups.Select(group => (object)new
+        {
+            name = group.Name,
+            artistName = group.Name,
+            itemCount = group.Count,
+            grouped = true
+        }).ToList();
+        return (mapped.Count, mapped.Take(CatalogPreviewLimit).ToList());
+    }
+
+    private static (int Total, List<object> Rows) AssembleTvCatalog(
+        IEnumerable<(Guid Id, string Name, string? Plot, string? OfficialRating, float? CommunityRating, string? LibraryName, string StarsJson, string ProviderIdsJson)> seriesRows,
+        IEnumerable<(Guid Id, int Count, string? Name)> countsBySeriesId,
+        IEnumerable<(string Name, int Count)> countsByName)
+    {
+        var shows = new List<(string Name, object Row)>();
+        var seenIds = new HashSet<Guid>();
+        var countById = countsBySeriesId.ToDictionary(row => row.Id, row => row);
+
+        foreach (var series in seriesRows)
+        {
+            seenIds.Add(series.Id);
+            var count = countById.TryGetValue(series.Id, out var grouped) ? grouped.Count : 0;
+            shows.Add((series.Name, TvShowRow(
+                series.Id,
+                series.Id,
+                series.Name,
+                series.Name,
+                count,
+                series.Plot,
+                series.OfficialRating,
+                series.CommunityRating,
+                series.LibraryName,
+                series.StarsJson,
+                series.ProviderIdsJson)));
+        }
+
+        foreach (var grouped in countsBySeriesId)
+        {
+            if (seenIds.Contains(grouped.Id))
+            {
+                continue;
+            }
+
+            var title = string.IsNullOrWhiteSpace(grouped.Name) ? "Untitled series" : grouped.Name;
+            shows.Add((title, TvShowRow(
+                grouped.Id,
+                grouped.Id,
+                title,
+                grouped.Name,
+                grouped.Count,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null)));
+        }
+
+        foreach (var grouped in countsByName)
+        {
+            var title = string.IsNullOrWhiteSpace(grouped.Name) ? "Untitled series" : grouped.Name;
+            shows.Add((title, TvShowRow(
+                Guid.Empty,
+                null,
+                title,
+                string.IsNullOrWhiteSpace(grouped.Name) ? null : grouped.Name,
+                grouped.Count,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null)));
+        }
+
+        var ordered = shows
+            .OrderBy(show => show.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(show => show.Row)
+            .ToList();
+        return (ordered.Count, ordered.Take(CatalogPreviewLimit).ToList());
     }
 
     private async Task<(int Total, List<object> Rows)> LoadTvCatalogAsync(
@@ -1154,10 +1440,9 @@ public sealed class MediaServerService
                 || item.CollectionType.ToLower() == "homemovies"
                 || item.CollectionType.ToLower() == "homemovie"))
             || (item.LibraryName != null && (
-                EF.Functions.ILike(item.LibraryName, "%Past Tense News%")
-                || EF.Functions.ILike(item.LibraryName, "%Past Tense%")
-                || EF.Functions.ILike(item.LibraryName, "%Home Video%")
-                || EF.Functions.ILike(item.LibraryName, "%Home Movie%"))));
+                item.LibraryName.ToLower().StartsWith("past tense")
+                || item.LibraryName.ToLower().StartsWith("home video")
+                || item.LibraryName.ToLower().StartsWith("home movie"))));
 
     private static IQueryable<MediaItem> WhereNotNewsCatalog(IQueryable<MediaItem> query)
         => query.Where(item =>
@@ -1168,10 +1453,9 @@ public sealed class MediaServerService
                 && item.CollectionType.ToLower() != "homemovies"
                 && item.CollectionType.ToLower() != "homemovie"))
             && (item.LibraryName == null || (
-                !EF.Functions.ILike(item.LibraryName, "%Past Tense News%")
-                && !EF.Functions.ILike(item.LibraryName, "%Past Tense%")
-                && !EF.Functions.ILike(item.LibraryName, "%Home Video%")
-                && !EF.Functions.ILike(item.LibraryName, "%Home Movie%"))));
+                !item.LibraryName.ToLower().StartsWith("past tense")
+                && !item.LibraryName.ToLower().StartsWith("home video")
+                && !item.LibraryName.ToLower().StartsWith("home movie"))));
 
     private static string NormalizeCollectionType(string? collectionType, string? name)
     {

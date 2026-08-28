@@ -2,11 +2,19 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using FinTv.Api;
 using FinTv.Domain;
+using Microsoft.Extensions.Logging;
 
 namespace FinTv.Services.MediaServers;
 
 public sealed class JellyfinMediaServerProvider : MediaServerProviderBase
 {
+    private const string FullItemFields =
+        "Path,Overview,ProviderIds,Chapters,Width,Height,Genres,Tags,Studios,People,"
+        + "ParentId,SortName,MediaSources,ChildCount,DateCreated,MediaStreams";
+
+    private const string SlimItemFields =
+        "Path,Overview,ProviderIds,ParentId,SortName,DateCreated,Width,Height";
+
     private static readonly JsonSerializerOptions Json = new()
     {
         PropertyNameCaseInsensitive = true
@@ -14,11 +22,16 @@ public sealed class JellyfinMediaServerProvider : MediaServerProviderBase
 
     private readonly IHttpClientFactory _http;
     private readonly CatalogSyncProgress _progress;
+    private readonly ILogger<JellyfinMediaServerProvider> _logger;
 
-    public JellyfinMediaServerProvider(IHttpClientFactory http, CatalogSyncProgress progress)
+    public JellyfinMediaServerProvider(
+        IHttpClientFactory http,
+        CatalogSyncProgress progress,
+        ILogger<JellyfinMediaServerProvider> logger)
     {
         _http = http;
         _progress = progress;
+        _logger = logger;
     }
 
     public override MediaServerKind Kind => MediaServerKind.Jellyfin;
@@ -106,22 +119,49 @@ public sealed class JellyfinMediaServerProvider : MediaServerProviderBase
             return Array.Empty<MediaServerRemoteLibrary>();
         }
 
+        var folderByName = await LoadVirtualFoldersByNameAsync(client, root, token, cancellationToken);
         var libraries = new List<MediaServerRemoteLibrary>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in items.EnumerateArray())
         {
-            var id = GetString(item, "Id");
+            var viewId = GetString(item, "Id");
             var name = GetString(item, "Name");
-            if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name))
+            if (string.IsNullOrWhiteSpace(viewId) || string.IsNullOrWhiteSpace(name))
+            {
+                continue;
+            }
+
+            folderByName.TryGetValue(name, out var folder);
+            var externalId = string.IsNullOrWhiteSpace(folder?.ItemId) ? viewId : folder.ItemId;
+            if (!seen.Add(externalId))
             {
                 continue;
             }
 
             libraries.Add(new MediaServerRemoteLibrary
             {
-                ExternalId = id,
+                ExternalId = externalId,
                 Name = name,
-                CollectionType = GetString(item, "CollectionType") ?? GetString(item, "CollectionTypeId"),
-                ItemCount = item.TryGetProperty("ChildCount", out var count) && count.TryGetInt32(out var n) ? n : null
+                CollectionType = GetString(item, "CollectionType")
+                    ?? GetString(item, "CollectionTypeId")
+                    ?? folder?.CollectionType,
+                ItemCount = item.TryGetProperty("ChildCount", out var count) && count.TryGetInt32(out var n) ? n : folder?.ItemCount
+            });
+        }
+
+        foreach (var (name, folder) in folderByName)
+        {
+            if (string.IsNullOrWhiteSpace(folder.ItemId) || !seen.Add(folder.ItemId))
+            {
+                continue;
+            }
+
+            libraries.Add(new MediaServerRemoteLibrary
+            {
+                ExternalId = folder.ItemId,
+                Name = name,
+                CollectionType = folder.CollectionType,
+                ItemCount = folder.ItemCount
             });
         }
 
@@ -192,9 +232,10 @@ public sealed class JellyfinMediaServerProvider : MediaServerProviderBase
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 _progress.Fetching(library.Name, libraryIndex, enabled.Count, imported, 0);
-                throw new InvalidOperationException(
-                    "Jellyfin refused library \"" + library.Name + "\": " + ex.Message,
-                    ex);
+                _logger.LogWarning(
+                    ex,
+                    "Skipping Jellyfin library {Library} so the rest of the catalog can still sync",
+                    library.Name);
             }
         }
 
@@ -217,17 +258,23 @@ public sealed class JellyfinMediaServerProvider : MediaServerProviderBase
         var imported = importedSoFar;
         var start = 0;
         const int page = 200;
+        var query = await ResolveItemsQueryAsync(
+            client,
+            root,
+            token,
+            userId,
+            library,
+            cancellationToken);
+        if (query is null)
+        {
+            return 0;
+        }
+
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
             _progress.Fetching(library.Name, libraryIndex, libraryCount, imported, 0);
-            var url = root + "/Users/" + Uri.EscapeDataString(userId) + "/Items"
-                + "?ParentId=" + Uri.EscapeDataString(library.ExternalId ?? "")
-                + "&Recursive=true&EnableTotalRecordCount=true&EnableImages=false&EnableUserData=false"
-                + "&IncludeItemTypes=Movie,Series,Episode,Audio,MusicVideo,Video"
-                + "&Fields=Path,Overview,ProviderIds,Chapters,Width,Height,Genres,Tags,Studios,People,"
-                + "ParentId,SortName,MediaSources,ChildCount,DateCreated,MediaStreams"
-                + "&StartIndex=" + start + "&Limit=" + page;
+            var url = BuildItemsUrl(root, userId, query, start, page);
             using var response = await GetAsync(client, url, token, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
@@ -274,6 +321,188 @@ public sealed class JellyfinMediaServerProvider : MediaServerProviderBase
         }
 
         return imported - importedSoFar;
+    }
+
+    private async Task<JellyfinItemsQuery?> ResolveItemsQueryAsync(
+        HttpClient client,
+        string root,
+        string? token,
+        string userId,
+        MediaServerLibrary library,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(library.ExternalId))
+        {
+            _logger.LogWarning("Skipping Jellyfin library {Library}: no folder id", library.Name);
+            return null;
+        }
+
+        var parentIds = new List<string>();
+        var folderId = await TryResolveCollectionFolderIdAsync(client, root, token, library.Name, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(folderId))
+        {
+            parentIds.Add(folderId.Trim());
+        }
+
+        var storedId = library.ExternalId.Trim();
+        if (parentIds.TrueForAll(id => !id.Equals(storedId, StringComparison.OrdinalIgnoreCase)))
+        {
+            parentIds.Add(storedId);
+        }
+
+        var homeVideo = IsHomeVideoLibrary(library);
+        var attempts = new List<JellyfinItemsQuery>();
+        foreach (var parentId in parentIds)
+        {
+            if (homeVideo)
+            {
+                attempts.Add(new JellyfinItemsQuery(parentId, "Video", SlimItemFields, true));
+                attempts.Add(new JellyfinItemsQuery(parentId, "Video", SlimItemFields, false));
+                attempts.Add(new JellyfinItemsQuery(parentId, "Video", FullItemFields, true));
+                attempts.Add(new JellyfinItemsQuery(parentId, null, SlimItemFields, true));
+                attempts.Add(new JellyfinItemsQuery(parentId, null, null, false));
+            }
+            else
+            {
+                attempts.Add(new JellyfinItemsQuery(parentId, "Movie,Series,Episode,Audio,MusicVideo,Video", FullItemFields, true));
+                attempts.Add(new JellyfinItemsQuery(parentId, "Movie,Series,Episode,Audio,MusicVideo,Video", SlimItemFields, true));
+                attempts.Add(new JellyfinItemsQuery(parentId, "Movie,Series,Episode,Audio,MusicVideo,Video", SlimItemFields, false));
+            }
+        }
+
+        string? lastError = null;
+        foreach (var probe in attempts)
+        {
+            var url = BuildItemsUrl(root, userId, probe, startIndex: 0, limit: 1);
+            using var response = await GetAsync(client, url, token, cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                if (probe != attempts[0])
+                {
+                    _logger.LogInformation(
+                        "Jellyfin library {Library} syncing with ParentId={ParentId} IncludeItemTypes={Types} userScoped={UserScoped}",
+                        library.Name,
+                        probe.ParentId,
+                        probe.IncludeItemTypes ?? "(all)",
+                        probe.UserScoped);
+                }
+
+                return probe;
+            }
+
+            var body = await response.Content.ReadAsStringAsync(cancellationToken);
+            lastError = "HTTP " + (int)response.StatusCode
+                + (string.IsNullOrWhiteSpace(TruncateJellyfinError(body))
+                    ? ""
+                    : ": " + TruncateJellyfinError(body));
+            if ((int)response.StatusCode is 401 or 403)
+            {
+                _logger.LogWarning("Jellyfin rejected library {Library}: {Error}", library.Name, lastError);
+                return null;
+            }
+        }
+
+        _logger.LogWarning("Skipping Jellyfin library {Library}: {Error}", library.Name, lastError ?? "no working Items query");
+        return null;
+    }
+
+    private async Task<string?> TryResolveCollectionFolderIdAsync(
+        HttpClient client,
+        string root,
+        string? token,
+        string libraryName,
+        CancellationToken cancellationToken)
+    {
+        var folders = await LoadVirtualFoldersByNameAsync(client, root, token, cancellationToken);
+        return folders.TryGetValue(libraryName, out var folder) ? folder.ItemId : null;
+    }
+
+    private async Task<Dictionary<string, JellyfinVirtualFolder>> LoadVirtualFoldersByNameAsync(
+        HttpClient client,
+        string root,
+        string? token,
+        CancellationToken cancellationToken)
+    {
+        var folders = new Dictionary<string, JellyfinVirtualFolder>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            using var response = await GetAsync(client, root + "/Library/VirtualFolders", token, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return folders;
+            }
+
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                return folders;
+            }
+
+            foreach (var folder in doc.RootElement.EnumerateArray())
+            {
+                var name = GetString(folder, "Name");
+                var id = GetString(folder, "ItemId") ?? GetString(folder, "Guid") ?? GetString(folder, "Id");
+                if (string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(id))
+                {
+                    continue;
+                }
+
+                folders[name] = new JellyfinVirtualFolder
+                {
+                    ItemId = id,
+                    CollectionType = GetString(folder, "CollectionType"),
+                    ItemCount = folder.TryGetProperty("ItemCount", out var count) && count.TryGetInt32(out var n) ? n : null
+                };
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "Could not list Jellyfin virtual folders");
+        }
+
+        return folders;
+    }
+
+    private static bool IsHomeVideoLibrary(MediaServerLibrary library)
+        => PastTenseNewsCatalog.MatchesCollectionType(library.CollectionType)
+            || PastTenseNewsCatalog.MatchesLibraryName(library.Name);
+
+    private static string BuildItemsUrl(
+        string root,
+        string userId,
+        JellyfinItemsQuery query,
+        int startIndex,
+        int limit)
+    {
+        var path = query.UserScoped
+            ? root + "/Users/" + Uri.EscapeDataString(userId) + "/Items"
+            : root + "/Items";
+        var url = path
+            + "?ParentId=" + Uri.EscapeDataString(query.ParentId)
+            + "&Recursive=true&EnableTotalRecordCount=true&EnableImages=false&EnableUserData=false"
+            + "&StartIndex=" + startIndex + "&Limit=" + limit;
+        if (!string.IsNullOrWhiteSpace(query.IncludeItemTypes))
+        {
+            url += "&IncludeItemTypes=" + query.IncludeItemTypes;
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.Fields))
+        {
+            url += "&Fields=" + query.Fields;
+        }
+
+        return url;
+    }
+
+    private sealed record JellyfinItemsQuery(string ParentId, string? IncludeItemTypes, string? Fields, bool UserScoped);
+
+    private sealed class JellyfinVirtualFolder
+    {
+        public string ItemId { get; set; } = "";
+
+        public string? CollectionType { get; set; }
+
+        public int? ItemCount { get; set; }
     }
 
     private static string TruncateJellyfinError(string? body)

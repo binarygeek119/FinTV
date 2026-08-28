@@ -342,7 +342,8 @@ public class DatabaseInitializer : IHostedService
             """CREATE INDEX IF NOT EXISTS "IX_MediaItems_AspectRatio" ON "MediaItems" ("AspectRatio")""",
             """CREATE INDEX IF NOT EXISTS "IX_MediaItems_FfprobeChaptersAt" ON "MediaItems" ("FfprobeChaptersAt")""",
             """CREATE INDEX IF NOT EXISTS "IX_MediaItems_TrueAspectRatio" ON "MediaItems" ("TrueAspectRatio")""",
-            """CREATE INDEX IF NOT EXISTS "IX_MediaItems_TrueAspectProbedAt" ON "MediaItems" ("TrueAspectProbedAt")"""
+            """CREATE INDEX IF NOT EXISTS "IX_MediaItems_TrueAspectProbedAt" ON "MediaItems" ("TrueAspectProbedAt")""",
+            """CREATE INDEX IF NOT EXISTS "IX_MediaItems_CatalogScope" ON "MediaItems" ("SourceConnectionId", "Kind", "IsMissing", "SeriesId")"""
         };
 
         foreach (var sql in statements)
