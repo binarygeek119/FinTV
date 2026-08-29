@@ -27,6 +27,8 @@ jobs:
             build-mode: none
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
 
       - uses: actions/setup-dotnet@v6
         if: matrix.language == 'csharp'
@@ -52,6 +54,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
 
       - uses: actions/setup-dotnet@v6
         with:
@@ -115,6 +119,8 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
 
       - uses: aquasecurity/trivy-action@v0.36.0
         with:

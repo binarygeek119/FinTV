@@ -51,6 +51,8 @@ jobs:
         rid: ${{ github.event.inputs.rid == 'all' && fromJSON('["linux-x64","win-x64"]') || fromJSON(format('["{0}"]', github.event.inputs.rid)) }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
 
       - uses: actions/setup-dotnet@v6
         with:
