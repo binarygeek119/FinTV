@@ -7,7 +7,8 @@
 Simulated live TV for [Jellyfin](https://jellyfin.org). This repository is **ChannelFlow-Server** — a .NET 10 app with a red Jellyfin-style Web UI, PostgreSQL, local library playback, WeatherStar, and news.
 
 Home: [github.com/binarygeek119/ChannelFlow](https://github.com/binarygeek119/ChannelFlow)  
-Client: [github.com/binarygeek119/ChannelFlow-Client](https://github.com/binarygeek119/ChannelFlow-Client)
+Client: [github.com/binarygeek119/ChannelFlow-Client](https://github.com/binarygeek119/ChannelFlow-Client)  
+Discord: [discord.gg/w7GK7Zufts](https://discord.gg/w7GK7Zufts)
 
 ChannelFlow talks to media servers itself (Jellyfin now; Emby and Plex connections are placeholders). Add Live TV in Jellyfin with this server's M3U and XMLTV URLs from the **Copy M3U** and **Copy XMLTV** buttons at the top of the web UI.
 
