@@ -73,7 +73,18 @@ internal static class ReverseProxyHosting
 
         app.MapGet("/", WriteIndex);
         app.MapGet("/index.html", WriteIndex);
-        app.MapFallback(WriteIndex);
+        app.MapFallback(async context =>
+        {
+            if (context.Request.Path.StartsWithSegments("/api"))
+            {
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                context.Response.ContentType = "application/json; charset=utf-8";
+                await context.Response.WriteAsync("{\"error\":\"Not found\"}");
+                return;
+            }
+
+            await WriteIndex(context);
+        });
     }
 
     public static string PublicOrigin(HttpRequest request)

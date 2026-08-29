@@ -672,7 +672,8 @@ public class TasksController : ControllerBase
             BlackPixThreshold = settings.BlackPixThreshold,
             BlackPictureRatio = settings.BlackPictureRatio,
             BlackMinFrames = settings.BlackMinFrames,
-            ConfidencePercent = settings.ConfidencePercent
+            ConfidencePercent = settings.ConfidencePercent,
+            MinGapSeconds = settings.MinGapSeconds
         };
     }
 }

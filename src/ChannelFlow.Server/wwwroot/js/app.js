@@ -6004,17 +6004,31 @@
     let commercialBreakScanPollTimer = null;
     let commercialBreakSettings = null;
 
+    function commercialBreakNumber(value, fallback) {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : fallback;
+    }
+
+    function commercialBreakFieldValue(id) {
+        const el = $(id);
+        return el && el.value !== '' ? el.value : null;
+    }
+
     function commercialBreakSettingsFromForm() {
         const current = commercialBreakSettings || {};
+        const minGapEl = $('cb-min-gap-min');
         return {
             scanEnabled: !!($('commercial-breaks-scan-enabled') && $('commercial-breaks-scan-enabled').checked),
             writeChaptersToFiles: !!($('commercial-breaks-write-files') && $('commercial-breaks-write-files').checked),
-            silenceDb: Number(($('cb-silence-db') && $('cb-silence-db').value) || current.silenceDb || -40),
-            silenceMinSeconds: Number(($('cb-silence-min') && $('cb-silence-min').value) || current.silenceMinSeconds || 0.3),
-            blackPixThreshold: Number(($('cb-black-pix') && $('cb-black-pix').value) || current.blackPixThreshold || 0.10),
-            blackPictureRatio: Number(($('cb-black-ratio') && $('cb-black-ratio').value) || current.blackPictureRatio || 0.95),
-            blackMinFrames: Number(($('cb-black-frames') && $('cb-black-frames').value) || current.blackMinFrames || 6),
-            confidencePercent: Number(($('cb-confidence') && $('cb-confidence').value) || current.confidencePercent || 70)
+            silenceDb: commercialBreakNumber(commercialBreakFieldValue('cb-silence-db') ?? current.silenceDb, -40),
+            silenceMinSeconds: commercialBreakNumber(commercialBreakFieldValue('cb-silence-min') ?? current.silenceMinSeconds, 0.3),
+            blackPixThreshold: commercialBreakNumber(commercialBreakFieldValue('cb-black-pix') ?? current.blackPixThreshold, 0.10),
+            blackPictureRatio: commercialBreakNumber(commercialBreakFieldValue('cb-black-ratio') ?? current.blackPictureRatio, 0.95),
+            blackMinFrames: commercialBreakNumber(commercialBreakFieldValue('cb-black-frames') ?? current.blackMinFrames, 6),
+            confidencePercent: commercialBreakNumber(commercialBreakFieldValue('cb-confidence') ?? current.confidencePercent, 70),
+            minGapSeconds: minGapEl
+                ? commercialBreakNumber(minGapEl.value, 8) * 60
+                : commercialBreakNumber(current.minGapSeconds, 480)
         };
     }
 
@@ -6034,6 +6048,8 @@
     function renderCommercialBreakScanStatus(status) {
         const el = $('commercial-breaks-scan-status');
         const runBtn = $('btn-run-commercial-breaks-scan');
+        const bar = $('commercial-breaks-scan-bar');
+        const fill = $('commercial-breaks-scan-bar-fill');
         if (!el || !status) {
             return;
         }
@@ -6042,6 +6058,15 @@
             const enabled = !!(status.scanEnabled || (commercialBreakSettings && commercialBreakSettings.scanEnabled));
             runBtn.disabled = !!status.isRunning || !enabled;
             runBtn.textContent = status.isRunning ? 'Scanning…' : 'Run now';
+        }
+
+        if (bar && fill) {
+            const running = !!status.isRunning;
+            bar.classList.toggle('hidden', !running);
+            bar.hidden = !running;
+            const indeterminate = running && (status.percent == null || status.percent === undefined);
+            bar.dataset.indeterminate = indeterminate ? 'true' : 'false';
+            fill.style.width = indeterminate ? '' : Math.max(0, Math.min(100, Number(status.percent) || 0)) + '%';
         }
 
         const next = status.nextRunAt ? new Date(status.nextRunAt).toLocaleString() : 'midnight';
@@ -6067,14 +6092,16 @@
     }
 
     async function loadCommercialBreakScan() {
-        try {
-            const [status, settings] = await Promise.all([
-                api('/tasks/commercial-breaks'),
-                commercialBreakSettings ? Promise.resolve(commercialBreakSettings) : api('/tasks/commercial-breaks/settings')
-            ]);
-            if (settings && !commercialBreakSettings) {
-                applyCommercialBreakSwitches(settings);
+        if (!commercialBreakSettings) {
+            try {
+                applyCommercialBreakSwitches(await api('/tasks/commercial-breaks/settings'));
+            } catch (ignore) {
+                // Status can still load if settings are unavailable.
             }
+        }
+
+        try {
+            const status = await api('/tasks/commercial-breaks');
             renderCommercialBreakScanStatus(status);
             if (status && status.isRunning) {
                 startCommercialBreakScanPolling();
@@ -6147,7 +6174,7 @@
     function openCommercialBreakSettings() {
         const s = commercialBreakSettings || {};
         openModal('Commercial break settings', `
-            <p class="hint">Tune blackdetect and silencedetect. Isolated black or silence scores about 45% and is dropped at the default 70% confidence. Overlapping black+silence scores about 90–100%.</p>
+            <p class="hint">Tune blackdetect and silencedetect. Isolated black or silence scores about 45% and is dropped at the default 70% confidence. Overlapping black+silence scores about 90–100%. One break about every 10 minutes (file length); at most one in each 10-minute window. If that count is short, a second pass uses black frames only (no audio).</p>
             <label class="field">
                 <span>How quiet (dB)</span>
                 <input id="cb-silence-db" type="number" min="-90" max="0" step="1" value="${escapeHtml(String(s.silenceDb ?? -40))}" class="emby-input">
@@ -6175,14 +6202,24 @@
                 <span>Confidence threshold (%)</span>
                 <input id="cb-confidence" type="number" min="1" max="100" step="1" value="${escapeHtml(String(s.confidencePercent ?? 70))}" class="emby-input">
             </label>
+            <label class="field">
+                <span>Min gap between breaks (minutes)</span>
+                <input id="cb-min-gap-min" type="number" min="1" max="30" step="0.5" value="${escapeHtml(String(((s.minGapSeconds ?? 480) / 60).toFixed(1)))}" class="emby-input">
+            </label>
+            <p class="hint">Stops two accepted spots from landing too close, including across a 10-minute window edge.</p>
         `, `
+            <button type="button" class="emby-button" id="cb-settings-reset">Reset to stock</button>
             <button type="button" class="emby-button" id="cb-settings-cancel">Cancel</button>
             <button type="button" class="raised button-submit emby-button" id="cb-settings-save">Save</button>
         `);
         const cancel = $('cb-settings-cancel');
         const save = $('cb-settings-save');
+        const reset = $('cb-settings-reset');
         if (cancel) {
             cancel.addEventListener('click', closeModal);
+        }
+        if (reset) {
+            reset.addEventListener('click', () => applyStockCommercialBreakFields());
         }
         if (save) {
             save.addEventListener('click', () => {
@@ -6192,6 +6229,22 @@
                 }).catch((e) => toast(e.message, 'error'));
             });
         }
+    }
+
+    function applyStockCommercialBreakFields() {
+        const set = (id, value) => {
+            const el = $(id);
+            if (el) {
+                el.value = String(value);
+            }
+        };
+        set('cb-silence-db', -40);
+        set('cb-silence-min', 0.3);
+        set('cb-black-pix', 0.10);
+        set('cb-black-ratio', 0.95);
+        set('cb-black-frames', 6);
+        set('cb-confidence', 70);
+        set('cb-min-gap-min', '8.0');
     }
 
     function renderAboutDl(elementId, rows) {

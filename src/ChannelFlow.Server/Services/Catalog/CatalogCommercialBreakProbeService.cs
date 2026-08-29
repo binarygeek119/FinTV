@@ -7,7 +7,7 @@ using Microsoft.EntityFrameworkCore;
 namespace FinTv.Services;
 
 /// <summary>
-/// Detects black+silence commercial-break spots one file at a time and inserts numbered break chapters.
+/// Detects commercial-break spots one file at a time (same rules as Commercial Spot Tester) and inserts numbered break chapters.
 /// </summary>
 public sealed class CatalogCommercialBreakProbeService
 {
@@ -47,7 +47,7 @@ public sealed class CatalogCommercialBreakProbeService
     public async Task<CatalogCommercialBreakProbeResult> ProbeAsync(
         CommercialBreakScanSettings settings,
         bool missingOnly,
-        Action<int, int, int>? onProgress,
+        Action<CatalogCommercialBreakProgress>? onProgress,
         CancellationToken cancellationToken)
     {
         settings.Clamp();
@@ -92,7 +92,7 @@ public sealed class CatalogCommercialBreakProbeService
         }
 
         var total = targets.Count;
-        onProgress?.Invoke(0, total, 0);
+        onProgress?.Invoke(new CatalogCommercialBreakProgress(0, total, 0));
         if (total == 0)
         {
             return new CatalogCommercialBreakProbeResult(0, 0, skipped, 0, 0, skipExample);
@@ -117,13 +117,24 @@ public sealed class CatalogCommercialBreakProbeService
                     .ToListAsync(cancellationToken)
                     .ConfigureAwait(false);
 
+                var fileName = Path.GetFileName(path);
+                onProgress?.Invoke(new CatalogCommercialBreakProgress(processed, total, added, fileName, "Reading file", 0));
+                var fileProgress = new Progress<ScanProgress>(update =>
+                    onProgress?.Invoke(new CatalogCommercialBreakProgress(
+                        processed,
+                        total,
+                        added,
+                        fileName,
+                        update.Phase,
+                        update.Fraction)));
                 var result = await _detector.DetectAsync(
                         path,
                         ffmpegPath,
                         ffprobePath,
                         settings,
                         existing.Select(chapter => chapter.Name),
-                        cancellationToken)
+                        progress: fileProgress,
+                        cancellationToken: cancellationToken)
                     .ConfigureAwait(false);
 
                 var now = DateTime.UtcNow;
@@ -172,7 +183,7 @@ public sealed class CatalogCommercialBreakProbeService
             finally
             {
                 processed++;
-                onProgress?.Invoke(processed, total, added);
+                onProgress?.Invoke(new CatalogCommercialBreakProgress(processed, total, added, Path.GetFileName(path), null, 1));
             }
         }
 
@@ -331,6 +342,14 @@ public sealed class CatalogCommercialBreakProbeService
 
     private sealed record ProbeTarget(Guid Id, string Path, Guid? SourceConnectionId, string TagsJson, long? RuntimeTicks);
 }
+
+public sealed record CatalogCommercialBreakProgress(
+    int Processed,
+    int Total,
+    int Found,
+    string? FileName = null,
+    string? Phase = null,
+    double FileFraction = 0);
 
 public sealed record CatalogCommercialBreakProbeResult(
     int Probed,

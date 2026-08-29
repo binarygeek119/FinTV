@@ -936,6 +936,10 @@ table.data-table tbody tr.selected {
     width: 38%;
     animation: catalog-sync-indet 1.15s ease-in-out infinite;
 }
+#commercial-breaks-scan-bar {
+    margin: 0.55rem 0 0.2rem;
+    max-width: 36rem;
+}
 .catalog-sync-popup.is-done .catalog-sync-bar-fill { background: #22c55e; }
 .catalog-sync-popup.is-error .catalog-sync-bar-fill { background: #ef4444; }
 .catalog-sync-meta {

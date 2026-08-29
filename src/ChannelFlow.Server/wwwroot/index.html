@@ -1284,7 +1284,7 @@
                 </div>
                 <div class="card section-card">
                     <h2>Commercial breaks</h2>
-                    <p class="hint">Finds black+silence spots and adds numbered <code>break</code> / <code>break 2</code> chapters in gaps after intro/preview/recap and before outro. Files with other chapter names are skipped. Off by default so Unraid does not start a long ffmpeg job until you enable it.</p>
+                    <p class="hint">Same detector as Commercial Spot Tester: black+silence spots, about one break every 10 minutes, a user min gap, and a black-frames-only retry when that count is short. Adds numbered <code>break</code> / <code>break 2</code> chapters after intro/preview/recap and before outro. Files with other chapter names are skipped. Off by default so Unraid does not start a long ffmpeg job until you enable it.</p>
                     <label class="field checkbox-field">
                         <input id="commercial-breaks-scan-enabled" type="checkbox">
                         <span class="channelflow-check-box" aria-hidden="true"></span>
@@ -1296,6 +1296,9 @@
                         <span>Write chapters to files (MKV / MP4)</span>
                     </label>
                     <p id="commercial-breaks-scan-status" class="hint">Loading commercial-break scan status…</p>
+                    <div id="commercial-breaks-scan-bar" class="catalog-sync-bar hidden" hidden data-indeterminate="true">
+                        <div id="commercial-breaks-scan-bar-fill" class="catalog-sync-bar-fill"></div>
+                    </div>
                     <div class="actions">
                         <button type="button" id="btn-commercial-breaks-settings" class="emby-button">Settings</button>
                         <button type="button" id="btn-run-commercial-breaks-scan" class="raised button-submit emby-button">Run now</button>
@@ -1510,7 +1513,7 @@
     <p class="catalog-sync-meta" id="catalog-sync-meta"></p>
   </div>
   </div>
-  <script src="js/app.js?v=assets33"></script>
+  <script src="js/app.js?v=assets34"></script>
   <script src="js/shell.js?v=library5"></script>
 </body>
 </html>

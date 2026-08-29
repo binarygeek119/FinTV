@@ -3,7 +3,7 @@ using ChannelFlow.CommercialDetect;
 namespace FinTv.Services;
 
 /// <summary>
-/// Midnight blackdetect+silencedetect pass for videos that still have no commercial-break probe.
+/// Midnight commercial-break scan for videos that still have no probe. Uses the same detector as Commercial Spot Tester.
 /// </summary>
 public sealed class CatalogCommercialBreakScanService
 {
@@ -24,6 +24,9 @@ public sealed class CatalogCommercialBreakScanService
     private int _processed;
     private int _total;
     private int _found;
+    private string? _currentFile;
+    private string? _phase;
+    private double _fileFraction;
 
     public CatalogCommercialBreakScanService(
         IServiceScopeFactory scopes,
@@ -67,7 +70,9 @@ public sealed class CatalogCommercialBreakScanService
                 processed = _processed,
                 total = _total,
                 found = _found,
-                percent = _total > 0 ? Math.Clamp((int)Math.Round(100.0 * _processed / _total), 0, 100) : (int?)null,
+                currentFile = _currentFile,
+                phase = _phase,
+                percent = OverallPercent(),
                 message = RunningMessage(settings),
                 finishedAt = _lastCompletedAt
             };
@@ -90,6 +95,9 @@ public sealed class CatalogCommercialBreakScanService
             _processed = 0;
             _total = 0;
             _found = 0;
+            _currentFile = null;
+            _phase = null;
+            _fileFraction = 0;
             return true;
         }
     }
@@ -133,13 +141,16 @@ public sealed class CatalogCommercialBreakScanService
             var result = await probe.ProbeAsync(
                     settings,
                     missingOnly: true,
-                    onProgress: (done, total, found) =>
+                    onProgress: update =>
                     {
                         lock (_gate)
                         {
-                            _processed = done;
-                            _total = total;
-                            _found = found;
+                            _processed = update.Processed;
+                            _total = update.Total;
+                            _found = update.Found;
+                            _currentFile = update.FileName;
+                            _phase = update.Phase;
+                            _fileFraction = update.FileFraction;
                         }
                     },
                     cancellationToken)
@@ -181,6 +192,9 @@ public sealed class CatalogCommercialBreakScanService
                 _lastSkipped = skipped;
                 _lastFailed = failed;
                 _lastWroteFiles = wroteFiles;
+                _currentFile = null;
+                _phase = null;
+                _fileFraction = 0;
                 if (error is not null)
                 {
                     _lastError = error;
@@ -233,8 +247,26 @@ public sealed class CatalogCommercialBreakScanService
             return "Looking for videos that still have no commercial-break scan…";
         }
 
-        return _found == 0
-            ? "Scanning black+silence (" + _processed + " of " + _total + ")…"
-            : "Scanning black+silence (" + _processed + " of " + _total + ", " + _found + " breaks)…";
+        var count = _processed + " of " + _total;
+        var found = _found == 0 ? "" : ", " + _found + " breaks";
+        if (!string.IsNullOrWhiteSpace(_currentFile))
+        {
+            var phase = string.IsNullOrWhiteSpace(_phase) ? "Scanning" : _phase;
+            var pct = (int)Math.Round(100.0 * Math.Clamp(_fileFraction, 0, 1));
+            return phase + " " + _currentFile + " (" + count + found + ", file " + pct + "%)…";
+        }
+
+        return "Scanning commercial breaks (" + count + found + ")…";
+    }
+
+    private int? OverallPercent()
+    {
+        if (_total <= 0)
+        {
+            return null;
+        }
+
+        var fraction = (_processed + Math.Clamp(_fileFraction, 0, 1)) / _total;
+        return Math.Clamp((int)Math.Round(100.0 * fraction), 0, 100);
     }
 }
