@@ -202,6 +202,119 @@ public class YouTubeCommercialStreamService
         };
     }
 
+    public async Task<IReadOnlyList<YouTubeCatalogEntry>> ListVideosAsync(string url, CancellationToken cancellationToken)
+    {
+        var ytDlp = _ytDlpLocator.Resolve()
+            ?? throw new InvalidOperationException("yt-dlp was not found. Install yt-dlp or set CHANNELFLOW_YTDLP_PATH.");
+        var settings = FinTvRuntime.Current?.Configuration.YouTube ?? new YouTubeSettings();
+        var stdout = new StringBuilder();
+        var stderr = new StringBuilder();
+        var result = await Cli.Wrap(ytDlp)
+            .WithArguments(BuildYtDlpArgs(
+                settings,
+                PlayerClientAttempts[0],
+                ["--flat-playlist", "--skip-download", "--print", "%(id)s\t%(title)s\t%(duration)s\t%(artist)s\t%(uploader)s", url],
+                allowPlaylist: true))
+            .WithStandardOutputPipe(PipeTarget.ToStringBuilder(stdout))
+            .WithStandardErrorPipe(PipeTarget.ToStringBuilder(stderr))
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteAsync(cancellationToken);
+
+        if (result.ExitCode != 0)
+        {
+            _logger.LogWarning("yt-dlp playlist lookup failed: {Error}", TrimProcessOutput(stderr));
+            return [];
+        }
+
+        var entries = new List<YouTubeCatalogEntry>();
+        foreach (var line in stdout.ToString().Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var parts = line.Split('\t');
+            var id = parts.Length > 0 ? parts[0].Trim() : string.Empty;
+            if (!YouTubeUrlHelper.TryGetVideoId(id, out var videoId))
+            {
+                continue;
+            }
+
+            var durationRaw = parts.Length > 2 ? parts[2] : string.Empty;
+            var duration = int.TryParse(durationRaw, out var seconds) ? seconds : 240;
+            var artist = parts.Length > 3 && !string.Equals(parts[3], "NA", StringComparison.OrdinalIgnoreCase)
+                ? parts[3]
+                : parts.Length > 4 && !string.Equals(parts[4], "NA", StringComparison.OrdinalIgnoreCase)
+                    ? parts[4]
+                    : string.Empty;
+            entries.Add(new YouTubeCatalogEntry(
+                videoId,
+                parts.Length > 1 && !string.Equals(parts[1], "NA", StringComparison.OrdinalIgnoreCase) ? parts[1] : "YouTube video",
+                artist,
+                Math.Clamp(duration, 30, 900)));
+        }
+
+        return entries;
+    }
+
+    public async Task StreamUrlAsync(
+        Channel channel,
+        string youtubeUrl,
+        string? videoId,
+        FfmpegCommandBuilder ffmpeg,
+        string ffmpegPath,
+        double durationSeconds,
+        Stream output,
+        CancellationToken cancellationToken)
+    {
+        var settings = FinTvRuntime.Current?.Configuration.YouTube ?? new YouTubeSettings();
+        var ytDlp = _ytDlpLocator.Resolve()
+            ?? throw new InvalidOperationException("yt-dlp was not found. Install yt-dlp or set CHANNELFLOW_YTDLP_PATH.");
+        IReadOnlyList<SponsorSkipRange> skipRanges = [];
+        if (settings.SponsorBlockEnabled && YouTubeUrlHelper.TryGetVideoId(videoId ?? youtubeUrl, out var id))
+        {
+            skipRanges = FfmpegSkipCuts.ForPlayback(
+                await _sponsorBlock.GetSkipRangesAsync(id, settings, cancellationToken),
+                durationSeconds);
+        }
+
+        Exception? pipeError = null;
+        foreach (var clientArgs in PlayerClientAttempts)
+        {
+            try
+            {
+                await StreamViaYtDlpPipeAsync(
+                    ytDlp,
+                    ffmpegPath,
+                    ffmpeg,
+                    channel,
+                    youtubeUrl,
+                    durationSeconds,
+                    skipRanges,
+                    settings,
+                    clientArgs,
+                    output,
+                    cancellationToken);
+                return;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                pipeError = ex;
+                if (!ShouldRetryYouTubeExtract(ex))
+                {
+                    break;
+                }
+            }
+        }
+
+        var streamUrl = await ResolveStreamUrlAsync(ytDlp, youtubeUrl, settings, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(streamUrl))
+        {
+            var args = ffmpeg.BuildRemoteMediaCommand(channel, streamUrl, 0, durationSeconds, null, skipRanges, overlayBug: false);
+            await RunFfmpegToStreamAsync(ffmpegPath, args, output, cancellationToken);
+            return;
+        }
+
+        throw pipeError ?? new InvalidOperationException(
+            "yt-dlp could not resolve a YouTube stream. Update yt-dlp or paste a fresh cookies.txt from a signed-in browser.");
+    }
+
     private async Task<IReadOnlyList<SponsorSkipRange>> ResolveSkipRangesAsync(
         Commercial commercial,
         YouTubeSettings settings,
@@ -410,12 +523,16 @@ public class YouTubeCommercialStreamService
         return null;
     }
 
-    private List<string> BuildYtDlpArgs(YouTubeSettings settings, string playerClients, IReadOnlyList<string> tail)
+    private List<string> BuildYtDlpArgs(
+        YouTubeSettings settings,
+        string playerClients,
+        IReadOnlyList<string> tail,
+        bool allowPlaylist = false)
     {
         _ = settings;
         var args = new List<string>
         {
-            "--no-playlist",
+            allowPlaylist ? "--yes-playlist" : "--no-playlist",
             "--no-part",
             "--no-cache-dir",
             "--no-warnings",
@@ -487,3 +604,5 @@ public class YouTubeCommercialStreamService
         return text[^1500..];
     }
 }
+
+public sealed record YouTubeCatalogEntry(string VideoId, string Title, string Artist, int DurationSeconds);

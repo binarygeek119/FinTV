@@ -441,6 +441,34 @@ public class PlayoutBuilderService : BackgroundService
     }
 
     /// <summary>
+    /// Deletes one channel's playout and resets its episode cursor. Lineups and primetime assignments stay.
+    /// </summary>
+    public async Task<int?> ClearChannelGuideDataAsync(Guid channelId, CancellationToken cancellationToken = default)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<FinTvDbContext>();
+        var channel = await db.Channels.FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
+        if (channel is null)
+        {
+            return null;
+        }
+
+        var cleared = await db.PlayoutItems.CountAsync(p => p.ChannelId == channelId, cancellationToken);
+        await db.PlayoutItems.Where(p => p.ChannelId == channelId).ExecuteDeleteAsync(cancellationToken);
+        channel.LastPlayoutBuiltAt = null;
+        channel.PlayoutAnchorJson = "{}";
+        await db.SaveChangesAsync(cancellationToken);
+
+        _stream.InterruptCurrentItem(channelId);
+        _guideUpdates.MarkUpdated();
+        _logger.LogInformation(
+            "Cleared {Count} playout items for {ChannelName} so the Live TV guide can start fresh",
+            cleared,
+            channel.Name);
+        return cleared;
+    }
+
+    /// <summary>
     /// Queues a background rebuild for every enabled channel.
     /// </summary>
     public void QueueForceRebuildAllChannels()

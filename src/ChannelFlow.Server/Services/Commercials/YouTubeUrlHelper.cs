@@ -70,6 +70,11 @@ public static partial class YouTubeUrlHelper
         return false;
     }
 
+    public static string WatchUrl(string? videoId)
+        => string.IsNullOrWhiteSpace(videoId)
+            ? string.Empty
+            : "https://www.youtube.com/watch?v=" + videoId.Trim();
+
     [GeneratedRegex("^[A-Za-z0-9_-]{11}$", RegexOptions.CultureInvariant)]
     private static partial Regex VideoIdRegex();
 }

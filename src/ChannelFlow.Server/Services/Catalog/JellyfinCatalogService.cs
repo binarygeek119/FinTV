@@ -15,15 +15,18 @@ public class JellyfinCatalogService
     private readonly ILibraryManager _libraryManager;
     private readonly HolidayChannelService _holidays;
     private readonly FinTvListService _lists;
+    private readonly MusicVideoChannelListService _musicVideoLists;
 
     public JellyfinCatalogService(
         ILibraryManager libraryManager,
         HolidayChannelService holidays,
-        FinTvListService lists)
+        FinTvListService lists,
+        MusicVideoChannelListService musicVideoLists)
     {
         _libraryManager = libraryManager;
         _holidays = holidays;
         _lists = lists;
+        _musicVideoLists = musicVideoLists;
     }
 
     public async Task<IReadOnlyList<ResolvedCandidate>> ResolveItemAsync(
@@ -205,15 +208,20 @@ public class JellyfinCatalogService
                 return fallbackQuery;
             });
 
-        var result = ApplyFilterDefinitionConstraints(
-            ApplyChannelFilterMetadata(
-                ApplyCatalogConstraints(items, channel, scheduleDate),
-                channel),
-            filter,
-            ChannelAiRules.GetYearConstraints(channel));
+        var result = ApplyMusicVideoArtistFilter(
+            ApplyFilterDefinitionConstraints(
+                ApplyChannelFilterMetadata(
+                    ApplyCatalogConstraints(items, channel, scheduleDate),
+                    channel),
+                filter,
+                ChannelAiRules.GetYearConstraints(channel)),
+            channel);
         _queryCache[cacheKey] = result;
         return result;
     }
+
+    public IReadOnlyList<ResolvedCandidate> ListResolvedMusicVideos(Channel channel, DateOnly? scheduleDate = null)
+        => QueryItems(channel, scheduleDate: scheduleDate).Select(MapItem).ToList();
 
     public IReadOnlyList<BaseItem> BrowseForAiManifest(Channel channel, ChannelCatalogMode catalogMode, int limit)
         => BrowseForAiManifestWithStats(channel, catalogMode, limit).Items;
@@ -407,6 +415,11 @@ public class JellyfinCatalogService
 
     public bool MatchesGenreConstraints(BaseItem item, ChannelCatalogGenreConstraints constraints)
     {
+        if (constraints.IsTitlePlotExcluded(item))
+        {
+            return false;
+        }
+
         if (item is Episode episode)
         {
             var series = ResolveSeriesForEpisode(episode);
@@ -874,6 +887,31 @@ public class JellyfinCatalogService
         return ApplyFilterDefinitionConstraints(items, filter, yearConstraints);
     }
 
+    private IReadOnlyList<BaseItem> ApplyMusicVideoArtistFilter(IReadOnlyList<BaseItem> items, Channel channel)
+    {
+        if (channel.ContentType != ChannelContentType.MusicVideo)
+        {
+            return items;
+        }
+
+        var allowed = _musicVideoLists.GetAllowedArtistNames(channel);
+        if (allowed is null)
+        {
+            return items;
+        }
+
+        if (allowed.Count == 0)
+        {
+            return [];
+        }
+
+        return items.Where(item =>
+        {
+            var artist = GetMusicVideoArtist(item);
+            return allowed.Any(name => MusicVideoChannelListService.ArtistsMatch(artist, name));
+        }).ToList();
+    }
+
     private IReadOnlyList<BaseItem> ApplyFilterDefinitionConstraints(
         IReadOnlyList<BaseItem> items,
         FilterDefinition? filter,
@@ -1142,8 +1180,9 @@ public class JellyfinCatalogService
         return new ResolvedCandidate
         {
             JellyfinItemId = item.Id,
-            SeriesId = MapSeriesId(item),
+            SeriesId = item.SeriesId != Guid.Empty ? item.SeriesId : MapSeriesId(item),
             Title = BuildPlayoutTitle(item),
+            Artist = item is MusicVideo ? GetMusicVideoArtist(item) : null,
             Duration = duration
         };
     }
@@ -1231,22 +1270,32 @@ public class JellyfinCatalogService
         if (useEpisodeRotation)
         {
             var grouped = items.OfType<Episode>()
+                .Where(episode => episode.SeriesId != Guid.Empty)
                 .GroupBy(e => e.SeriesId)
                 .ToList();
 
+            var picks = new List<ResolvedCandidate>(grouped.Count);
             foreach (var group in grouped)
             {
                 var key = group.Key.ToString("N");
                 anchor.SeriesEpisodeIndex.TryGetValue(key, out var index);
                 var ordered = group.OrderBy(e => e.ParentIndexNumber ?? 0).ThenBy(e => e.IndexNumber ?? 0).ToList();
-                if (index >= ordered.Count)
+                if (ordered.Count == 0)
+                {
+                    continue;
+                }
+
+                if (index < 0 || index >= ordered.Count)
                 {
                     index = 0;
                 }
 
-                var episode = ordered[index];
-                anchor.SeriesEpisodeIndex[key] = index + 1;
-                return new[] { MapItem(episode) };
+                picks.Add(MapItem(ordered[index]));
+            }
+
+            if (picks.Count > 0)
+            {
+                return picks;
             }
         }
 

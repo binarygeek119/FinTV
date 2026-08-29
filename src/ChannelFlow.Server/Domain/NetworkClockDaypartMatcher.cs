@@ -20,15 +20,10 @@ public static class NetworkClockDaypartMatcher
         var key = Normalize(daypartName);
         if (key.Contains("toon takeover"))
         {
-            return 4;
+            return 6;
         }
 
-        if (key.Contains("prime") || key.Contains("mid-day") || key.Contains("midday"))
-        {
-            return 2;
-        }
-
-        return 2;
+        return 4;
     }
 
     public static bool PrefersMovies(string? libraryTag, string? daypartName)
@@ -377,14 +372,15 @@ public static class NetworkClockDaypartMatcher
             YearMax = yearMax
         };
 
-    private static DaypartTaste Sitcoms(int yearMin, int yearMax, params string[] keywords)
+        private static DaypartTaste Sitcoms(int yearMin, int yearMax, params string[] keywords)
         => new()
         {
             PreferLiveAction = true,
             ForbidAdult = true,
+            ForbidKids = true,
             PreferKeywords = keywords,
             PreferGenres = ["Comedy", "Sitcom", "Family"],
-            AvoidKeywords = ["preschool", "nick jr"],
+            AvoidKeywords = ["preschool", "nick jr", "cartoon", "scooby"],
             YearMin = yearMin,
             YearMax = yearMax
         };
@@ -393,9 +389,10 @@ public static class NetworkClockDaypartMatcher
         => new()
         {
             PreferLiveAction = true,
+            ForbidKids = true,
             PreferKeywords = keywords,
             PreferGenres = ["Drama", "Soap", "Romance"],
-            AvoidKeywords = ["cartoon", "preschool"],
+            AvoidKeywords = ["cartoon", "preschool", "scooby"],
             YearMin = yearMin,
             YearMax = yearMax
         };
@@ -405,8 +402,8 @@ public static class NetworkClockDaypartMatcher
         {
             PreferKeywords = keywords,
             PreferGenres = ["Drama", "Teen", "Comedy"],
-            AvoidKeywords = ["preschool", "toddler"],
-            ForbidKids = false,
+            AvoidKeywords = ["preschool", "toddler", "scooby", "cartoon"],
+            ForbidKids = true,
             YearMin = yearMin,
             YearMax = yearMax
         };

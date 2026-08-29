@@ -28,7 +28,7 @@ public static class ChannelPresets
     /// </summary>
     public static IReadOnlyList<ChannelPresetDefinition> All { get; } =
     [
-        Preset(119, 119.1m, "FlashBack TV", ChannelContentType.TvShow, "TV Shows", "1970–2010 TV and movies (first-episode year for series)", "channelflow-flashback", "Shows/FlashBack_TV.png", catalogMode: ChannelCatalogMode.Mixed, minYear: 1970, maxYear: 2010),
+        Preset(119, 119.1m, "FlashBack TV", ChannelContentType.TvShow, "TV Shows", "1970–2009 TV and movies (first-episode year for series)", "channelflow-flashback", "Shows/FlashBack_TV.png", catalogMode: ChannelCatalogMode.Mixed, minYear: 1970, maxYear: 2009),
         Preset(120, 119.2m, "Retro TV", ChannelContentType.TvShow, "TV Shows", "1910–1969 TV and movies (first-episode year for series)", "channelflow-retro", "Shows/Retro_TV.png", catalogMode: ChannelCatalogMode.Mixed, minYear: 1910, maxYear: 1969),
         Preset(121, 119.3m, "[OpenSwim]", ChannelContentType.TvShow, "TV Shows", "Nick, Disney, Fox Kids, and Cartoon Network style kids TV/movies; any year; TV-PG max", "channelflow-open-swim", "Shows/[open_swim].png", catalogMode: ChannelCatalogMode.Mixed, maxRating: "TV-PG"),
         Preset(122, 119.4m, "Flip Television", ChannelContentType.TvShow, "TV Shows", "Reality TV themed shows and movies", "channelflow-reality", "Shows/Flip_Television.png", catalogMode: ChannelCatalogMode.Mixed),
@@ -37,13 +37,13 @@ public static class ChannelPresets
         Preset(125, 124.1m, "Past Tense News", ChannelContentType.TvShow, "TV Shows", "Home movies treated as live breaking news", "channelflow-past-tense-news", "News/Past_Tense_News.png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(123.1m, 119.8m, "FlowWire News", ChannelContentType.News, "TV Shows", "Live FlowWire RSS news channel with optional TTS", "channelflow-live-news", "News/FlowWire.png"),
         Preset(128, 124.2m, "Cops And Robbers", ChannelContentType.TvShow, "TV Shows", "Crime and cop themed TV shows and movies (genre or plot)", "channelflow-crime", "Shows/cops_and_robbers.png", catalogMode: ChannelCatalogMode.Mixed),
-        Preset(129, 124.3m, "Slappy", ChannelContentType.TvShow, "TV Shows", "Comedy TV and movies with Friday 5–8pm Slappy's Toon Takeover", "channelflow-comedy", "Shows/Slappy.png", catalogMode: ChannelCatalogMode.Mixed),
+        Preset(129, 124.3m, "Slappy", ChannelContentType.TvShow, "TV Shows", "Fox network clone: comedy TV and movies with Friday 5–8pm Slappy's Toon Takeover", "channelflow-comedy", "Shows/Slappy.png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(130, 126.1m, "Winning", ChannelContentType.TvShow, "TV Shows", "Game shows channel", "channelflow-game-shows", "Shows/winning.png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(133, 126.2m, "GET LEARNEDED", ChannelContentType.TvShow, "TV Shows", "Educational tv shows and movies", "channelflow-education", "Shows/GET_LEARNEDED.png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(134, 126.3m, "YouTube TV", ChannelContentType.TvShow, "TV Shows", "Content from Jellyfin TV library YouTube only", "channelflow-youtube", "Shows/YouTube_TV.png"),
         Preset(203, 203.1m, "Creature Double Feature", ChannelContentType.Movie, "Movies", "Creature and monster movies and TV (genre, plot, or tags)", "channelflow-creature", "Movies/Creature_Double_Feature.png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(204, 203.2m, "Hero TV", ChannelContentType.Movie, "Movies", "Anyone who saves or protects people — heroes, rescuers, and champions", "channelflow-hero", "Movies/Hero_TV.png", catalogMode: ChannelCatalogMode.Mixed),
-        Preset(205, 203.3m, "That's Funny", ChannelContentType.Movie, "Movies", "Comedian movies and tv shows", "channelflow-funny", "Movies/That's_Funny.png", catalogMode: ChannelCatalogMode.Mixed),
+        Preset(205, 203.3m, "That's Funny", ChannelContentType.Movie, "Movies", "Stand-up comedies from Stand-Up Comedies Movies and Stand-Up Comedies TV Shows", "channelflow-funny", "Movies/That's_Funny.png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(207, 203.4m, "The Holiday Channel", ChannelContentType.Movie, "Movies", "Seasonal holiday TV and movies; off-season plays The Holiday Channel.mkv", "channelflow-holiday", "The_Holiday_Channel/The Holiday Channel-plane.png", catalogMode: ChannelCatalogMode.Mixed),
         Preset(312, 312.1m, "The Parody Channel", ChannelContentType.MusicVideo, "Music Videos", "Parody music videos", "channelflow-parody", "Music Videos Channels/The-Parody-Channel.png"),
         Preset(313, 312.2m, "Rap On Tap", ChannelContentType.MusicVideo, "Music Videos", "Rap and hip hop music videos", "channelflow-rap", "Music Videos Channels/Rap-On-Tap.png"),

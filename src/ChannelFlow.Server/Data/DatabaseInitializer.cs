@@ -87,6 +87,9 @@ public class DatabaseInitializer : IHostedService
         await EnsureLineupSlotColumnsAsync(db, cancellationToken);
         await EnsureMediaItemColumnsAsync(db, cancellationToken);
         await EnsureCatalogTablesAsync(db, cancellationToken);
+        await EnsureAiPoolTablesAsync(db, cancellationToken);
+        await EnsurePrimetimeTablesAsync(db, cancellationToken);
+        await EnsurePlayoutItemExternalUrlAsync(db, cancellationToken);
         await UpgradeTvShowsToEpisodesAsync(db, cancellationToken);
         await EnsureCatalogMissingColumnsAsync(db, cancellationToken);
         await EnsureMediaServerSchemaAsync(db, cancellationToken);
@@ -433,6 +436,119 @@ public class DatabaseInitializer : IHostedService
             {
                 _logger.LogWarning(ex, "Catalog table ensure failed for {Sql}", sql);
             }
+        }
+    }
+
+    private async Task EnsureAiPoolTablesAsync(FinTvDbContext db, CancellationToken cancellationToken)
+    {
+        var statements = new[]
+        {
+            """
+            CREATE TABLE IF NOT EXISTS "ChannelCatalogPool" (
+                "Id" uuid NOT NULL,
+                "ChannelId" uuid NOT NULL,
+                "JellyfinItemId" uuid NOT NULL,
+                "Kind" text NOT NULL,
+                "PickedAt" timestamp with time zone NOT NULL,
+                CONSTRAINT "PK_ChannelCatalogPool" PRIMARY KEY ("Id")
+            )
+            """,
+            """CREATE UNIQUE INDEX IF NOT EXISTS "IX_ChannelCatalogPool_ChannelId_JellyfinItemId" ON "ChannelCatalogPool" ("ChannelId", "JellyfinItemId")""",
+            """CREATE INDEX IF NOT EXISTS "IX_ChannelCatalogPool_JellyfinItemId" ON "ChannelCatalogPool" ("JellyfinItemId")""",
+            """
+            CREATE TABLE IF NOT EXISTS "MusicVideoChannelArtists" (
+                "Id" uuid NOT NULL,
+                "ChannelId" uuid NOT NULL,
+                "ArtistName" text NOT NULL,
+                "CreatedAt" timestamp with time zone NOT NULL,
+                CONSTRAINT "PK_MusicVideoChannelArtists" PRIMARY KEY ("Id")
+            )
+            """,
+            """CREATE UNIQUE INDEX IF NOT EXISTS "IX_MusicVideoChannelArtists_ChannelId_ArtistName" ON "MusicVideoChannelArtists" ("ChannelId", "ArtistName")""",
+            """
+            CREATE TABLE IF NOT EXISTS "MusicVideoYoutubeSources" (
+                "Id" uuid NOT NULL,
+                "ChannelId" uuid NOT NULL,
+                "SourceUrl" text NOT NULL,
+                "YoutubeVideoId" text NULL,
+                "Title" text NULL,
+                "Artist" text NULL,
+                "DurationSeconds" integer NULL,
+                "IsPlaylist" boolean NOT NULL DEFAULT FALSE,
+                "ParentSourceId" uuid NULL,
+                "CreatedAt" timestamp with time zone NOT NULL,
+                CONSTRAINT "PK_MusicVideoYoutubeSources" PRIMARY KEY ("Id")
+            )
+            """,
+            """CREATE INDEX IF NOT EXISTS "IX_MusicVideoYoutubeSources_ChannelId" ON "MusicVideoYoutubeSources" ("ChannelId")"""
+        };
+
+        foreach (var sql in statements)
+        {
+            try
+            {
+                await CatalogSchema.ExecuteAsync(db, sql, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "AI pool table ensure failed");
+            }
+        }
+    }
+
+    private async Task EnsurePrimetimeTablesAsync(FinTvDbContext db, CancellationToken cancellationToken)
+    {
+        var statements = new[]
+        {
+            """
+            CREATE TABLE IF NOT EXISTS "ChannelPrimetimeSlots" (
+                "Id" uuid NOT NULL,
+                "ChannelId" uuid NOT NULL,
+                "SlotIndex" integer NOT NULL,
+                CONSTRAINT "PK_ChannelPrimetimeSlots" PRIMARY KEY ("Id")
+            )
+            """,
+            """CREATE UNIQUE INDEX IF NOT EXISTS "IX_ChannelPrimetimeSlots_ChannelId_SlotIndex" ON "ChannelPrimetimeSlots" ("ChannelId", "SlotIndex")""",
+            """
+            CREATE TABLE IF NOT EXISTS "ChannelPrimetimeCandidates" (
+                "Id" uuid NOT NULL,
+                "SlotId" uuid NOT NULL,
+                "SeriesId" uuid NOT NULL,
+                "Title" text NOT NULL,
+                "SortOrder" integer NOT NULL,
+                CONSTRAINT "PK_ChannelPrimetimeCandidates" PRIMARY KEY ("Id"),
+                CONSTRAINT "FK_ChannelPrimetimeCandidates_ChannelPrimetimeSlots_SlotId"
+                    FOREIGN KEY ("SlotId") REFERENCES "ChannelPrimetimeSlots" ("Id") ON DELETE CASCADE
+            )
+            """,
+            """CREATE INDEX IF NOT EXISTS "IX_ChannelPrimetimeCandidates_SlotId" ON "ChannelPrimetimeCandidates" ("SlotId")""",
+            """CREATE INDEX IF NOT EXISTS "IX_ChannelPrimetimeCandidates_SeriesId" ON "ChannelPrimetimeCandidates" ("SeriesId")"""
+        };
+
+        foreach (var sql in statements)
+        {
+            try
+            {
+                await CatalogSchema.ExecuteAsync(db, sql, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Primetime table ensure failed");
+            }
+        }
+    }
+
+    private async Task EnsurePlayoutItemExternalUrlAsync(FinTvDbContext db, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                """ALTER TABLE "PlayoutItems" ADD COLUMN IF NOT EXISTS "ExternalUrl" text NULL""",
+                cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "PlayoutItem ExternalUrl ensure skipped");
         }
     }
 

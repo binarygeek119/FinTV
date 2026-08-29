@@ -19,6 +19,9 @@ public class LineupGeneratorService
     private readonly LogoBumperService _bumpers;
     private readonly OriginalBroadcastSimulator _originalBroadcast;
     private readonly GuideMetadataService _guideMetadata;
+    private readonly MusicVideoChannelListService _musicVideos;
+    private readonly JellyfinCatalogService _catalog;
+    private readonly ChannelPrimetimeService _primetime;
     private readonly ILogger<LineupGeneratorService> _logger;
 
     public LineupGeneratorService(
@@ -33,6 +36,9 @@ public class LineupGeneratorService
         LogoBumperService bumpers,
         OriginalBroadcastSimulator originalBroadcast,
         GuideMetadataService guideMetadata,
+        MusicVideoChannelListService musicVideos,
+        JellyfinCatalogService catalog,
+        ChannelPrimetimeService primetime,
         ILogger<LineupGeneratorService> logger)
     {
         _db = db;
@@ -46,6 +52,9 @@ public class LineupGeneratorService
         _bumpers = bumpers;
         _originalBroadcast = originalBroadcast;
         _guideMetadata = guideMetadata;
+        _musicVideos = musicVideos;
+        _catalog = catalog;
+        _primetime = primetime;
         _logger = logger;
     }
 
@@ -76,6 +85,9 @@ public class LineupGeneratorService
 
             await RewindEpisodeCursorsAsync(existing, anchor, cancellationToken);
             _db.PlayoutItems.RemoveRange(existing);
+            anchor.ActiveSeriesBlockId = null;
+            anchor.SeriesBlockRemaining = 0;
+            anchor.RecentSeriesIds.Clear();
         }
 
         var builtPrograms = new List<PlayoutItem>();
@@ -91,6 +103,14 @@ public class LineupGeneratorService
         var anniversaryByDate = new Dictionary<DateOnly, Queue<AnniversaryPick>>();
         var stealEnabled = OriginalBroadcastSimulator.IsEnabled(channel);
         var (primeStart, primeEnd) = AiPlayoutTemplates.GetPrimetimeSlotRange(channel);
+        var assignmentChannel = ChannelAiRules.IsPrimetimeAssignmentChannel(channel);
+        var assignedPrime = assignmentChannel
+            ? await _primetime.LoadAsync(channel.Id, cancellationToken)
+            : [];
+        var exclusivePrimeSeries = await ExpandSeriesIdsAsync(
+            ChannelPrimetimeService.ExclusiveSeriesIds(assignedPrime),
+            cancellationToken);
+        var primetimeFilledDates = new HashSet<int>();
         var cursor = startUtc;
         var steps = 0;
         var maxSteps = Math.Max(96, (int)((endUtc - startUtc).TotalMinutes / 10) + 48);
@@ -115,12 +135,37 @@ public class LineupGeneratorService
             {
                 slots = _lineupService.ResolveSlotsForDate(snapshot, date);
                 slotsByDate[date] = slots;
+                if (assignmentChannel && primetimeFilledDates.Add(date.DayNumber))
+                {
+                    await FillAssignedPrimetimeForDateAsync(
+                        channel,
+                        date,
+                        tz,
+                        startUtc,
+                        endUtc,
+                        assignedPrime,
+                        anchor,
+                        builtPrograms,
+                        cancellationToken);
+                    anchor.ActiveSeriesBlockId = null;
+                    anchor.SeriesBlockRemaining = 0;
+                }
             }
 
             var slotIndex = (local.Hour * 60 + local.Minute) / 30;
 
+            if (assignmentChannel
+                && AiPlayoutTemplates.IsAssignedPrimetimeSlot(slotIndex)
+                && IsChannelTimeCovered(channel.Id, cursor))
+            {
+                cursor = cursor.AddMinutes(30);
+                continue;
+            }
+
             if (IsSlotConsumedByEarlierSpan(slots, slotIndex)
-                && !(stealEnabled && AiPlayoutTemplates.IsPrimetimeSlot(slotIndex, primeStart, primeEnd)))
+                && !(assignmentChannel && AiPlayoutTemplates.IsAssignedPrimetimeSlot(slotIndex))
+                && !(stealEnabled && AiPlayoutTemplates.IsPrimetimeSlot(slotIndex, primeStart, primeEnd))
+                && !(SeriesEpisodeBlocks.AppliesTo(channel) && anchor.SeriesBlockRemaining > 0))
             {
                 cursor = cursor.AddMinutes(30);
                 continue;
@@ -163,6 +208,7 @@ public class LineupGeneratorService
 
             var stolePrimetime = false;
             if (stealEnabled
+                && !(assignmentChannel && AiPlayoutTemplates.IsAssignedPrimetimeSlot(slotIndex))
                 && !IsRerunTimeslot(slot, channel, slotIndex)
                 && AiPlayoutTemplates.IsPrimetimeSlot(slotIndex, primeStart, primeEnd))
             {
@@ -284,16 +330,16 @@ public class LineupGeneratorService
                 "Selecting program for {ChannelName} slot {SlotIndex}",
                 channel.Name,
                 slotIndex);
-            var picked = await _smartSelection.PickCandidateAsync(channel, slot, date, anchor, cancellationToken);
-            if (picked is null && !slot.Candidates.Any(c => c.Kind == SlotCandidateKind.FilterQuery))
-            {
-                picked = await _smartSelection.PickCandidateAsync(
-                    channel,
-                    CreateFilterFallbackSlot(channel, slotIndex),
-                    date,
-                    anchor,
-                    cancellationToken);
-            }
+            var picked = await SelectProgramAsync(
+                channel,
+                slot,
+                slotIndex,
+                date,
+                anchor,
+                cancellationToken,
+                assignmentChannel && exclusivePrimeSeries.Count > 0
+                    ? exclusivePrimeSeries
+                    : null);
 
             if (picked is null)
             {
@@ -307,6 +353,19 @@ public class LineupGeneratorService
                     .Where(e => e.Id == pickedId || e.JellyfinItemId == pickedId)
                     .Select(e => e.SeriesId)
                     .FirstOrDefaultAsync(cancellationToken);
+            }
+
+            if (SeriesEpisodeBlocks.AppliesTo(channel)
+                && picked.SeriesId is Guid seriesForSpan
+                && seriesForSpan != Guid.Empty)
+            {
+                spanSlots = 1;
+                blockEndLocal = slotStartLocal.AddMinutes(30);
+                blockEnd = TimeZoneInfo.ConvertTimeToUtc(blockEndLocal, tz);
+                if (blockEnd <= slotStart)
+                {
+                    blockEnd = slotStart.AddMinutes(30);
+                }
             }
 
             _logger.LogInformation(
@@ -590,6 +649,11 @@ public class LineupGeneratorService
             return false;
         }
 
+        if (ChannelAiRules.IsPrimetimeAssignmentChannel(channel))
+        {
+            return AiPlayoutTemplates.IsAssignedOvernightRerunSlot(slotIndex);
+        }
+
         if (slot?.IsRerunSlot == true)
         {
             return true;
@@ -597,6 +661,187 @@ public class LineupGeneratorService
 
         return (slot is null || slot.Candidates.Count == 0)
             && NetworkSchedulePlanner.IsOvernightRerunSlot(slotIndex, AiPlayoutTemplates.Resolve(channel));
+    }
+
+    private async Task<ResolvedCandidate?> SelectProgramAsync(
+        Channel channel,
+        LineupSlot slot,
+        int slotIndex,
+        DateOnly date,
+        PlayoutAnchorState anchor,
+        CancellationToken cancellationToken,
+        IReadOnlySet<Guid>? excludeSeriesIds = null)
+    {
+        if (!SeriesEpisodeBlocks.AppliesTo(channel))
+        {
+            return await PickWithFilterFallbackAsync(
+                channel,
+                slot,
+                slotIndex,
+                date,
+                anchor,
+                cancellationToken,
+                excludeSeriesIds,
+                retryWithoutExclude: excludeSeriesIds is not { Count: > 0 });
+        }
+
+        SeriesEpisodeBlocks.EnsureWeek(anchor, date);
+
+        if (anchor.SeriesBlockRemaining > 0 && anchor.ActiveSeriesBlockId is Guid continueId)
+        {
+            if (excludeSeriesIds is not { Count: > 0 } || !excludeSeriesIds.Contains(continueId))
+            {
+                var next = await _smartSelection.PickSeriesEpisodeAsync(
+                    channel,
+                    continueId,
+                    date,
+                    anchor,
+                    cancellationToken);
+                if (next is not null)
+                {
+                    SeriesEpisodeBlocks.ContinueOrFinish(anchor, continueId);
+                    _logger.LogInformation(
+                        "Continuing series block on {ChannelName}: {Title} ({Remaining} episode(s) left in block)",
+                        channel.Name,
+                        next.Title,
+                        anchor.SeriesBlockRemaining);
+                    return next;
+                }
+            }
+
+            SeriesEpisodeBlocks.FinishBlock(anchor, continueId);
+        }
+
+        if (excludeSeriesIds is { Count: > 0 }
+            && slot.Candidates.All(c =>
+                c.Kind == SlotCandidateKind.FilterQuery || c.JellyfinItemId is null))
+        {
+            return null;
+        }
+
+        var exclude = new HashSet<Guid>(SeriesEpisodeBlocks.CooldownSeries(anchor, date));
+        if (excludeSeriesIds is { Count: > 0 })
+        {
+            exclude.UnionWith(excludeSeriesIds);
+        }
+
+        var fallback = CreateFilterFallbackSlot(channel, slotIndex);
+        var picked = await _smartSelection.PickCandidateAsync(
+            channel,
+            fallback,
+            date,
+            anchor,
+            cancellationToken,
+            excludeSeriesIds: exclude);
+        if (picked is null && anchor.RecentSeriesIds.Count > 0)
+        {
+            var oldest = anchor.RecentSeriesIds.FirstOrDefault(id => !exclude.Contains(id));
+            if (oldest != Guid.Empty)
+            {
+                picked = await _smartSelection.PickSeriesEpisodeAsync(
+                    channel,
+                    oldest,
+                    date,
+                    anchor,
+                    cancellationToken);
+            }
+        }
+
+        if (picked is null)
+        {
+            picked = await PickWithFilterFallbackAsync(
+                channel,
+                slot,
+                slotIndex,
+                date,
+                anchor,
+                cancellationToken,
+                excludeSeriesIds: exclude,
+                retryWithoutExclude: excludeSeriesIds is not { Count: > 0 });
+        }
+
+        if (picked is null)
+        {
+            return null;
+        }
+
+        if (picked.SeriesId is null && picked.JellyfinItemId is Guid pickedId)
+        {
+            picked.SeriesId = await _db.Episodes.AsNoTracking()
+                .Where(e => e.Id == pickedId || e.JellyfinItemId == pickedId)
+                .Select(e => e.SeriesId)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        if (picked.SeriesId is not Guid seriesId || seriesId == Guid.Empty)
+        {
+            return picked;
+        }
+
+        if (excludeSeriesIds is { Count: > 0 } && excludeSeriesIds.Contains(seriesId))
+        {
+            return null;
+        }
+
+        var rng = new Random(HashCode.Combine(channel.PlayoutSeed, date.DayNumber, slotIndex, seriesId));
+        var marathon = SeriesEpisodeBlocks.ShouldStartMarathon(anchor, date, slotIndex, channel.PlayoutSeed);
+        var length = marathon
+            ? SeriesEpisodeBlocks.PickMarathonLength(rng)
+            : SeriesEpisodeBlocks.PickNormalLength(rng);
+        if (!marathon && slot.SpanSlots is >= 2 and <= SeriesEpisodeBlocks.MaxNormal)
+        {
+            length = slot.SpanSlots;
+        }
+
+        SeriesEpisodeBlocks.BeginBlock(anchor, seriesId, length, marathon, date);
+        _logger.LogInformation(
+            "{Kind} ({Length} episodes) on {ChannelName}: {Title}",
+            marathon ? "Mini-marathon" : "Series block",
+            length,
+            channel.Name,
+            picked.Title);
+        return picked;
+    }
+
+    private async Task<ResolvedCandidate?> PickWithFilterFallbackAsync(
+        Channel channel,
+        LineupSlot slot,
+        int slotIndex,
+        DateOnly date,
+        PlayoutAnchorState anchor,
+        CancellationToken cancellationToken,
+        IReadOnlySet<Guid>? excludeSeriesIds = null,
+        bool retryWithoutExclude = true)
+    {
+        var picked = await _smartSelection.PickCandidateAsync(
+            channel,
+            slot,
+            date,
+            anchor,
+            cancellationToken,
+            excludeSeriesIds: excludeSeriesIds);
+        if (picked is null)
+        {
+            picked = await _smartSelection.PickCandidateAsync(
+                channel,
+                CreateFilterFallbackSlot(channel, slotIndex),
+                date,
+                anchor,
+                cancellationToken,
+                excludeSeriesIds: excludeSeriesIds);
+        }
+
+        if (picked is null && retryWithoutExclude && excludeSeriesIds is { Count: > 0 })
+        {
+            picked = await _smartSelection.PickCandidateAsync(
+                channel,
+                CreateFilterFallbackSlot(channel, slotIndex),
+                date,
+                anchor,
+                cancellationToken);
+        }
+
+        return picked;
     }
 
     private static LineupSlot CreatePastTenseNewsSlot(Channel channel, int slotIndex)
@@ -785,11 +1030,13 @@ public class LineupGeneratorService
         DateTime blockEnd,
         CancellationToken cancellationToken)
     {
+        _ = slot;
+        var catalogPicks = _catalog.ListResolvedMusicVideos(channel, date);
         var fillStart = slotStart;
         var packed = 0;
-        while (fillStart < blockEnd - TimeSpan.FromSeconds(8) && packed < 24)
+        while (fillStart < blockEnd - TimeSpan.FromSeconds(8) && packed < 64)
         {
-            var picked = await _smartSelection.PickCandidateAsync(channel, slot, date, anchor, cancellationToken);
+            var picked = await _musicVideos.PickNextAsync(channel, anchor, catalogPicks, cancellationToken);
             if (picked is null)
             {
                 break;
@@ -802,22 +1049,42 @@ public class LineupGeneratorService
                 fillEnd = blockEnd;
             }
 
-            _db.PlayoutItems.Add(new PlayoutItem
+            var item = new PlayoutItem
             {
                 ChannelId = channel.Id,
                 JellyfinItemId = picked.JellyfinItemId,
+                ExternalUrl = picked.ExternalUrl,
+                IsVirtual = !string.IsNullOrWhiteSpace(picked.ExternalUrl),
+                VirtualSource = string.IsNullOrWhiteSpace(picked.ExternalUrl)
+                    ? VirtualContentSource.None
+                    : VirtualContentSource.YouTubeMusicVideo,
                 Start = fillStart,
                 Finish = fillEnd,
-                Title = picked.Title
-            });
+                Title = string.IsNullOrWhiteSpace(picked.Artist) ? picked.Title : $"{picked.Artist} · {picked.Title}"
+            };
+            _db.PlayoutItems.Add(item);
             _db.PlayoutHistory.Add(new PlayoutHistoryEntry
             {
                 ChannelId = channel.Id,
                 JellyfinItemId = picked.JellyfinItemId,
                 AiredAt = fillStart,
-                Title = picked.Title
+                Title = item.Title
             });
-            await _commercialService.InsertCommercialsAsync(channel, picked, fillStart, fillEnd, cancellationToken);
+            if (picked.JellyfinItemId.HasValue)
+            {
+                await _commercialService.InsertCommercialsAsync(
+                    channel,
+                    new ResolvedCandidate
+                    {
+                        JellyfinItemId = picked.JellyfinItemId,
+                        Title = picked.Title,
+                        Duration = clipDuration
+                    },
+                    fillStart,
+                    fillEnd,
+                    cancellationToken);
+            }
+
             fillStart = fillEnd;
             packed++;
         }
@@ -896,6 +1163,158 @@ public class LineupGeneratorService
         return padUntil > blockEnd ? padUntil : blockEnd;
     }
 
+    private async Task<HashSet<Guid>> ExpandSeriesIdsAsync(HashSet<Guid> ids, CancellationToken cancellationToken)
+    {
+        if (ids.Count == 0)
+        {
+            return ids;
+        }
+
+        var rows = await _db.TvShows.AsNoTracking()
+            .Where(show => ids.Contains(show.Id) || ids.Contains(show.JellyfinItemId))
+            .Select(show => new { show.Id, show.JellyfinItemId })
+            .ToListAsync(cancellationToken);
+        var expanded = new HashSet<Guid>(ids);
+        foreach (var row in rows)
+        {
+            expanded.Add(row.Id);
+            if (row.JellyfinItemId != Guid.Empty)
+            {
+                expanded.Add(row.JellyfinItemId);
+            }
+        }
+
+        return expanded;
+    }
+
+    private bool IsChannelTimeCovered(Guid channelId, DateTime utc)
+        => _db.ChangeTracker.Entries<PlayoutItem>()
+            .Where(e => e.State != EntityState.Deleted)
+            .Select(e => e.Entity)
+            .Any(p => p.ChannelId == channelId && p.Start <= utc && p.Finish > utc);
+
+    private async Task FillAssignedPrimetimeForDateAsync(
+        Channel channel,
+        DateOnly date,
+        TimeZoneInfo tz,
+        DateTime windowStart,
+        DateTime windowEnd,
+        IReadOnlyList<ChannelPrimetimeSlot> assignments,
+        PlayoutAnchorState anchor,
+        List<PlayoutItem> builtPrograms,
+        CancellationToken cancellationToken)
+    {
+        if (assignments.Count == 0)
+        {
+            return;
+        }
+
+        for (var slotIndex = AiPlayoutTemplates.PrimeTimeStartSlot;
+             slotIndex <= AiPlayoutTemplates.AssignedPrimeTimeEndSlot;
+             slotIndex++)
+        {
+            var slot = ChannelPrimetimeService.CreateLineupSlot(assignments, slotIndex);
+            if (slot is null)
+            {
+                continue;
+            }
+
+            var slotStartLocal = date.ToDateTime(TimeOnly.MinValue).AddMinutes(slotIndex * 30);
+            var slotStart = TimeZoneInfo.ConvertTimeToUtc(
+                DateTime.SpecifyKind(slotStartLocal, DateTimeKind.Unspecified),
+                tz);
+            var blockEnd = slotStart.AddMinutes(30);
+            if (blockEnd <= windowStart || slotStart >= windowEnd)
+            {
+                continue;
+            }
+
+            if (slotStart < windowStart)
+            {
+                slotStart = windowStart;
+            }
+
+            if (blockEnd > windowEnd)
+            {
+                blockEnd = windowEnd;
+            }
+
+            if (slotStart >= blockEnd || IsChannelTimeCovered(channel.Id, slotStart))
+            {
+                continue;
+            }
+
+            var picked = await _smartSelection.PickCandidateAsync(
+                channel,
+                slot,
+                date,
+                anchor,
+                cancellationToken);
+            if (picked is null)
+            {
+                continue;
+            }
+
+            if (picked.SeriesId is null && picked.JellyfinItemId is Guid pickedId)
+            {
+                picked.SeriesId = await _db.Episodes.AsNoTracking()
+                    .Where(e => e.Id == pickedId || e.JellyfinItemId == pickedId)
+                    .Select(e => e.SeriesId)
+                    .FirstOrDefaultAsync(cancellationToken);
+            }
+
+            _logger.LogInformation(
+                "Assigned primetime {Slot} on {ChannelName}: {Title}",
+                ChannelPrimetimeService.FormatSlotLabel(slotIndex),
+                channel.Name,
+                picked.Title);
+
+            if (channel.ContentType != ChannelContentType.Music
+                && ShortEpisodeBlocks.IsShortRuntime(picked.Duration)
+                && picked.SeriesId is Guid shortSeriesId
+                && shortSeriesId != Guid.Empty)
+            {
+                await PackShortEpisodeBlockAsync(
+                    channel,
+                    picked,
+                    shortSeriesId,
+                    date,
+                    anchor,
+                    slotStart,
+                    blockEnd,
+                    tz,
+                    builtPrograms,
+                    cancellationToken);
+                continue;
+            }
+
+            var contentEnd = picked.Duration > TimeSpan.Zero
+                ? slotStart.Add(picked.Duration)
+                : blockEnd;
+            var padUntil = ResolveSlotPadEnd(contentEnd, blockEnd, tz);
+            var scheduled = await _commercialService.ScheduleProgramWithBreaksAsync(
+                channel,
+                picked,
+                slotStart,
+                padUntil,
+                cancellationToken);
+            builtPrograms.AddRange(scheduled.ProgramItems);
+            padUntil = ResolveSlotPadEnd(scheduled.TimelineEnd, blockEnd, tz);
+            if (padUntil > scheduled.TimelineEnd)
+            {
+                await _commercialService.PadToSlotAsync(channel, scheduled.TimelineEnd, padUntil, cancellationToken);
+            }
+
+            _db.PlayoutHistory.Add(new PlayoutHistoryEntry
+            {
+                ChannelId = channel.Id,
+                JellyfinItemId = picked.JellyfinItemId,
+                AiredAt = slotStart,
+                Title = picked.Title
+            });
+        }
+    }
+
     private async Task<DateTime?> TryAddOvernightRerunAsync(
         Channel channel,
         DateOnly localDate,
@@ -906,17 +1325,40 @@ public class LineupGeneratorService
         CancellationToken cancellationToken)
     {
         var previousDate = localDate.AddDays(-1);
-        var pool = await LoadRerunPoolAsync(channel, previousDate, tz, builtPrograms, cancellationToken);
-        if (pool.Count == 0)
+        PlayoutItem? pick;
+        if (ChannelAiRules.IsPrimetimeAssignmentChannel(channel))
+        {
+            var overnightLocal = TimeZoneInfo.ConvertTimeFromUtc(slotStart, tz);
+            var overnightSlot = (overnightLocal.Hour * 60 + overnightLocal.Minute) / 30;
+            var offset = overnightSlot - AiPlayoutTemplates.EarlyBirdStartSlot;
+            var primeSlot = AiPlayoutTemplates.PrimeTimeStartSlot + offset;
+            pick = await LoadYesterdayPrimeSlotAsync(
+                channel,
+                previousDate,
+                primeSlot,
+                tz,
+                builtPrograms,
+                cancellationToken);
+        }
+        else
+        {
+            var pool = await LoadRerunPoolAsync(channel, previousDate, tz, builtPrograms, cancellationToken);
+            if (pool.Count == 0)
+            {
+                return null;
+            }
+
+            var alreadyUsed = builtPrograms
+                .Where(p => DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(p.Start, tz)) == localDate)
+                .Select(p => p.JellyfinItemId)
+                .ToHashSet();
+            pick = pool.FirstOrDefault(p => !alreadyUsed.Contains(p.JellyfinItemId)) ?? pool[0];
+        }
+
+        if (pick is null)
         {
             return null;
         }
-
-        var alreadyUsed = builtPrograms
-            .Where(p => DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(p.Start, tz)) == localDate)
-            .Select(p => p.JellyfinItemId)
-            .ToHashSet();
-        var pick = pool.FirstOrDefault(p => !alreadyUsed.Contains(p.JellyfinItemId)) ?? pool[0];
         var duration = pick.OutPoint > TimeSpan.Zero
             ? pick.OutPoint
             : pick.Finish - pick.Start;
@@ -987,6 +1429,63 @@ public class LineupGeneratorService
             tz,
             primeStart,
             primeEnd);
+    }
+
+    private async Task<PlayoutItem?> LoadYesterdayPrimeSlotAsync(
+        Channel channel,
+        DateOnly previousDate,
+        int primeSlot,
+        TimeZoneInfo tz,
+        List<PlayoutItem> builtPrograms,
+        CancellationToken cancellationToken)
+    {
+        var (primeStart, primeEnd) = AiPlayoutTemplates.GetPrimetimeSlotRange(channel);
+        if (primeSlot < primeStart || primeSlot > primeEnd)
+        {
+            return null;
+        }
+
+        var skipMovies = ExcludeMoviesFromReruns(channel);
+        var fromBuilt = builtPrograms
+            .Where(p => DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(p.Start, tz)) == previousDate)
+            .ToList();
+        var movieIds = skipMovies
+            ? await LoadMovieIdsAsync(fromBuilt.Select(p => p.JellyfinItemId), cancellationToken)
+            : [];
+        var match = fromBuilt
+            .Where(p => IsProgramRerunSource(p, movieIds))
+            .Where(p => SlotIndexOf(p, tz) == primeSlot)
+            .OrderBy(p => p.Start)
+            .FirstOrDefault();
+        if (match is not null)
+        {
+            return match;
+        }
+
+        var startLocal = previousDate.ToDateTime(TimeOnly.MinValue);
+        var startUtc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(startLocal, DateTimeKind.Unspecified), tz);
+        var endUtc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(startLocal.AddDays(1), DateTimeKind.Unspecified), tz);
+        var fromDb = await _db.PlayoutItems
+            .Where(p => p.ChannelId == channel.Id && p.Start >= startUtc && p.Start < endUtc)
+            .ToListAsync(cancellationToken);
+        if (skipMovies)
+        {
+            movieIds = await LoadMovieIdsAsync(
+                fromDb.Select(p => p.JellyfinItemId).Concat(builtPrograms.Select(p => p.JellyfinItemId)),
+                cancellationToken);
+        }
+
+        return fromDb
+            .Where(p => _db.Entry(p).State != EntityState.Deleted && IsProgramRerunSource(p, movieIds))
+            .Where(p => SlotIndexOf(p, tz) == primeSlot)
+            .OrderBy(p => p.Start)
+            .FirstOrDefault();
+    }
+
+    private static int SlotIndexOf(PlayoutItem item, TimeZoneInfo tz)
+    {
+        var local = TimeZoneInfo.ConvertTimeFromUtc(item.Start, tz);
+        return (local.Hour * 60 + local.Minute) / 30;
     }
 
     private static bool ExcludeMoviesFromReruns(Channel channel)

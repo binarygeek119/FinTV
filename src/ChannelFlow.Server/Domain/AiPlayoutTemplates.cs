@@ -27,6 +27,8 @@ public static class AiPlayoutTemplates
     public const int TeenHourEndSlot = 35;
     public const int PrimeTimeStartSlot = 36;
     public const int PrimeTimeEndSlot = 43;
+    /// <summary>Last half-hour of user-assigned primetime (8:30–9:00pm).</summary>
+    public const int AssignedPrimeTimeEndSlot = 41;
     public const int ToonTakeoverStartSlot = 34;
     public const int ToonTakeoverEndSlot = 39;
 
@@ -292,6 +294,11 @@ public static class AiPlayoutTemplates
     /// </summary>
     public static (int StartSlotIndex, int EndSlotIndex) GetPrimetimeSlotRange(Channel channel)
     {
+        if (ChannelAiRules.IsPrimetimeAssignmentChannel(channel))
+        {
+            return (PrimeTimeStartSlot, AssignedPrimeTimeEndSlot);
+        }
+
         var template = Resolve(channel);
         var prime = template.Dayparts.FirstOrDefault(d =>
             d.Name.Contains("prime", StringComparison.OrdinalIgnoreCase)
@@ -304,6 +311,12 @@ public static class AiPlayoutTemplates
 
         return (PrimeTimeStartSlot, PrimeTimeEndSlot);
     }
+
+    public static bool IsAssignedPrimetimeSlot(int slotIndex)
+        => slotIndex >= PrimeTimeStartSlot && slotIndex <= AssignedPrimeTimeEndSlot;
+
+    public static bool IsAssignedOvernightRerunSlot(int slotIndex)
+        => slotIndex >= EarlyBirdStartSlot && slotIndex <= EarlyBirdEndSlot;
 
     public static bool IsPrimetimeSlot(int slotIndex, int startSlotIndex, int endSlotIndex)
         => slotIndex >= startSlotIndex && slotIndex <= endSlotIndex;
@@ -405,7 +418,7 @@ public static class AiPlayoutTemplates
             lines.Add("- Mid-Day is original programming, not rerun slots.");
             lines.Add("- Do not place kids content in Late Night.");
             lines.Add("- Do not place adult-only titles in Before School, Morning, or After School.");
-            lines.Add("- Do not run a series block across a daypart boundary. Typical series blocks are 1-2 episodes, not multi-hour dumps of the same show.");
+            lines.Add("- Do not run a series block across a daypart boundary. Typical series blocks are 1-4 episodes, with a few 4-6 episode mini-marathons per week. Do not dump one series across the whole day.");
             lines.Add("- Put movies only where this channel's daypart guide asks for features/blockbusters (usually Prime Time). At most two unique movies per day. Do not fill Morning, Mid-Day, or After School with movies, and do not repeat a movie the same day.");
             lines.Add("- Do not fill Late Night with Saturday-morning cartoons.");
         }
@@ -449,10 +462,10 @@ public static class AiPlayoutTemplates
         {
             "Series episode blocking:",
             "- For TV series, use consecutive slots with the same jellyfinItemId; ChannelFlow plays the next episode in order for each consecutive slot.",
-            "- Typical blocks: 1-2 consecutive episodes of the same series (1-2 back-to-back slots with the same jellyfinItemId). Use spanSlots=1 per slot for ~30-minute episodes, or spanSlots=2 for hour-long episodes. Do not cross a daypart boundary.",
-            "- Mini-marathon: include exactly ONE mini-marathon per lineup — 5-6 consecutive slots (max 6 episodes) of the same series. " + marathonSlots,
-            "- Keep mini-marathons rare and special (about 1-2 per week channel-wide). On this daily template include one; use lineup overrides on other weekdays if you want a second weekly marathon or none.",
-            "- Between blocks, switch to a different series or movie; do not repeat the same series later the same day unless it is a different block separated by other shows.",
+            "- Typical blocks: 1-4 consecutive episodes of the same series. Use spanSlots=1 per slot for ~30-minute episodes, or spanSlots=2 for hour-long episodes. Do not cross a daypart boundary.",
+            "- Mini-marathon: include a few 4-6 episode mini-marathons per week (about three), not one series all day. " + marathonSlots,
+            "- Keep mini-marathons special (about 2-3 per week channel-wide).",
+            "- Between blocks, switch to a different series or movie; do not repeat the same series later the same day.",
             "- Movies are single entries: one jellyfinItemId with spanSlots from runtime, not multi-slot episode blocks."
         });
     }

@@ -22,6 +22,21 @@ public class PlayoutAnchorState
     /// and to maximize spacing before the same artist returns.
     /// </summary>
     public List<string> RecentMusicVideoArtists { get; set; } = new();
+
+    /// <summary>Series currently filling a 1–6 episode block.</summary>
+    public Guid? ActiveSeriesBlockId { get; set; }
+
+    /// <summary>Episodes left in the current series block after the one on air.</summary>
+    public int SeriesBlockRemaining { get; set; }
+
+    /// <summary>Recently finished series, oldest first. Used to keep the same show from returning too soon.</summary>
+    public List<Guid> RecentSeriesIds { get; set; } = new();
+
+    public int MiniMarathonsThisWeek { get; set; }
+
+    public int SeriesBlockWeekKey { get; set; }
+
+    public int LastMiniMarathonDayNumber { get; set; }
 }
 
 public class SmartSelectionService
@@ -40,47 +55,51 @@ public class SmartSelectionService
         LineupSlot slot,
         DateOnly scheduleDate,
         PlayoutAnchorState anchor,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        Guid? preferSeriesId = null,
+        IReadOnlySet<Guid>? excludeSeriesIds = null)
     {
         if (slot.Candidates.Count == 0)
         {
             return null;
         }
 
-        var historyCutoff = DateTime.UtcNow.AddDays(-(FinTvRuntime.Current?.Configuration.HistoryDaysToConsider ?? 7));
-        var recentIds = await _db.PlayoutHistory
-            .Where(h => h.ChannelId == channel.Id && h.AiredAt >= historyCutoff)
-            .Select(h => h.JellyfinItemId)
-            .ToListAsync(cancellationToken);
+        var pick = await PickFromSlotAsync(
+            channel,
+            slot,
+            scheduleDate,
+            anchor,
+            preferSeriesId,
+            excludeSeriesIds,
+            cancellationToken);
 
-        var resolved = new List<(SlotCandidate Candidate, ResolvedCandidate Item, double Score)>();
-        var preferSeries = channel.ContentType == ChannelContentType.TvShow
-            && ChannelAiRules.ResolveCatalogMode(channel) != ChannelCatalogMode.MovieOnly;
-
-        foreach (var candidate in slot.Candidates.OrderBy(c => c.SortOrder))
+        if (pick is not null)
         {
-            var items = await ResolveCandidateAsync(channel, candidate, scheduleDate, anchor, slot.SlotIndex, cancellationToken);
-            foreach (var item in items)
-            {
-                var score = ComputeScore(item, candidate.Weight, recentIds, anchor, scheduleDate, preferSeries);
-                resolved.Add((candidate, item, score));
-            }
+            RecordPick(anchor, pick, scheduleDate);
         }
 
-        if (resolved.Count == 0)
+        return pick;
+    }
+
+    /// <summary>
+    /// Next episode of a series already in an episode block, advancing the season cursor.
+    /// </summary>
+    public async Task<ResolvedCandidate?> PickSeriesEpisodeAsync(
+        Channel channel,
+        Guid seriesId,
+        DateOnly scheduleDate,
+        PlayoutAnchorState anchor,
+        CancellationToken cancellationToken = default)
+    {
+        var items = await _catalog.ResolveItemAsync(seriesId, channel, anchor, scheduleDate, cancellationToken);
+        var pick = items.FirstOrDefault(item => item.SeriesId == seriesId)
+            ?? items.FirstOrDefault();
+        if (pick is null)
         {
             return null;
         }
 
-        var rng = CreateRng(channel.PlayoutSeed, scheduleDate, slot.SlotIndex);
-        var maxScore = resolved.Max(r => r.Score);
-        var top = resolved.Where(r => r.Score >= maxScore - 0.001).ToList();
-        var pick = top[rng.Next(top.Count)].Item;
-        if (pick.JellyfinItemId is Guid pickedId)
-        {
-            anchor.LastAired[pickedId] = scheduleDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
-        }
-
+        RecordPick(anchor, pick, scheduleDate);
         return pick;
     }
 
@@ -220,18 +239,106 @@ public class SmartSelectionService
         return name;
     }
 
+    private async Task<ResolvedCandidate?> PickFromSlotAsync(
+        Channel channel,
+        LineupSlot slot,
+        DateOnly scheduleDate,
+        PlayoutAnchorState anchor,
+        Guid? preferSeriesId,
+        IReadOnlySet<Guid>? excludeSeriesIds,
+        CancellationToken cancellationToken)
+    {
+        var historyCutoff = DateTime.UtcNow.AddDays(-(FinTvRuntime.Current?.Configuration.HistoryDaysToConsider ?? 7));
+        var recentIds = await _db.PlayoutHistory
+            .Where(h => h.ChannelId == channel.Id && h.AiredAt >= historyCutoff)
+            .Select(h => h.JellyfinItemId)
+            .ToListAsync(cancellationToken);
+
+        var resolved = new List<(SlotCandidate Candidate, ResolvedCandidate Item, double Score)>();
+        var preferSeries = channel.ContentType == ChannelContentType.TvShow
+            && ChannelAiRules.ResolveCatalogMode(channel) != ChannelCatalogMode.MovieOnly;
+
+        foreach (var candidate in slot.Candidates.OrderBy(c => c.SortOrder))
+        {
+            var items = await ResolveCandidateAsync(channel, candidate, scheduleDate, anchor, slot.SlotIndex, cancellationToken);
+            foreach (var item in items)
+            {
+                if (excludeSeriesIds is { Count: > 0 }
+                    && item.SeriesId is Guid excluded
+                    && excluded != Guid.Empty
+                    && excludeSeriesIds.Contains(excluded)
+                    && preferSeriesId != excluded)
+                {
+                    continue;
+                }
+
+                var score = ComputeScore(
+                    item,
+                    candidate.Weight,
+                    recentIds,
+                    anchor,
+                    scheduleDate,
+                    preferSeries,
+                    preferSeriesId,
+                    excludeSeriesIds);
+                resolved.Add((candidate, item, score));
+            }
+        }
+
+        if (resolved.Count == 0)
+        {
+            return null;
+        }
+
+        var rng = CreateRng(channel.PlayoutSeed, scheduleDate, slot.SlotIndex);
+        var maxScore = resolved.Max(r => r.Score);
+        var top = resolved.Where(r => r.Score >= maxScore - 0.001).ToList();
+        return top[rng.Next(top.Count)].Item;
+    }
+
+    private static void RecordPick(PlayoutAnchorState anchor, ResolvedCandidate pick, DateOnly scheduleDate)
+    {
+        var airedAt = scheduleDate.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+        if (pick.JellyfinItemId is Guid pickedId)
+        {
+            anchor.LastAired[pickedId] = airedAt;
+        }
+
+        if (pick.SeriesId is Guid seriesId && seriesId != Guid.Empty)
+        {
+            var key = seriesId.ToString("N");
+            anchor.SeriesEpisodeIndex.TryGetValue(key, out var index);
+            anchor.SeriesEpisodeIndex[key] = index + 1;
+            anchor.LastAired[seriesId] = airedAt;
+        }
+    }
+
     private static double ComputeScore(
         ResolvedCandidate item,
         int weight,
         List<Guid?> recentIds,
         PlayoutAnchorState anchor,
         DateOnly scheduleDate,
-        bool preferSeries)
+        bool preferSeries,
+        Guid? preferSeriesId = null,
+        IReadOnlySet<Guid>? excludeSeriesIds = null)
     {
         var score = weight * 10.0;
         if (preferSeries && item.SeriesId is null)
         {
             score -= 25;
+        }
+
+        if (item.SeriesId is Guid seriesId && seriesId != Guid.Empty)
+        {
+            if (preferSeriesId == seriesId)
+            {
+                score += 800;
+            }
+            else if (excludeSeriesIds is not null && excludeSeriesIds.Contains(seriesId))
+            {
+                score -= 10_000;
+            }
         }
 
         if (item.JellyfinItemId.HasValue && recentIds.Contains(item.JellyfinItemId))
@@ -242,28 +349,44 @@ public class SmartSelectionService
         if (item.JellyfinItemId.HasValue
             && anchor.LastAired.TryGetValue(item.JellyfinItemId.Value, out var last))
         {
-            DateOnly lastDay;
-            try
-            {
-                lastDay = DateOnly.FromDateTime(last);
-            }
-            catch (ArgumentOutOfRangeException)
-            {
-                lastDay = scheduleDate;
-            }
+            score += RecencyPenalty(scheduleDate, last, item.SeriesId is null ? 120 : 40, item.SeriesId is null ? 16 : 6);
+        }
 
-            var days = scheduleDate.DayNumber - lastDay.DayNumber;
-            if (days <= 0)
-            {
-                score -= item.SeriesId is null ? 120 : 40;
-            }
-            else if (days < 7)
-            {
-                score -= (7 - days) * (item.SeriesId is null ? 16 : 6);
-            }
+        if (item.SeriesId is Guid airedSeries
+            && airedSeries != Guid.Empty
+            && preferSeriesId != airedSeries
+            && anchor.LastAired.TryGetValue(airedSeries, out var seriesLast))
+        {
+            score += RecencyPenalty(scheduleDate, seriesLast, 400, 24);
         }
 
         return score;
+    }
+
+    private static double RecencyPenalty(DateOnly scheduleDate, DateTime last, int sameDayPenalty, int recentDayWeight)
+    {
+        DateOnly lastDay;
+        try
+        {
+            lastDay = DateOnly.FromDateTime(last);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            lastDay = scheduleDate;
+        }
+
+        var days = scheduleDate.DayNumber - lastDay.DayNumber;
+        if (days <= 0)
+        {
+            return -sameDayPenalty;
+        }
+
+        if (days < 7)
+        {
+            return -(7 - days) * recentDayWeight;
+        }
+
+        return 0;
     }
 
     private static Random CreateRng(int seed, DateOnly date, int slotIndex)
@@ -302,6 +425,8 @@ public class ResolvedCandidate
     public Guid? SeriesId { get; set; }
 
     public string Title { get; set; } = string.Empty;
+
+    public string? Artist { get; set; }
 
     public TimeSpan Duration { get; set; }
 

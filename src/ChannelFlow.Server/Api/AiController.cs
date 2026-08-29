@@ -24,6 +24,8 @@ public class AiController : ControllerBase
     private readonly PlayoutBuilderService _playoutBuilder;
     private readonly WeatherGuideMetadataService _weatherGuide;
     private readonly AiChannelGenerateJobService _channelGenerateJobs;
+    private readonly ChannelCatalogPoolService _pool;
+    private readonly ChannelPrimetimeService _primetime;
 
     public AiController(
         AiLineupGeneratorService generator,
@@ -33,7 +35,9 @@ public class AiController : ControllerBase
         LineupGeneratorService playoutGenerator,
         PlayoutBuilderService playoutBuilder,
         WeatherGuideMetadataService weatherGuide,
-        AiChannelGenerateJobService channelGenerateJobs)
+        AiChannelGenerateJobService channelGenerateJobs,
+        ChannelCatalogPoolService pool,
+        ChannelPrimetimeService primetime)
     {
         _generator = generator;
         _autoApply = autoApply;
@@ -43,6 +47,8 @@ public class AiController : ControllerBase
         _playoutBuilder = playoutBuilder;
         _weatherGuide = weatherGuide;
         _channelGenerateJobs = channelGenerateJobs;
+        _pool = pool;
+        _primetime = primetime;
     }
 
     [HttpGet("settings")]
@@ -201,6 +207,10 @@ public class AiController : ControllerBase
             .Where(l => l.IsDefault)
             .Select(l => new { l.ChannelId, Count = l.Slots.Count(s => s.Candidates.Count > 0) })
             .ToDictionaryAsync(x => x.ChannelId, x => x.Count, cancellationToken);
+        var poolCounts = await _db.ChannelCatalogPool
+            .GroupBy(row => row.ChannelId)
+            .Select(group => new { ChannelId = group.Key, Count = group.Count() })
+            .ToDictionaryAsync(x => x.ChannelId, x => x.Count, cancellationToken);
 
         return Ok(channels
             .Where(c => c.ContentType != ChannelContentType.Weather && c.ContentType != ChannelContentType.News)
@@ -218,7 +228,9 @@ public class AiController : ControllerBase
                     aiFineTunePrompt = c.AiFineTunePrompt ?? string.Empty,
                     aiPlayoutTemplateId = c.AiPlayoutTemplateId ?? AiPlayoutTemplates.NoneId,
                     aiRuleBrief = ChannelAiRules.GetBrief(tag),
-                    filledSlots = slotCounts.TryGetValue(c.Id, out var count) ? count : 0
+                    filledSlots = slotCounts.TryGetValue(c.Id, out var count) ? count : 0,
+                    poolCount = poolCounts.TryGetValue(c.Id, out var pool) ? pool : 0,
+                    primetimeAssignment = ChannelAiRules.IsPrimetimeAssignmentLibraryTag(tag)
                 };
             }));
     }
@@ -324,6 +336,88 @@ public class AiController : ControllerBase
     public ActionResult<object> GetGenerateStatus(Guid channelId)
         => Ok(_channelGenerateJobs.BuildStatus(channelId));
 
+    [HttpDelete("channels/{channelId:guid}/pool")]
+    public async Task<IActionResult> ClearChannelPool(Guid channelId, CancellationToken cancellationToken)
+    {
+        var exists = await _db.Channels.AnyAsync(c => c.Id == channelId, cancellationToken);
+        if (!exists)
+        {
+            return NotFound();
+        }
+
+        await _pool.ClearAsync(channelId, cancellationToken);
+        return Ok(new { ok = true, message = "AI pool cleared. Next Generate will rebuild it." });
+    }
+
+    [HttpGet("channels/{channelId:guid}/primetime-shows")]
+    public async Task<IActionResult> GetPrimetimeShows(Guid channelId, CancellationToken cancellationToken)
+    {
+        var channel = await _db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
+        if (channel is null)
+        {
+            return NotFound();
+        }
+
+        if (!ChannelAiRules.IsPrimetimeAssignmentChannel(channel))
+        {
+            return BadRequest(new { message = "This channel does not use primetime show assignments." });
+        }
+
+        var shows = await _primetime.ListEligibleShowsAsync(channel, cancellationToken);
+        return Ok(new { shows });
+    }
+
+    [HttpGet("channels/{channelId:guid}/primetime")]
+    public async Task<IActionResult> GetPrimetime(Guid channelId, CancellationToken cancellationToken)
+    {
+        var channel = await _db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
+        if (channel is null)
+        {
+            return NotFound();
+        }
+
+        if (!ChannelAiRules.IsPrimetimeAssignmentChannel(channel))
+        {
+            return BadRequest(new { message = "This channel does not use primetime show assignments." });
+        }
+
+        var slots = await _primetime.LoadAsync(channelId, cancellationToken);
+        return Ok(_primetime.BuildResponse(slots));
+    }
+
+    [HttpPut("channels/{channelId:guid}/primetime")]
+    public async Task<IActionResult> UpdatePrimetime(
+        Guid channelId,
+        [FromBody] ChannelPrimetimePutRequest? request,
+        CancellationToken cancellationToken)
+    {
+        var channel = await _db.Channels.AsNoTracking().FirstOrDefaultAsync(c => c.Id == channelId, cancellationToken);
+        if (channel is null)
+        {
+            return NotFound();
+        }
+
+        if (!ChannelAiRules.IsPrimetimeAssignmentChannel(channel))
+        {
+            return BadRequest(new { message = "This channel does not use primetime show assignments." });
+        }
+
+        await _primetime.SaveAsync(channelId, request?.Slots ?? [], cancellationToken);
+        var slots = await _primetime.LoadAsync(channelId, cancellationToken);
+        return Ok(_primetime.BuildResponse(slots));
+    }
+
+    [HttpDelete("pools")]
+    public async Task<IActionResult> ClearAllPools(CancellationToken cancellationToken)
+    {
+        await _pool.ClearAllAsync(cancellationToken);
+        return Ok(new { ok = true, message = "AI pool cleared. Next Generate will rebuild it." });
+    }
+
+    [HttpGet("generate/queue")]
+    public ActionResult<object> GetQueueStatus()
+        => Ok(_channelGenerateJobs.BuildQueueStatus());
+
     [HttpPost("channels/{channelId:guid}/apply")]
     public async Task<IActionResult> Apply(
         Guid channelId,
@@ -368,24 +462,19 @@ public class AiController : ControllerBase
             return BadRequest(new { message = "AI lineup generation is disabled." });
         }
 
-        if (_autoApply.IsGenerateAllJobRunning)
-        {
-            return Ok(new { queued = false, alreadyRunning = true, job = _autoApply.BuildGenerateAllStatus() });
-        }
-
-        _autoApply.QueueManualGenerateAllEligibleChannels();
-        return Ok(new { queued = true, job = _autoApply.BuildGenerateAllStatus() });
+        _channelGenerateJobs.QueueGenerateAll();
+        return Ok(new { queued = true, job = _channelGenerateJobs.BuildGenerateAllStatus() });
     }
 
     [HttpGet("generate-all/status")]
     public ActionResult<object> GetGenerateAllStatus()
-        => Ok(_autoApply.BuildGenerateAllStatus());
+        => Ok(_channelGenerateJobs.BuildGenerateAllStatus());
 
     [HttpPost("generate-all/cancel")]
     public ActionResult<object> CancelGenerateAll()
     {
-        var cancelled = _autoApply.CancelGenerateAll();
-        return Ok(new { cancelled, job = _autoApply.BuildGenerateAllStatus() });
+        var cancelled = _channelGenerateJobs.Cancel();
+        return Ok(new { cancelled, job = _channelGenerateJobs.BuildGenerateAllStatus() });
     }
 
     [HttpGet("weather-guide-cache/status")]
@@ -562,4 +651,9 @@ public class AiApplyLineupRequest
 public class WeatherGuideCacheGenerateRequest
 {
     public bool Force { get; set; }
+}
+
+public class ChannelPrimetimePutRequest
+{
+    public List<ChannelPrimetimeSlotRequest>? Slots { get; set; }
 }

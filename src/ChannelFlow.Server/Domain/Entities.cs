@@ -247,6 +247,8 @@ public class PlayoutItem
 
     public string? GuideGroup { get; set; }
 
+    public string? ExternalUrl { get; set; }
+
     public bool IsVirtual { get; set; }
 
     public VirtualContentSource VirtualSource { get; set; }

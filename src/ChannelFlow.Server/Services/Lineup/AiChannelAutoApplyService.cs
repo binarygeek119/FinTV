@@ -23,6 +23,7 @@ public class AiChannelAutoApplyService
     private readonly LineupGeneratorService _playoutGenerator;
     private readonly PlayoutBuilderService _playoutBuilder;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ChannelCatalogPoolService _pool;
     private readonly ILogger<AiChannelAutoApplyService> _logger;
 
     public AiChannelAutoApplyService(
@@ -31,6 +32,7 @@ public class AiChannelAutoApplyService
         LineupGeneratorService playoutGenerator,
         PlayoutBuilderService playoutBuilder,
         IServiceScopeFactory scopeFactory,
+        ChannelCatalogPoolService pool,
         ILogger<AiChannelAutoApplyService> logger)
     {
         _db = db;
@@ -38,6 +40,7 @@ public class AiChannelAutoApplyService
         _playoutGenerator = playoutGenerator;
         _playoutBuilder = playoutBuilder;
         _scopeFactory = scopeFactory;
+        _pool = pool;
         _logger = logger;
     }
 
@@ -187,7 +190,8 @@ public class AiChannelAutoApplyService
         AiProvider? providerOverride,
         Action<AiChannelBuildProgress>? onProgress,
         CancellationToken cancellationToken = default,
-        bool skipIfAtHorizon = false)
+        bool skipIfAtHorizon = false,
+        bool buildPlayout = true)
     {
         var daysToBuild = PlayoutScheduleHelper.GetPlayoutDaysToBuild();
         Channel? channel;
@@ -235,6 +239,30 @@ public class AiChannelAutoApplyService
                 await ApplyDefaultSettingsAsync(channelId, cancellationToken);
                 _db.ChangeTracker.Clear();
 
+                var liveChannel = await _db.Channels.FirstAsync(c => c.Id == channelId, cancellationToken);
+                ReportProgress(onProgress, new AiChannelBuildProgress
+                {
+                    CurrentDay = 1,
+                    TotalDays = daysToBuild,
+                    Phase = "priming",
+                    ChannelName = liveChannel.Name
+                });
+                await _pool.EnsurePrimedAsync(
+                    liveChannel,
+                    batchChannels: null,
+                    onPage: (name, page, total) =>
+                    {
+                        ReportProgress(onProgress, new AiChannelBuildProgress
+                        {
+                            CurrentDay = page,
+                            TotalDays = total,
+                            Phase = $"priming page {page}/{total}",
+                            ChannelName = name
+                        });
+                    },
+                    cancellationToken);
+                _db.ChangeTracker.Clear();
+
                 preview = await _generator.GenerateAsync(channelId, providerOverride, cancellationToken);
                 _db.ChangeTracker.Clear();
                 await _generator.ApplyAsync(
@@ -252,9 +280,22 @@ public class AiChannelAutoApplyService
                 return AiAutoApplyChannelResult.Failed(ex.Message, channelId, channel.Name);
             }
 
+            if (!buildPlayout)
+            {
+                ReportProgress(onProgress, new AiChannelBuildProgress
+                {
+                    CurrentDay = 1,
+                    TotalDays = daysToBuild,
+                    Phase = "lineup",
+                    ChannelName = channel.Name,
+                    Preview = preview
+                });
+                return AiAutoApplyChannelResult.Succeeded(channelId, channel.Name, preview);
+            }
+
             coverage = await GetHorizonDayCoverageAsync(channelId, daysToBuild, cancellationToken)
                 .ConfigureAwait(false);
-            if (ShouldLeaveHorizonForMidnight(coverage))
+            if (skipIfAtHorizon && ShouldLeaveHorizonForMidnight(coverage))
             {
                 ReportProgress(onProgress, new AiChannelBuildProgress
                 {
@@ -273,7 +314,7 @@ public class AiChannelAutoApplyService
 
             for (var day = 0; day < daysToBuild; day++)
             {
-                if (coverage[day])
+                if (skipIfAtHorizon && coverage[day])
                 {
                     continue;
                 }

@@ -1,16 +1,23 @@
 using System.Collections.Concurrent;
 using FinTv.Domain;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace FinTv.Services;
 
 /// <summary>
-/// Runs single-channel AI lineup generation in the background so admin HTTP requests return immediately.
+/// FIFO AI generate queue: clicks stack, then one worker primes, builds lineups, and round-robins playout days.
 /// </summary>
 public sealed class AiChannelGenerateJobService
 {
     private static readonly ConcurrentDictionary<Guid, JobState> Jobs = new();
+    private static readonly object QueueLock = new();
+    private static readonly List<Guid> Pending = new();
+    private static CancellationTokenSource? WorkerCts;
+    private static CancellationTokenSource? DebounceCts;
+    private static int WorkerActive;
+    private static QueueSnapshot Snapshot = new();
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly PlayoutBuilderService _playoutBuilder;
@@ -28,6 +35,14 @@ public sealed class AiChannelGenerateJobService
 
     public bool IsRunning(Guid channelId)
     {
+        lock (QueueLock)
+        {
+            if (Pending.Contains(channelId) || Snapshot.ChannelIds.Contains(channelId))
+            {
+                return Snapshot.IsRunning || Pending.Count > 0;
+            }
+        }
+
         if (!Jobs.TryGetValue(channelId, out var job))
         {
             return false;
@@ -41,104 +56,109 @@ public sealed class AiChannelGenerateJobService
 
     public bool TryQueue(Guid channelId, AiProvider? providerOverride)
     {
+        _ = providerOverride;
         var job = Jobs.GetOrAdd(channelId, _ => new JobState());
         lock (job)
         {
-            if (job.IsRunning)
-            {
-                return false;
-            }
-
-            job.IsRunning = true;
             job.Error = null;
-            job.Preview = null;
-            job.Applied = false;
             job.ApplyError = null;
-            job.Phase = "generating";
-            job.CurrentDay = 1;
-            job.TotalDays = PlayoutScheduleHelper.GetPlayoutDaysToBuild();
-            job.ChannelName = null;
+            job.Phase = "queued";
+            job.IsRunning = true;
             job.StartedAtUtc = DateTime.UtcNow;
             job.CompletedAtUtc = null;
+            job.TotalDays = PlayoutScheduleHelper.GetPlayoutDaysToBuild();
         }
 
-        _logger.LogInformation("Queueing AI lineup generation for channel {ChannelId}", channelId);
+        lock (QueueLock)
+        {
+            if (!Pending.Contains(channelId))
+            {
+                Pending.Add(channelId);
+            }
+        }
+
+        _logger.LogInformation("Queued AI lineup generation for channel {ChannelId}", channelId);
+        ScheduleDebounce();
+        return true;
+    }
+
+    public bool IsQueueRunning()
+    {
+        lock (QueueLock)
+        {
+            return Snapshot.IsRunning || Pending.Count > 0 || Volatile.Read(ref WorkerActive) > 0;
+        }
+    }
+
+    public void QueueGenerateAll()
+    {
+        SetSnapshot(s =>
+        {
+            s.IsRunning = true;
+            s.Phase = "queuing";
+            s.Message = "Queuing eligible channels…";
+            s.WasCancelled = false;
+            s.LastError = null;
+            s.StartedAt = DateTime.UtcNow;
+            s.CompletedAt = null;
+        });
+        EnqueueEligibleChannels();
+    }
+
+    public void EnqueueEligibleChannels()
+    {
         _ = Task.Run(async () =>
         {
-            try
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<FinTv.Data.FinTvDbContext>();
+            var rows = await db.Channels.AsNoTracking()
+                .Where(c => c.Enabled && c.ContentType != ChannelContentType.Weather && c.ContentType != ChannelContentType.News)
+                .OrderBy(c => c.Number)
+                .ToListAsync();
+            var queued = 0;
+            foreach (var channel in rows.Where(AiChannelAutoApplyService.IsEligible))
             {
-                using var scope = _scopeFactory.CreateScope();
-                var autoApply = scope.ServiceProvider.GetRequiredService<AiChannelAutoApplyService>();
-                var result = await autoApply.GenerateAndBuildHorizonDaysAsync(
-                        channelId,
-                        providerOverride,
-                        onProgress: progress =>
-                        {
-                            lock (job)
-                            {
-                                job.Phase = progress.Phase;
-                                job.CurrentDay = progress.CurrentDay;
-                                job.TotalDays = progress.TotalDays;
-                                job.ChannelName = progress.ChannelName;
-                                if (progress.Preview is not null)
-                                {
-                                    job.Preview = progress.Preview;
-                                    job.Applied = true;
-                                }
-                            }
-                        },
-                        CancellationToken.None)
-                    .ConfigureAwait(false);
-
-                lock (job)
-                {
-                    if (result.Preview is not null)
-                    {
-                        job.Preview = result.Preview;
-                    }
-
-                    if (result.Ok)
-                    {
-                        job.Applied = true;
-                        job.Phase = result.PlayoutAlreadyAtHorizon ? "horizon-full" : "done";
-                    }
-                    else if (result.WasSkipped)
-                    {
-                        job.Error = result.Error;
-                    }
-                    else
-                    {
-                        job.Applied = result.Preview is not null;
-                        job.ApplyError = result.Error;
-                    }
-
-                    job.CompletedAtUtc = DateTime.UtcNow;
-                }
-
-                _logger.LogInformation(
-                    "AI lineup generation finished for {Channel} (ok={Ok})",
-                    result.ChannelName ?? channelId.ToString(),
-                    result.Ok);
+                TryQueue(channel.Id, null);
+                queued++;
             }
-            catch (Exception ex)
+
+            if (queued == 0)
             {
-                _logger.LogWarning(ex, "AI lineup generation failed for channel {ChannelId}", channelId);
-                lock (job)
+                SetSnapshot(s =>
                 {
-                    job.Error = ex is InvalidOperationException invalid
-                        ? invalid.Message
-                        : $"AI lineup generation failed: {ex.Message}";
-                    job.CompletedAtUtc = DateTime.UtcNow;
-                }
-            }
-            finally
-            {
-                lock (job)
-                {
-                    job.IsRunning = false;
-                }
+                    s.IsRunning = false;
+                    s.Phase = "done";
+                    s.Message = "No eligible channels.";
+                    s.CompletedAt = DateTime.UtcNow;
+                });
             }
         });
+    }
+
+    public bool Cancel()
+    {
+        lock (QueueLock)
+        {
+            Pending.Clear();
+            WorkerCts?.Cancel();
+            DebounceCts?.Cancel();
+            Snapshot.WasCancelled = true;
+            Snapshot.IsRunning = false;
+            Snapshot.Phase = "cancelled";
+        }
+
+        foreach (var job in Jobs.Values)
+        {
+            lock (job)
+            {
+                if (job.IsRunning)
+                {
+                    job.IsRunning = false;
+                    job.Error = "Cancelled.";
+                    job.CompletedAtUtc = DateTime.UtcNow;
+                }
+            }
+        }
 
         return true;
     }
@@ -151,15 +171,15 @@ public sealed class AiChannelGenerateJobService
             return new
             {
                 channelId,
-                isRunning = false,
+                isRunning = IsQueueBusy(),
                 preview = (AiLineupPreviewResult?)null,
                 applied = false,
                 applyError = (string?)null,
                 error = (string?)null,
-                phase = (string?)null,
-                currentDay = 0,
+                phase = Snapshot.Phase,
+                currentDay = Snapshot.CurrentDay,
                 totalDays = PlayoutScheduleHelper.GetPlayoutDaysToBuild(),
-                channelName = (string?)null,
+                channelName = Snapshot.ChannelName,
                 rebuild
             };
         }
@@ -169,20 +189,367 @@ public sealed class AiChannelGenerateJobService
             return new
             {
                 channelId,
-                isRunning = job.IsRunning,
+                isRunning = job.IsRunning || IsQueueBusy() && Snapshot.ChannelIds.Contains(channelId),
                 startedAt = job.StartedAtUtc,
                 completedAt = job.CompletedAtUtc,
                 preview = job.Preview,
                 applied = job.Applied,
                 applyError = job.ApplyError,
                 error = job.Error,
-                phase = job.Phase,
+                phase = job.Phase ?? Snapshot.Phase,
                 currentDay = job.CurrentDay,
                 totalDays = job.TotalDays,
-                channelName = job.ChannelName,
+                channelName = job.ChannelName ?? Snapshot.ChannelName,
                 rebuild
             };
         }
+    }
+
+    public object BuildQueueStatus()
+    {
+        lock (QueueLock)
+        {
+            return new
+            {
+                isRunning = Snapshot.IsRunning || Pending.Count > 0 || Volatile.Read(ref WorkerActive) > 0,
+                phase = Snapshot.Phase,
+                channelName = Snapshot.ChannelName,
+                currentDay = Snapshot.CurrentDay,
+                totalDays = Snapshot.TotalDays,
+                currentChannel = Snapshot.CurrentChannelIndex,
+                totalChannels = Math.Max(Snapshot.ChannelIds.Count, Pending.Count),
+                queued = Pending.Count,
+                page = Snapshot.Page,
+                totalPages = Snapshot.TotalPages,
+                message = Snapshot.Message,
+                lastError = Snapshot.LastError,
+                wasCancelled = Snapshot.WasCancelled,
+                startedAt = Snapshot.StartedAt,
+                completedAt = Snapshot.CompletedAt
+            };
+        }
+    }
+
+    public object BuildGenerateAllStatus()
+    {
+        lock (QueueLock)
+        {
+            var totalChannels = Math.Max(Snapshot.ChannelIds.Count, Pending.Count);
+            var totalDays = Snapshot.TotalDays > 0 ? Snapshot.TotalDays : PlayoutScheduleHelper.GetPlayoutDaysToBuild();
+            var totalSteps = Math.Max(1, totalChannels * totalDays);
+            var completedSteps = Snapshot.Phase is "done" or "cancelled" or "error"
+                ? totalSteps
+                : Math.Max(0, ((Snapshot.CurrentDay <= 1 ? 0 : Snapshot.CurrentDay - 1) * totalChannels) + Math.Max(0, Snapshot.CurrentChannelIndex - 1));
+            return new
+            {
+                isRunning = Snapshot.IsRunning || Pending.Count > 0 || Volatile.Read(ref WorkerActive) > 0,
+                currentPhase = Snapshot.Phase,
+                currentChannelName = Snapshot.ChannelName,
+                currentDay = Snapshot.CurrentDay,
+                totalDays,
+                totalChannels,
+                completedSteps,
+                totalSteps,
+                queued = Pending.Count,
+                page = Snapshot.Page,
+                totalPages = Snapshot.TotalPages,
+                message = Snapshot.Message,
+                lastError = Snapshot.LastError,
+                wasCancelled = Snapshot.WasCancelled,
+                startedAt = Snapshot.StartedAt,
+                completedAt = Snapshot.CompletedAt,
+                workerActive = Volatile.Read(ref WorkerActive) > 0,
+                lineupsGenerated = totalChannels,
+                playoutDaysBuilt = completedSteps
+            };
+        }
+    }
+
+    private bool IsQueueBusy()
+    {
+        lock (QueueLock)
+        {
+            return Snapshot.IsRunning || Pending.Count > 0;
+        }
+    }
+
+    private void ScheduleDebounce()
+    {
+        DebounceCts?.Cancel();
+        var cts = new CancellationTokenSource();
+        DebounceCts = cts;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2), cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            await RunWorkerAsync();
+        });
+    }
+
+    private async Task RunWorkerAsync()
+    {
+        if (Interlocked.CompareExchange(ref WorkerActive, 1, 0) != 0)
+        {
+            return;
+        }
+
+        List<Guid> batch;
+        lock (QueueLock)
+        {
+            batch = Pending.Distinct().ToList();
+            Pending.Clear();
+            Snapshot = new QueueSnapshot
+            {
+                IsRunning = true,
+                ChannelIds = batch,
+                TotalDays = PlayoutScheduleHelper.GetPlayoutDaysToBuild(),
+                Phase = "starting",
+                StartedAt = DateTime.UtcNow
+            };
+            WorkerCts = new CancellationTokenSource();
+        }
+
+        var cancel = WorkerCts!.Token;
+        try
+        {
+            if (batch.Count == 0)
+            {
+                return;
+            }
+
+            using var primeScope = _scopeFactory.CreateScope();
+            var db = primeScope.ServiceProvider.GetRequiredService<FinTv.Data.FinTvDbContext>();
+            var channels = await db.Channels
+                .Where(c => batch.Contains(c.Id))
+                .OrderBy(c => c.Number)
+                .ToListAsync(cancel);
+            var pool = primeScope.ServiceProvider.GetRequiredService<ChannelCatalogPoolService>();
+            SetSnapshot(s =>
+            {
+                s.Phase = "priming";
+                s.Message = "Paging the live catalog to the AI…";
+            });
+            await pool.PrimeEmptyChannelsAsync(
+                channels,
+                (name, page, total) => SetSnapshot(s =>
+                {
+                    s.Phase = "priming";
+                    s.ChannelName = name;
+                    s.Page = page;
+                    s.TotalPages = total;
+                    s.Message = $"Priming {name}: page {page} of {total}";
+                }),
+                cancel);
+
+            var days = PlayoutScheduleHelper.GetPlayoutDaysToBuild();
+            var roundRobin = channels.Count > 1;
+            foreach (var channel in channels)
+            {
+                cancel.ThrowIfCancellationRequested();
+                SetSnapshot(s =>
+                {
+                    s.Phase = "lineup";
+                    s.ChannelName = channel.Name;
+                    s.Message = $"Generating weekly lineup for {channel.Name}";
+                });
+                using var lineupScope = _scopeFactory.CreateScope();
+                var autoApply = lineupScope.ServiceProvider.GetRequiredService<AiChannelAutoApplyService>();
+                var result = await autoApply.GenerateAndBuildHorizonDaysAsync(
+                    channel.Id,
+                    null,
+                    progress => UpdateJob(channel.Id, progress),
+                    cancel,
+                    skipIfAtHorizon: false,
+                    buildPlayout: !roundRobin).ConfigureAwait(false);
+                UpdateJobResult(channel.Id, result);
+            }
+
+            if (roundRobin)
+            {
+                for (var day = 0; day < days; day++)
+                {
+                    var channelIndex = 0;
+                    foreach (var channel in channels)
+                    {
+                        cancel.ThrowIfCancellationRequested();
+                        channelIndex++;
+                        SetSnapshot(s =>
+                        {
+                            s.Phase = "playout";
+                            s.ChannelName = channel.Name;
+                            s.CurrentDay = day + 1;
+                            s.TotalDays = days;
+                            s.CurrentChannelIndex = channelIndex;
+                            s.Message = $"Playout day {day + 1}/{days} · {channel.Name}";
+                        });
+                        using var dayScope = _scopeFactory.CreateScope();
+                        var autoApply = dayScope.ServiceProvider.GetRequiredService<AiChannelAutoApplyService>();
+                        using (await ChannelApplyLocks.AcquireAsync(channel.Id, cancel))
+                        {
+                            await autoApply.BuildChannelPlayoutDayAsync(channel.Id, day, cancel, interruptStream: day == 0)
+                                .ConfigureAwait(false);
+                        }
+
+                        UpdateJob(channel.Id, new AiChannelBuildProgress
+                        {
+                            CurrentDay = day + 1,
+                            TotalDays = days,
+                            Phase = "playout",
+                            ChannelName = channel.Name
+                        });
+                    }
+                }
+            }
+
+            foreach (var channel in channels)
+            {
+                if (Jobs.TryGetValue(channel.Id, out var job))
+                {
+                    lock (job)
+                    {
+                        job.IsRunning = false;
+                        job.Phase = "done";
+                        job.CompletedAtUtc = DateTime.UtcNow;
+                    }
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            SetSnapshot(s =>
+            {
+                s.WasCancelled = true;
+                s.Phase = "cancelled";
+                s.Message = "Cancelled.";
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AI generate queue failed");
+            SetSnapshot(s =>
+            {
+                s.LastError = ex.Message;
+                s.Phase = "error";
+                s.Message = ex.Message;
+            });
+        }
+        finally
+        {
+            SetSnapshot(s =>
+            {
+                s.IsRunning = false;
+                s.CompletedAt = DateTime.UtcNow;
+                if (s.Phase is "starting" or "lineup" or "playout" or "priming")
+                {
+                    s.Phase = "done";
+                }
+            });
+            Interlocked.Exchange(ref WorkerActive, 0);
+            lock (QueueLock)
+            {
+                Snapshot.ChannelIds = [];
+            }
+
+            bool more;
+            lock (QueueLock)
+            {
+                more = Pending.Count > 0;
+            }
+
+            if (more)
+            {
+                ScheduleDebounce();
+            }
+        }
+    }
+
+    private void UpdateJob(Guid channelId, AiChannelBuildProgress progress)
+    {
+        var job = Jobs.GetOrAdd(channelId, _ => new JobState());
+        lock (job)
+        {
+            job.IsRunning = true;
+            job.Phase = progress.Phase;
+            job.CurrentDay = progress.CurrentDay;
+            job.TotalDays = progress.TotalDays;
+            job.ChannelName = progress.ChannelName;
+            if (progress.Preview is not null)
+            {
+                job.Preview = progress.Preview;
+                job.Applied = true;
+            }
+        }
+    }
+
+    private void UpdateJobResult(Guid channelId, AiAutoApplyChannelResult result)
+    {
+        var job = Jobs.GetOrAdd(channelId, _ => new JobState());
+        lock (job)
+        {
+            if (result.Preview is not null)
+            {
+                job.Preview = result.Preview;
+                job.Applied = true;
+            }
+
+            if (!result.Ok && !result.WasSkipped)
+            {
+                job.ApplyError = result.Error;
+            }
+
+            if (result.WasSkipped)
+            {
+                job.Error = result.Error;
+            }
+
+            job.ChannelName = result.ChannelName;
+        }
+    }
+
+    private static void SetSnapshot(Action<QueueSnapshot> update)
+    {
+        lock (QueueLock)
+        {
+            update(Snapshot);
+        }
+    }
+
+    private sealed class QueueSnapshot
+    {
+        public bool IsRunning { get; set; }
+
+        public List<Guid> ChannelIds { get; set; } = [];
+
+        public string? Phase { get; set; }
+
+        public string? ChannelName { get; set; }
+
+        public string? Message { get; set; }
+
+        public string? LastError { get; set; }
+
+        public int CurrentDay { get; set; }
+
+        public int TotalDays { get; set; }
+
+        public int CurrentChannelIndex { get; set; }
+
+        public int Page { get; set; }
+
+        public int TotalPages { get; set; }
+
+        public bool WasCancelled { get; set; }
+
+        public DateTime? StartedAt { get; set; }
+
+        public DateTime? CompletedAt { get; set; }
     }
 
     private sealed class JobState

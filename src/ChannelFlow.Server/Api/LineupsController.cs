@@ -317,6 +317,27 @@ public class LineupsController : ControllerBase
         return Accepted(new { queued = true, channelId, channelName = channel.Name });
     }
 
+    /// <summary>
+    /// Deletes this channel's entire Live TV playout (including what's on now). Lineups stay.
+    /// </summary>
+    [HttpPost("{channelId:guid}/clear-playout")]
+    public async Task<IActionResult> ClearPlayout(Guid channelId, CancellationToken cancellationToken)
+    {
+        var channel = await _channels.GetByIdAsync(channelId, cancellationToken);
+        if (channel is null)
+        {
+            return NotFound();
+        }
+
+        var cleared = await _playoutBuilder.ClearChannelGuideDataAsync(channelId, cancellationToken);
+        if (cleared is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(new { cleared = cleared.Value, channelName = channel.Name });
+    }
+
     [HttpGet("{channelId:guid}/playout-horizon")]
     public async Task<ActionResult<object>> GetPlayoutHorizon(Guid channelId, CancellationToken cancellationToken)
     {

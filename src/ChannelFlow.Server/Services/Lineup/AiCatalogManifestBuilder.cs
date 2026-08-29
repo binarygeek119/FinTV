@@ -15,9 +15,20 @@ public class AiCatalogManifestBuilder
         _catalog = catalog;
     }
 
-    public AiCatalogManifest Build(Channel channel)
+    public AiCatalogManifest Build(Channel channel, IReadOnlyList<AiCatalogEntry>? pool = null)
     {
         var catalogMode = JellyfinCatalogService.ResolveCatalogMode(channel);
+        if (pool is { Count: > 0 })
+        {
+            return new AiCatalogManifest
+            {
+                CatalogMode = catalogMode,
+                TotalAvailable = pool.Count,
+                IncludedInPrompt = pool.Count,
+                TagMatchedCount = pool.Count,
+                Catalog = pool.ToList()
+            };
+        }
         var mapMode = PastTenseNewsCatalog.IsPastTenseNewsChannel(channel)
             ? ChannelCatalogMode.Mixed
             : catalogMode;
@@ -81,7 +92,9 @@ public class AiCatalogManifestBuilder
                 Genres = series.Genres?.ToList() ?? new List<string>(),
                 Tags = series.Tags?.ToList() ?? new List<string>(),
                 Plot = TruncatePlot(series.Overview),
-                OfficialRating = NormalizeOfficialRating(series.OfficialRating)
+                OfficialRating = NormalizeOfficialRating(series.OfficialRating),
+                Studios = series.Studios?.ToList() ?? new List<string>(),
+                LibraryName = series.LibraryName
             };
         }
 
@@ -113,7 +126,9 @@ public class AiCatalogManifestBuilder
                 Genres = movie.Genres?.ToList() ?? new List<string>(),
                 Tags = movie.Tags?.ToList() ?? new List<string>(),
                 Plot = TruncatePlot(movie.Overview),
-                OfficialRating = NormalizeOfficialRating(movie.OfficialRating)
+                OfficialRating = NormalizeOfficialRating(movie.OfficialRating),
+                Studios = movie.Studios?.ToList() ?? new List<string>(),
+                LibraryName = movie.LibraryName
             };
         }
 
@@ -234,4 +249,8 @@ public class AiCatalogEntry
     public string? Plot { get; set; }
 
     public string? OfficialRating { get; set; }
+
+    public List<string> Studios { get; set; } = new();
+
+    public string? LibraryName { get; set; }
 }

@@ -16,12 +16,18 @@ public sealed class CatalogCleanupService
 
     private readonly FinTvDbContext _db;
     private readonly PathRemapService _remap;
+    private readonly ChannelCatalogPoolService _pool;
     private readonly ILogger<CatalogCleanupService> _logger;
 
-    public CatalogCleanupService(FinTvDbContext db, PathRemapService remap, ILogger<CatalogCleanupService> logger)
+    public CatalogCleanupService(
+        FinTvDbContext db,
+        PathRemapService remap,
+        ChannelCatalogPoolService pool,
+        ILogger<CatalogCleanupService> logger)
     {
         _db = db;
         _remap = remap;
+        _pool = pool;
         _logger = logger;
     }
 
@@ -119,6 +125,7 @@ public sealed class CatalogCleanupService
             .ExecuteUpdateAsync(
                 setters => setters.SetProperty(row => row.IsMissing, true).SetProperty(row => row.MissingSince, now),
                 cancellationToken);
+        await _pool.PruneMissingAsync(cancellationToken);
         return marked;
     }
 
@@ -181,6 +188,7 @@ public sealed class CatalogCleanupService
                 : 0;
             var scan = await ScanLocalFilesAsync(cancellationToken, nested: true);
             var removed = await RemoveExpiredAsync(settings.GracePeriodDays, cancellationToken);
+            await _pool.PruneMissingAsync(cancellationToken);
             var stillMissing = await CountMissingAsync(cancellationToken);
 
             state.MarkedMissing = marked + scan.MarkedMissing;
@@ -444,6 +452,7 @@ public sealed class CatalogCleanupService
             .ExecuteUpdateAsync(
                 setters => setters.SetProperty(row => row.IsMissing, true).SetProperty(row => row.MissingSince, now),
                 cancellationToken);
+        await _pool.PruneMissingAsync(cancellationToken);
         return marked;
     }
 

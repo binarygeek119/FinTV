@@ -736,6 +736,12 @@ public class LogoSetService
     private static IEnumerable<string> RelativePathCandidates(string relativePath)
     {
         yield return relativePath;
+        var underscored = relativePath.Replace(' ', '_');
+        if (!string.Equals(underscored, relativePath, StringComparison.Ordinal))
+        {
+            yield return underscored;
+        }
+
         if (relativePath.StartsWith("The Holiday Channel/", StringComparison.OrdinalIgnoreCase))
         {
             yield return "The_Holiday_Channel/" + relativePath["The Holiday Channel/".Length..];

@@ -262,6 +262,10 @@ public class StreamService : IDisposable
                     {
                         await StreamBundledVideoAsync(channel, current, ffmpegPath, output, linked.Token);
                     }
+                    else if (current.IsVirtual && current.VirtualSource == VirtualContentSource.YouTubeMusicVideo)
+                    {
+                        await StreamYouTubeMusicVideoAsync(channel, current, youtubeCommercials, ffmpegPath, output, linked.Token);
+                    }
                     else if (current.CommercialId.HasValue)
                     {
                         await StreamCommercialItemAsync(channel, current, catalog, youtubeCommercials, ffmpegPath, output, linked.Token);
@@ -342,7 +346,8 @@ public class StreamService : IDisposable
         if (item?.CommercialId is not null
             || (item?.IsVirtual == true
                 && (item.VirtualSource == VirtualContentSource.LogoBumper
-                    || item.VirtualSource == VirtualContentSource.BundledVideo)))
+                    || item.VirtualSource == VirtualContentSource.BundledVideo
+                    || item.VirtualSource == VirtualContentSource.YouTubeMusicVideo)))
         {
             await Task.Delay(TimeSpan.FromMilliseconds(200), cancellationToken);
             return;
@@ -721,6 +726,32 @@ public class StreamService : IDisposable
             LogoBumperService.ResolveToonTakeoverPath(),
             "Slappy's Toon Takeover bumper was not found.",
             durationOverride);
+    }
+
+    private async Task StreamYouTubeMusicVideoAsync(
+        Channel channel,
+        PlayoutItem item,
+        YouTubeCommercialStreamService youtubeCommercials,
+        string ffmpegPath,
+        Stream output,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(item.ExternalUrl))
+        {
+            throw new InvalidOperationException($"YouTube music video {item.Title} has no URL.");
+        }
+
+        YouTubeUrlHelper.TryGetVideoId(item.ExternalUrl, out var videoId);
+        var duration = Math.Max(1, (item.Finish - DateTime.UtcNow).TotalSeconds);
+        await youtubeCommercials.StreamUrlAsync(
+            channel,
+            item.ExternalUrl,
+            videoId,
+            _ffmpeg,
+            ffmpegPath,
+            duration,
+            output,
+            cancellationToken);
     }
 
     private async Task StreamBundledVideoAsync(

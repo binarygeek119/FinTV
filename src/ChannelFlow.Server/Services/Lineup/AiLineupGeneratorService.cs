@@ -19,6 +19,8 @@ public class AiLineupGeneratorService
     private readonly JellyfinCatalogService _catalog;
     private readonly LineupService _lineups;
     private readonly HolidayChannelService _holidays;
+    private readonly ChannelCatalogPoolService _pool;
+    private readonly ChannelPrimetimeService _primetime;
     private readonly ILogger<AiLineupGeneratorService> _logger;
 
     public AiLineupGeneratorService(
@@ -28,6 +30,8 @@ public class AiLineupGeneratorService
         JellyfinCatalogService catalog,
         LineupService lineups,
         HolidayChannelService holidays,
+        ChannelCatalogPoolService pool,
+        ChannelPrimetimeService primetime,
         ILogger<AiLineupGeneratorService> logger)
     {
         _db = db;
@@ -36,6 +40,8 @@ public class AiLineupGeneratorService
         _catalog = catalog;
         _lineups = lineups;
         _holidays = holidays;
+        _pool = pool;
+        _primetime = primetime;
         _logger = logger;
     }
 
@@ -64,7 +70,20 @@ public class AiLineupGeneratorService
             }
         }
 
-        var manifest = _manifestBuilder.Build(channel);
+        if (channel.ContentType == ChannelContentType.MusicVideo)
+        {
+            var mvSlots = NetworkSchedulePlanner.CreateFilterSlots(channel.FilterJson);
+            return BuildPreview(
+                channel,
+                mvSlots,
+                _manifestBuilder.Build(channel, []),
+                providerOverride ?? FinTvRuntime.Current?.Configuration.Ai.DefaultProvider ?? AiProvider.OpenAi,
+                AiPlayoutTemplates.Resolve(channel),
+                NetworkSchedulePlanner.CloneDailyToWeek(mvSlots));
+        }
+
+        var pool = await _pool.LoadPoolEntriesAsync(channel, cancellationToken);
+        var manifest = _manifestBuilder.Build(channel, pool);
         FinTvDebugLog.Ai(
             _logger,
             "Catalog manifest for {Channel}: mode={Mode}, tagMatched={TagMatched}, available={Available}, inPrompt={InPrompt}",
@@ -173,7 +192,17 @@ public class AiLineupGeneratorService
                 channel.ContentType,
                 playoutTemplate,
                 libraryTag);
-            NetworkSchedulePlanner.SprinkleMovies(weekly, manifest.Catalog, catalogMode);
+            NetworkSchedulePlanner.SprinkleMovies(weekly, manifest.Catalog, catalogMode, libraryTag);
+            NetworkSchedulePlanner.SprinkleMiniMarathons(weekly, manifest.Catalog, playoutTemplate, libraryTag);
+            IReadOnlyList<ChannelPrimetimeSlot> assignedPrime = [];
+            HashSet<Guid>? primeExclude = null;
+            if (ChannelAiRules.IsPrimetimeAssignmentChannel(channel))
+            {
+                assignedPrime = await _primetime.LoadAsync(channel.Id, cancellationToken);
+                primeExclude = ChannelPrimetimeService.ExclusiveSeriesIds(assignedPrime);
+                ChannelPrimetimeService.StampWeekly(weekly, assignedPrime);
+            }
+
             foreach (var day in weekly.Keys.ToList())
             {
                 NetworkSchedulePlanner.FillRemainingGaps(
@@ -183,9 +212,15 @@ public class AiLineupGeneratorService
                     channel.ContentType,
                     playoutTemplate,
                     libraryTag,
-                    day);
+                    day,
+                    primeExclude);
                 NetworkSchedulePlanner.FillEmptySlotsWithChannelFilter(weekly[day], channel.FilterJson);
                 weekly[day] = LineupSlotSpans.Compact(weekly[day]);
+            }
+
+            if (assignedPrime.Count > 0)
+            {
+                ChannelPrimetimeService.StampWeekly(weekly, assignedPrime);
             }
 
             slots = weekly.GetValueOrDefault(DayOfWeek.Monday) ?? slots;
@@ -996,7 +1031,7 @@ public class AiLineupGeneratorService
             Rules:
             - Identify catalog rows with n (preferred), jellyfinItemId, or exact title. Do not invent GUIDs.
             - Keep shows in the same time slot across days/weeks unless it is a weekly special (Monday-only, Friday movie, theme day).
-            - Typical series blocks are 1-2 episodes inside a single daypart. Include at most one theme-day mini-marathon of 2-6 episodes per week.
+            - Typical series blocks are 1-4 episodes inside a single daypart. Include a few mini-marathons of 4-6 episodes during the week (about three: e.g. Wednesday, Saturday, Sunday). Do not play the same series over and over the same day.
             - Fill all 48 half-hour slots (0-47). Overnight may reuse daytime or primetime series, or use rerun slots.
             """ + rerunExample + """
             - Schedule like a real TV network using the playout template dayparts.
@@ -1035,7 +1070,7 @@ public class AiLineupGeneratorService
 
         return """
             Prefer `blocks` for a weekly TV grid. ChannelFlow expands this to 14 days and plays episodes in order (S01E01 onward, continuing from the last generated episode).
-            - episodeBlock: consecutive 30-minute episodes of the same series (usually 2-4; a theme day may use 2-6).
+            - episodeBlock: consecutive 30-minute episodes of the same series (usually 1-4; a few times a week use 4-6 for a mini-marathon). Do not dump one series across the whole day.
             - days: weekdays, daily, weekends, or a list such as ["mon","tue","wed","thu","fri"] or ["fri"].
             - If Show X is on at 11:00 every Monday, list only Monday for that block. If Show Y is on at noon every day, use daily.
             """ + overnight + clock;
@@ -1123,6 +1158,9 @@ public class AiLineupGeneratorService
                 },
             daypartGuide,
             fineTune = channel.AiFineTunePrompt ?? string.Empty,
+            assignedPrimetime = ChannelAiRules.IsPrimetimeAssignmentChannel(channel)
+                ? "User assigns 6:00-9:00pm (slots 36-41). Each of those half-hours may list several series; pick one per slot. Do not schedule those series anywhere else that day. Early Bird 2:00-5:00am (slots 4-9) is a rerun of last night's 6:00-9:00pm episodes in order. Fill primetime first, then the rest of the day. 9:00-10:00pm is not assigned primetime."
+                : null,
             catalog = manifest.Catalog.Select((c, index) => new
             {
                 n = index + 1,
@@ -1132,7 +1170,10 @@ public class AiLineupGeneratorService
                 year = c.Year,
                 runtimeMinutes = c.RuntimeMinutes,
                 genres = c.Genres,
-                officialRating = c.OfficialRating
+                officialRating = c.OfficialRating,
+                plot = c.Plot,
+                studios = c.Studios,
+                libraryName = c.LibraryName
             }),
             totalAvailable = manifest.TotalAvailable
         };

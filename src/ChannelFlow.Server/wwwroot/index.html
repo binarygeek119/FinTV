@@ -13,7 +13,7 @@
   <link rel="manifest" href="site.webmanifest?v=3d08b8f1">
   <meta name="theme-color" content="#101010">
   <link rel="stylesheet" href="css/legacy-admin.css">
-  <link rel="stylesheet" href="css/app.css?v=assets28">
+  <link rel="stylesheet" href="css/app.css?v=assets31">
 </head>
 <body>
   <div id="login-screen" class="auth-screen hidden">
@@ -347,13 +347,34 @@
             </section>
 
             <section id="tab-list" class="tab-panel hidden" hidden>
-                <div class="card section-card">
-                    <div class="section-header">
-                        <h3>ChannelFlow Lists</h3>
-                        <button type="button" id="btn-add-list" class="raised button-submit emby-button">Add from Jellyfin</button>
+                <nav class="inner-tabs" id="list-inner-tabs" role="tablist" aria-label="List pages">
+                    <button type="button" class="inner-tab active" data-list-page="lists" role="tab" aria-selected="true">Lists</button>
+                    <button type="button" class="inner-tab" data-list-page="artists" role="tab" aria-selected="false">Music video artists</button>
+                    <button type="button" class="inner-tab" data-list-page="youtube" role="tab" aria-selected="false">Import music video playlist</button>
+                </nav>
+                <div id="list-page-lists" class="list-page">
+                    <div class="card section-card">
+                        <div class="section-header">
+                            <h3>ChannelFlow Lists</h3>
+                            <button type="button" id="btn-add-list" class="raised button-submit emby-button">Add from Jellyfin</button>
+                        </div>
+                        <p class="hint">Register Jellyfin playlists as ChannelFlow lists. Use them in Lineups, Overrides, Special Presentations, and AI slot edits.</p>
+                        <div id="lists-table" class="data-table-wrap"></div>
                     </div>
-                    <p class="hint">Register Jellyfin playlists as ChannelFlow lists. Use them in Lineups, Overrides, Special Presentations, and AI slot edits.</p>
-                    <div id="lists-table" class="data-table-wrap"></div>
+                </div>
+                <div id="list-page-artists" class="list-page hidden" hidden>
+                    <div class="card section-card">
+                        <h3>Music video artists</h3>
+                        <p class="hint">Add artist names for The Parody Channel and Rap On Tap. HeadPhone Jack with an empty list plays every music-video artist not on those two lists. If you add names to HeadPhone Jack, it uses those instead.</p>
+                        <div id="mv-artists-panels"></div>
+                    </div>
+                </div>
+                <div id="list-page-youtube" class="list-page hidden" hidden>
+                    <div class="card section-card">
+                        <h3>Import music video playlist</h3>
+                        <p class="hint">Paste a YouTube video or playlist URL per channel. Lookup and playback use the cookies.txt and SponsorBlock settings from the YouTube tab.</p>
+                        <div id="mv-youtube-panels"></div>
+                    </div>
                 </div>
             </section>
 
@@ -830,16 +851,22 @@
                     <p class="hint">At local midnight, ChannelFlow-Server pulls the real forecast from the Weather tab source (NOAA or Open-Meteo) for each weather channel location and writes that day's TV guide titles and descriptions. If AI is enabled, it turns those facts into cable-guide copy; if not, the live temperatures and conditions go in the guide as-is. Click <strong>Generate Weather Guide Cache</strong> to refresh today now. EPG reads the cache only.</p>
                     <p id="ai-weather-guide-cache-status" class="hint">Loading weather guide cache status…</p>
                 </div>
+                <nav class="inner-tabs" id="ai-inner-tabs" role="tablist" aria-label="AI pages">
+                    <button type="button" class="inner-tab active" data-ai-page="lineups" role="tab" aria-selected="true">Channel lineups</button>
+                    <button type="button" class="inner-tab" data-ai-page="primetime" role="tab" aria-selected="false">Primetime</button>
+                </nav>
+                <div id="ai-page-lineups" class="ai-page">
                 <div class="card section-card">
                     <div class="section-header-row">
                         <h3>Channel lineups</h3>
                         <div class="actions section-header-actions">
                             <button type="button" id="btn-ai-generate-all" class="emby-button">Generate All Channels</button>
+                            <button type="button" id="btn-ai-clear-all-pools" class="emby-button">Clear all AI pools</button>
                             <button type="button" id="btn-ai-cancel-generate-all" class="emby-button hidden">Cancel Generate All</button>
                         </div>
                     </div>
                     <p id="ai-generate-all-status" class="hint hidden"></p>
-                    <p class="hint">Pick a <strong>playout template</strong> to structure dayparts (morning cartoons, primetime, etc.). Channel rules define content scope; fine-tune adds extra instructions. <strong>Generate</strong> writes the weekly lineup and fills the Live TV guide up to 14 days, one day at a time. If a channel already has 14 days, Generate leaves that playout in place. At local midnight, when today ends, only the next day (day 15 of the rolling window) is built. <strong>Generate All</strong> skips channels that already have 14 days and moves on.</p>
+                    <p class="hint">Pick a <strong>playout template</strong> to structure dayparts. Channel rules define content scope; fine-tune adds extra instructions. <strong>Generate</strong> pages the live catalog into an AI pool (unless one is saved), writes the weekly lineup, and fills a 14-day guide. Multiple Generates stack; two or more channels build day 1 for every channel, then day 2. Short cartoons pack into one half-hour listing. <strong>Clear AI pool</strong> empties saved picks so the next Generate re-pages the catalog. <strong>Clear playout</strong> empties that channel’s Live TV guide (including what’s on now); the lineup and primetime assignments stay, and the channel goes Off Air until Generate or Rebuild.</p>
                     <div id="ai-channels-list" class="ai-channels-list"></div>
                 </div>
                 <div id="ai-preview-panel" class="card section-card hidden">
@@ -849,6 +876,34 @@
                     <div class="actions">
                         <button type="button" id="btn-ai-apply" class="raised button-submit emby-button">Apply Lineup + Rebuild Guide</button>
                         <button type="button" id="btn-ai-discard" class="emby-button">Discard</button>
+                    </div>
+                </div>
+                </div>
+                <div id="ai-page-primetime" class="ai-page hidden" hidden>
+                    <div class="card section-card">
+                        <div class="section-header-row">
+                            <h3>Primetime</h3>
+                            <div class="actions section-header-actions">
+                                <button type="button" id="btn-ai-primetime-save" class="raised button-submit emby-button">Save primetime</button>
+                            </div>
+                        </div>
+                        <p class="hint">Prime-TV channels only. Assign one or more series to each half-hour from <strong>6:00 PM to 9:00 PM</strong>. Generate fills those slots first, keeps those shows off the rest of the day, and encores last night’s prime overnight <strong>2:00–5:00 AM</strong>.</p>
+                        <label class="field">
+                            <span>Channel</span>
+                            <select id="ai-primetime-channel" class="emby-select"></select>
+                        </label>
+                        <p id="ai-primetime-empty" class="hint hidden">No prime-TV channels. FlashBack, Open Swim, Retro, Reality, Crime, Comedy, Game Shows, and Education use this grid.</p>
+                        <div id="ai-primetime-editor" class="primetime-layout hidden">
+                            <div>
+                                <label class="field">
+                                    <span>Shows that match this channel</span>
+                                    <input id="ai-primetime-search" type="search" class="emby-input" placeholder="Search shows" autocomplete="off">
+                                </label>
+                                <p class="hint">Click a show to add it to the selected timeslot. A slot can hold more than one show for AI to pick from.</p>
+                                <div id="ai-primetime-shows" class="primetime-show-list"></div>
+                            </div>
+                            <div id="ai-primetime-slots" class="primetime-slots"></div>
+                        </div>
                     </div>
                 </div>
             </section>
@@ -1436,7 +1491,7 @@
     <p class="catalog-sync-meta" id="catalog-sync-meta"></p>
   </div>
   </div>
-  <script src="js/app.js?v=assets28"></script>
+  <script src="js/app.js?v=assets31"></script>
   <script src="js/shell.js?v=library5"></script>
 </body>
 </html>

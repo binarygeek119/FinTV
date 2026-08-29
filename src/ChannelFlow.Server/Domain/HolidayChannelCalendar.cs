@@ -10,7 +10,7 @@ public static class HolidayChannelCalendar
 
     public const string OffSeasonLogoRelativePath = "The_Holiday_Channel/The Holiday Channel-plane.png";
 
-    public const string OffSeasonVideoRelativePath = "The_Holiday_Channel/The Holiday Channel.mkv";
+    public const string OffSeasonVideoRelativePath = "The_Holiday_Channel/The_Holiday_Channel.mkv";
 
     public const string OffSeasonMediaTitle = "The Holiday Channel";
 
@@ -23,7 +23,7 @@ public static class HolidayChannelCalendar
             "Valentine's Day",
             observanceMonth: 2,
             observanceDay: 14,
-            daysBefore: 30,
+            daysBefore: 25,
             logoPath: "The_Holiday_Channel/The Holiday Channel-Valentine's Day.png",
             matchKeywords: ["valentine", "valentines", "sweetheart", "cupid"],
             seasonMonths: [2]),
@@ -40,8 +40,7 @@ public static class HolidayChannelCalendar
             "Independence Day",
             observanceMonth: 7,
             observanceDay: 4,
-            daysBefore: 30,
-            bleedIntoPriorMonth: true,
+            daysBefore: 9,
             logoPath: "The_Holiday_Channel/The Holiday Channel - Independence Day.png",
             matchKeywords: ["independence day", "july 4", "july fourth", "fourth of july", "4th of july", "fireworks", "patriotic"],
             seasonMonths: [6, 7]),
@@ -69,8 +68,7 @@ public static class HolidayChannelCalendar
             "Christmas",
             observanceMonth: 12,
             observanceDay: 25,
-            daysBefore: 54,
-            bleedIntoPriorMonth: true,
+            daysBefore: 24,
             logoPath: "The_Holiday_Channel/christmas-marry.png",
             matchKeywords: ["christmas", "xmas", "santa", "nutcracker", "grinch", "snowman", "krampus", "noel", "nativity"],
             seasonMonths: [11, 12])

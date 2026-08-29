@@ -13,7 +13,7 @@ public static class ChannelAiRules
     private static readonly Dictionary<string, ChannelAiRuleDefinition> Rules = new(StringComparer.OrdinalIgnoreCase)
     {
         ["channelflow-flashback"] = new(
-            "TV series and movies released from 1970 through 2010 only. For TV series, eligibility uses the first episode premiere year in that range. Exclude crime, cops, and game shows.",
+            "TV series and movies released from 1970 through 2009 only (1970s–2000s). For TV series, eligibility uses the first episode premiere year in that range. Exclude crime, cops, game shows, and Open Swim kids cartoons (Scooby-Doo, Nick, Cartoon Network, Saturday-morning Hanna-Barbera).",
             ChannelCatalogMode.Mixed,
             BuildFlashBackDaypartGuide()),
         ["channelflow-retro"] = new(
@@ -35,12 +35,14 @@ public static class ChannelAiRules
             ChannelCatalogMode.Mixed,
             BuildCopsAndRobbersDaypartGuide()),
         ["channelflow-comedy"] = new(
-            "Comedy themed TV shows and movies. Match Comedy genre or comedy keywords in title, plot, or tags. Friday 5:00-8:00pm is Slappy's Toon Takeover (kid cartoons only).",
+            "Fox network clone: comedy sitcoms, sketch, and animation. Match Comedy genre or comedy keywords in title, plot, or tags. Friday 5:00-8:00pm is Slappy's Toon Takeover (kid cartoons only).",
             ChannelCatalogMode.Mixed,
             BuildSlappyDaypartGuide()),
-        ["channelflow-game-shows"] = new("Game shows only.", ChannelCatalogMode.Mixed),
+        ["channelflow-game-shows"] = new(
+            "Game shows only. Match Game Show genre, plot, or networks such as Game Show Network.",
+            ChannelCatalogMode.Mixed),
         ["channelflow-education"] = new(
-            "Educational TV and documentaries (History, Discovery, science, nature).",
+            "Discovery / History Channel clone: educational TV and documentaries. Match plot, genres, or networks (Discovery, History, National Geographic).",
             ChannelCatalogMode.Mixed,
             BuildGetLearnededDaypartGuide()),
         ["channelflow-youtube"] = new("Only content from the Jellyfin TV library named YouTube.", ChannelCatalogMode.TvOnly),
@@ -50,7 +52,9 @@ public static class ChannelAiRules
         ["channelflow-hero"] = new(
             "Hero-themed movies and TV about anyone who saves or protects people — superheroes, first responders, doctors, rescuers, soldiers, and everyday heroes. Prefer uplifting stories of courage and rescue. Match relevant genres or save/rescue/hero keywords in title, plot, and tags.",
             ChannelCatalogMode.Mixed),
-        ["channelflow-funny"] = new("Comedian-led movies and TV.", ChannelCatalogMode.Mixed),
+        ["channelflow-funny"] = new(
+            "Stand-up comedian movies and TV from the Stand-Up Comedies Movies and Stand-Up Comedies TV Shows libraries.",
+            ChannelCatalogMode.Mixed),
         ["channelflow-holiday"] = new(
             "Seasonal holiday channel. Only play TV and movies themed to the active holiday window (up to 30 days before the observance). Match content using Jellyfin tags, plot/overview text, title keywords, and release/premiere month. When no holiday window is active the channel is off-season. Build cable-style marathons that loop smartly.",
             ChannelCatalogMode.Mixed),
@@ -64,7 +68,7 @@ public static class ChannelAiRules
         ["channelflow-flashback"] = new ChannelCatalogYearConstraints
         {
             MinYear = 1970,
-            MaxYear = 2010,
+            MaxYear = 2009,
             UseFirstEpisodeYearForSeries = true
         },
         ["channelflow-retro"] = new ChannelCatalogYearConstraints
@@ -75,11 +79,33 @@ public static class ChannelAiRules
         }
     };
 
+    private static readonly string[] OpenSwimKidsTitleKeywords =
+    [
+        "spongebob", "rugrats", "doug", "hey arnold", "catdog", "rocko's modern life", "fairly oddparents",
+        "avatar", "legend of korra", "invader zim", "drake and josh", "icarly", "victorious", "blue's clues",
+        "dora the explorer", "paw patrol", "kim possible", "phineas and ferb", "gravity falls", "ducktales",
+        "darkwing duck", "goof troop", "recess", "lizzie mcguire", "suite life", "mickey mouse", "winnie the pooh",
+        "dexter's laboratory", "powerpuff girls", "cow and chicken", "ed edd n eddy", "johnny bravo",
+        "courage the cowardly dog", "adventure time", "steven universe", "amazing world of gumball",
+        "teen titans", "samurai jack", "codename kids next door", "foster's home", "ben 10", "animaniacs",
+        "tiny toon", "scooby-doo", "looney tunes", "sesame street", "mister rogers", "mr. rogers", "peppa pig",
+        "clarissa", "all that", "kenan and kel", "goosebumps", "mighty morphin", "ninja turtles"
+    ];
+
     private static readonly Dictionary<string, ChannelCatalogGenreConstraints> GenreConstraints = new(StringComparer.OrdinalIgnoreCase)
     {
         ["channelflow-flashback"] = new ChannelCatalogGenreConstraints
         {
-            ExcludedGenreKeywords = new[] { "Crime", "Cop", "Police", "Detective", "Game Show", "Game-Show", "GameShow" }
+            ExcludedGenreKeywords = new[]
+            {
+                "Crime", "Cop", "Police", "Detective", "Game Show", "Game-Show", "GameShow",
+                "Children", "Kids", "Preschool"
+            },
+            ExcludedPlotKeywords = OpenSwimKidsTitleKeywords.Concat(
+            [
+                "hanna-barbera", "hanna barbera", "scrappy-doo", "scooby doo", "scooby-doo",
+                "13 ghosts of scooby", "nickelodeon", "cartoon network", "fox kids", "kids wb", "kids' wb"
+            ]).ToArray()
         },
         ["channelflow-retro"] = new ChannelCatalogGenreConstraints
         {
@@ -88,19 +114,15 @@ public static class ChannelAiRules
         ["channelflow-open-swim"] = new ChannelCatalogGenreConstraints
         {
             RequiredGenreKeywords = new[] { "Kids", "Family", "Children", "Animation", "Animated", "Cartoon", "Preschool" },
-            RequiredPlotKeywords = new[]
-            {
+            RequiredPlotKeywords = OpenSwimKidsTitleKeywords.Concat(
+            [
                 "nickelodeon", "nicktoons", "nick jr", "disney", "disney channel", "disney junior", "playhouse disney",
-                "cartoon network", "fox kids", "fox box", "kids wb", "wb kids", "saturday morning", "after school",
-                "spongebob", "rugrats", "doug", "hey arnold", "catdog", "rocko's modern life", "fairly oddparents",
-                "avatar", "legend of korra", "invader zim", "drake and josh", "icarly", "victorious", "blue's clues",
-                "dora the explorer", "paw patrol", "kim possible", "phineas and ferb", "gravity falls", "ducktales",
-                "darkwing duck", "goof troop", "recess", "lizzie mcguire", "suite life", "mickey mouse", "winnie the pooh",
-                "dexter's laboratory", "powerpuff girls", "cow and chicken", "ed edd n eddy", "johnny bravo",
-                "courage the cowardly dog", "adventure time", "steven universe", "amazing world of gumball",
-                "teen titans", "samurai jack", "codename kids next door", "foster's home", "ben 10", "animaniacs",
-                "tiny toon", "scooby-doo", "looney tunes", "sesame street", "mister rogers", "mr. rogers", "peppa pig",
-                "clarissa", "all that", "kenan and kel", "goosebumps", "mighty morphin", "ninja turtles"
+                "cartoon network", "fox kids", "fox box", "kids wb", "wb kids", "saturday morning", "after school"
+            ]).ToArray(),
+            RequiredStudioKeywords = new[]
+            {
+                "Nickelodeon", "Nick", "Disney", "Disney Channel", "Cartoon Network",
+                "Fox Kids", "Kids' WB", "Kids WB", "Warner Bros. Animation"
             },
             ExcludedGenreKeywords = new[] { "Horror", "Thriller", "Crime", "War" }
         },
@@ -160,6 +182,7 @@ public static class ChannelAiRules
         },
         ["channelflow-game-shows"] = new ChannelCatalogGenreConstraints
         {
+            RequiredStudioKeywords = new[] { "Game Show Network", "GSN" },
             RequiredGenreKeywords = new[] { "Game Show", "Game-Show", "GameShow", "Quiz", "Trivia" },
             RequiredPlotKeywords = new[]
             {
@@ -171,6 +194,7 @@ public static class ChannelAiRules
         },
         ["channelflow-education"] = new ChannelCatalogGenreConstraints
         {
+            RequiredStudioKeywords = new[] { "Discovery", "History", "History Channel", "National Geographic", "Nat Geo" },
             RequiredGenreKeywords = new[] { "Documentary", "Educational", "Education", "History", "Science", "Nature" },
             RequiredPlotKeywords = new[]
             {
@@ -226,6 +250,11 @@ public static class ChannelAiRules
         ["channelflow-youtube"] = new ChannelCatalogLibraryConstraints
         {
             LibraryName = "YouTube"
+        },
+        ["channelflow-funny"] = new ChannelCatalogLibraryConstraints
+        {
+            LibraryName = "Stand-Up Comedies Movies",
+            AlternateLibraryNames = ["Stand-Up Comedies TV Shows", "Stand-Up Comedies Movie", "Stand Up Comedies Movies"]
         }
     };
 
@@ -258,7 +287,7 @@ public static class ChannelAiRules
         ("Mid-Day", "(TV-PG / PG) Original curated 90s soap-opera arcs."),
         ("After School", "(TV-G / PG) 90s/00s golden-era animation."),
         ("Teen Hour", "(TV-14 / PG-13) 90s teen dramas and coming-of-age movies."),
-        ("Prime Time", "(TV-MA / R) Blockbuster movies (1970-2000)."),
+        ("Prime Time", "(TV-MA / R) Blockbuster movies (1970-2009)."),
         ("Late Night", "(TV-MA / UR) Uncut cult classics, lost media, and director's cuts."));
 
     private static string BuildRetroDaypartGuide() => NetworkDaypartGuide(
@@ -545,6 +574,36 @@ public static class ChannelAiRules
         => FilterDefinition.PresetIdsEqual(libraryTag, "channelflow-news")
             || FilterDefinition.PresetIdsEqual(libraryTag, "channelflow-live-news");
 
+    public static bool IsPrimeTvLibraryTag(string? libraryTag)
+        => FilterDefinition.PresetIdsEqual(libraryTag, "channelflow-flashback")
+            || FilterDefinition.PresetIdsEqual(libraryTag, "channelflow-retro")
+            || FilterDefinition.PresetIdsEqual(libraryTag, "channelflow-open-swim")
+            || FilterDefinition.PresetIdsEqual(libraryTag, "channelflow-reality")
+            || FilterDefinition.PresetIdsEqual(libraryTag, "channelflow-crime")
+            || FilterDefinition.PresetIdsEqual(libraryTag, "channelflow-comedy")
+            || FilterDefinition.PresetIdsEqual(libraryTag, "channelflow-game-shows")
+            || FilterDefinition.PresetIdsEqual(libraryTag, "channelflow-education")
+            || FilterDefinition.PresetIdsEqual(libraryTag, "channelflow-youtube")
+            || FilterDefinition.PresetIdsEqual(libraryTag, "channelflow-past-tense-news");
+
+    /// <summary>
+    /// Prime-TV channels that use the 6–9pm assignment grid (not YouTube or Past Tense News).
+    /// </summary>
+    public static bool IsPrimetimeAssignmentLibraryTag(string? libraryTag)
+        => IsPrimeTvLibraryTag(libraryTag)
+            && !FilterDefinition.PresetIdsEqual(libraryTag, "channelflow-youtube")
+            && !FilterDefinition.PresetIdsEqual(libraryTag, "channelflow-past-tense-news");
+
+    public static bool IsPrimetimeAssignmentChannel(Channel channel)
+        => channel.ContentType == ChannelContentType.TvShow
+            && IsPrimetimeAssignmentLibraryTag(ExtractLibraryTag(channel.FilterJson));
+
+    public static bool IsMovieNetworkTag(string? libraryTag)
+        => FilterDefinition.PresetIdsEqual(libraryTag, "channelflow-creature")
+            || FilterDefinition.PresetIdsEqual(libraryTag, "channelflow-hero")
+            || FilterDefinition.PresetIdsEqual(libraryTag, "channelflow-funny")
+            || FilterDefinition.PresetIdsEqual(libraryTag, "channelflow-holiday");
+
     /// <summary>
     /// Optional max official rating from a preset filter (for example OpenSwim TV-PG).
     /// </summary>
@@ -597,11 +656,18 @@ public class ChannelCatalogYearConstraints
 /// </summary>
 public class ChannelCatalogGenreConstraints
 {
+    public IReadOnlyList<string> RequiredStudioKeywords { get; set; } = Array.Empty<string>();
+
     public IReadOnlyList<string> RequiredGenreKeywords { get; set; } = Array.Empty<string>();
 
     public IReadOnlyList<string> RequiredPlotKeywords { get; set; } = Array.Empty<string>();
 
     public IReadOnlyList<string> ExcludedGenreKeywords { get; set; } = Array.Empty<string>();
+
+    /// <summary>
+    /// Title, plot, tag, or studio text that keeps a title off this channel (for example Scooby-Doo on FlashBack).
+    /// </summary>
+    public IReadOnlyList<string> ExcludedPlotKeywords { get; set; } = Array.Empty<string>();
 
     /// <summary>
     /// Plot keywords that require a supporting genre when the item does not match <see cref="RequiredGenreKeywords"/>.
@@ -646,6 +712,7 @@ public class ChannelCatalogGenreConstraints
             return false;
         }
 
+        var studios = item.Studios?.ToList() ?? new List<string>();
         var genres = item.Genres?.ToList() ?? new List<string>();
 
         if (ExcludedGenreKeywords.Count > 0
@@ -655,7 +722,19 @@ public class ChannelCatalogGenreConstraints
             return false;
         }
 
-        if (RequiredGenreKeywords.Count == 0 && RequiredPlotKeywords.Count == 0)
+        if (IsTitlePlotExcluded(item))
+        {
+            return false;
+        }
+
+        if (RequiredGenreKeywords.Count == 0 && RequiredPlotKeywords.Count == 0 && RequiredStudioKeywords.Count == 0)
+        {
+            return true;
+        }
+
+        if (RequiredStudioKeywords.Count > 0
+            && studios.Any(studio => RequiredStudioKeywords.Any(keyword =>
+                studio.Contains(keyword, StringComparison.OrdinalIgnoreCase))))
         {
             return true;
         }
@@ -694,6 +773,51 @@ public class ChannelCatalogGenreConstraints
         return false;
     }
 
+    /// <summary>
+    /// True when title, series name, plot, tags, or studios hit an excluded keyword.
+    /// </summary>
+    public bool IsTitlePlotExcluded(BaseItem item)
+    {
+        if (ExcludedPlotKeywords.Count == 0)
+        {
+            return false;
+        }
+
+        var searchable = new List<string>();
+        if (!string.IsNullOrWhiteSpace(item.Name))
+        {
+            searchable.Add(item.Name);
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.SeriesName))
+        {
+            searchable.Add(item.SeriesName);
+        }
+
+        if (!string.IsNullOrWhiteSpace(item.Overview))
+        {
+            searchable.Add(item.Overview);
+        }
+
+        if (item.Tags is { Length: > 0 })
+        {
+            searchable.AddRange(item.Tags);
+        }
+
+        if (item.Studios is { Length: > 0 })
+        {
+            searchable.AddRange(item.Studios);
+        }
+
+        if (searchable.Count == 0)
+        {
+            return false;
+        }
+
+        var blob = string.Join(' ', searchable);
+        return ExcludedPlotKeywords.Any(keyword => ContainsPlotKeyword(blob, keyword));
+    }
+
     private bool TryMatchPlotOrTitle(BaseItem item, out string? matchedKeyword)
     {
         matchedKeyword = null;
@@ -714,6 +838,12 @@ public class ChannelCatalogGenreConstraints
             searchable.Add(string.Join(' ', itemTags));
         }
 
+        var itemStudios = item.Studios?.ToList();
+        if (itemStudios is { Count: > 0 })
+        {
+            searchable.Add(string.Join(' ', itemStudios));
+        }
+
         if (searchable.Count == 0)
         {
             return false;
@@ -731,6 +861,18 @@ public class ChannelCatalogGenreConstraints
             return false;
         }
 
+        var normalizedBlob = NormalizeSearchText(blob);
+        var normalizedKeyword = NormalizeSearchText(keyword);
+        if (normalizedKeyword.Length == 0)
+        {
+            return false;
+        }
+
+        if (normalizedBlob.Contains(normalizedKeyword, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
         if (keyword.Contains(' ', StringComparison.Ordinal))
         {
             return blob.Contains(keyword, StringComparison.OrdinalIgnoreCase);
@@ -738,6 +880,25 @@ public class ChannelCatalogGenreConstraints
 
         var pattern = $@"(?<![\p{{L}}\p{{N}}]){Regex.Escape(keyword)}(?![\p{{L}}\p{{N}}])";
         return Regex.IsMatch(blob, pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    }
+
+    private static string NormalizeSearchText(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return string.Empty;
+        }
+
+        var chars = value.ToLowerInvariant().ToCharArray();
+        for (var i = 0; i < chars.Length; i++)
+        {
+            if (!char.IsLetterOrDigit(chars[i]))
+            {
+                chars[i] = ' ';
+            }
+        }
+
+        return string.Join(' ', new string(chars).Split(' ', StringSplitOptions.RemoveEmptyEntries));
     }
 }
 

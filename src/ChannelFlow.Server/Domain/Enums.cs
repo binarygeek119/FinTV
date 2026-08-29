@@ -68,7 +68,8 @@ public enum VirtualContentSource
     MusicArtSlide = 2,
     News = 3,
     LogoBumper = 4,
-    BundledVideo = 5
+    BundledVideo = 5,
+    YouTubeMusicVideo = 6
 }
 
 public enum CommercialSource

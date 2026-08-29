@@ -221,6 +221,15 @@ body.guide-tab-open .tv-guide {
     font-weight: 600;
     white-space: nowrap;
 }
+#btn-logout {
+    background: var(--channelflow-danger, #ef4444);
+    border-color: var(--channelflow-danger, #ef4444);
+    color: #fff;
+}
+#btn-logout:hover {
+    background: #dc2626;
+    border-color: #dc2626;
+}
 .app-clock { color: var(--muted); font-size: 0.9rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .topbar-user { color: var(--muted); font-size: 0.85rem; }
 .muted { color: var(--muted); margin: 0.2rem 0 0; }
@@ -622,6 +631,62 @@ body.channel-editor-open {
     color: #fff;
 }
 .inner-tabs .inner-tab:hover:not(.active) { background: #2c2c2c; }
+.primetime-layout {
+    display: grid;
+    grid-template-columns: minmax(240px, 1fr) minmax(280px, 1.3fr);
+    gap: 1rem;
+    align-items: start;
+}
+.primetime-show-list {
+    max-height: 28rem;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+.primetime-show {
+    text-align: left;
+    background: #1c1c1c;
+    color: var(--text);
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 0.45rem 0.65rem;
+    cursor: pointer;
+    font: inherit;
+}
+.primetime-show:hover { background: #2c2c2c; }
+.primetime-slots { display: flex; flex-direction: column; gap: 0.65rem; }
+.primetime-slot {
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 0.65rem 0.75rem;
+    background: #161616;
+    cursor: pointer;
+}
+.primetime-slot.active { border-color: var(--accent); }
+.primetime-slot-label { font-weight: 600; margin-bottom: 0.4rem; }
+.primetime-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; min-height: 1.8rem; }
+.primetime-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    background: #2c2c2c;
+    border-radius: 999px;
+    padding: 0.15rem 0.25rem 0.15rem 0.65rem;
+    font-size: 0.85rem;
+}
+.primetime-chip button {
+    background: transparent;
+    border: 0;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0 0.35rem;
+}
+@media (max-width: 800px) {
+    .primetime-layout { grid-template-columns: 1fr; }
+}
 .library-add-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;

@@ -56,6 +56,16 @@ public class FinTvDbContext : DbContext
 
     public DbSet<PastTenseNewsRow> PastTenseNews => Set<PastTenseNewsRow>();
 
+    public DbSet<ChannelCatalogPoolItem> ChannelCatalogPool => Set<ChannelCatalogPoolItem>();
+
+    public DbSet<ChannelPrimetimeSlot> ChannelPrimetimeSlots => Set<ChannelPrimetimeSlot>();
+
+    public DbSet<ChannelPrimetimeCandidate> ChannelPrimetimeCandidates => Set<ChannelPrimetimeCandidate>();
+
+    public DbSet<MusicVideoChannelArtist> MusicVideoChannelArtists => Set<MusicVideoChannelArtist>();
+
+    public DbSet<MusicVideoYoutubeSource> MusicVideoYoutubeSources => Set<MusicVideoYoutubeSource>();
+
     public DbSet<PathMapping> PathMappings => Set<PathMapping>();
 
     public DbSet<MediaServerConnection> MediaServerConnections => Set<MediaServerConnection>();
@@ -202,6 +212,39 @@ public class FinTvDbContext : DbContext
         ConfigureCatalogTable<MusicRow>(modelBuilder, "Music");
         ConfigureCatalogTable<MusicVideoRow>(modelBuilder, "MusicVideos");
         ConfigureCatalogTable<PastTenseNewsRow>(modelBuilder, "PastTenseNews");
+
+        modelBuilder.Entity<ChannelCatalogPoolItem>(entity =>
+        {
+            entity.ToTable("ChannelCatalogPool");
+            entity.HasIndex(e => new { e.ChannelId, e.JellyfinItemId }).IsUnique();
+            entity.HasIndex(e => e.JellyfinItemId);
+        });
+
+        modelBuilder.Entity<ChannelPrimetimeSlot>(entity =>
+        {
+            entity.HasIndex(e => new { e.ChannelId, e.SlotIndex }).IsUnique();
+            entity.HasMany(e => e.Candidates)
+                .WithOne(e => e.Slot)
+                .HasForeignKey(e => e.SlotId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ChannelPrimetimeCandidate>(entity =>
+        {
+            entity.HasIndex(e => e.SlotId);
+            entity.HasIndex(e => e.SeriesId);
+        });
+
+        modelBuilder.Entity<MusicVideoChannelArtist>(entity =>
+        {
+            entity.HasIndex(e => new { e.ChannelId, e.ArtistName }).IsUnique();
+        });
+
+        modelBuilder.Entity<MusicVideoYoutubeSource>(entity =>
+        {
+            entity.HasIndex(e => e.ChannelId);
+            entity.HasIndex(e => e.ParentSourceId);
+        });
     }
 
     private static void ConfigureCatalogTable<TEntity>(ModelBuilder modelBuilder, string tableName)

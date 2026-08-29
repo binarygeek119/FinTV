@@ -60,6 +60,11 @@
     let aiSettings = null;
     let aiChannels = [];
     let aiPlayoutTemplates = [];
+    let aiPage = 'lineups';
+    let primetimeShows = [];
+    let primetimeSlots = [];
+    let primetimeSelectedSlot = 36;
+    let primetimeSearch = '';
     let aiPreview = null;
     let weatherDockerStatus = null;
     let newsFeeds = [];
@@ -3845,6 +3850,7 @@
             aiChannels = await api('/ai/channels');
             aiPlayoutTemplates = await api('/ai/playout-templates');
             renderAiChannels();
+            populatePrimetimeChannelSelect();
             updateAiUiState();
             const job = await api('/ai/generate-all/status');
             renderGenerateAllStatus(job);
@@ -3852,6 +3858,9 @@
                 startGenerateAllPolling();
             }
             await loadWeatherGuideCacheStatus();
+            if (aiPage === 'primetime') {
+                await loadPrimetimeEditor();
+            }
         } catch (err) {
             reportApiError(err, 'Could not load AI settings.');
         }
@@ -4008,10 +4017,16 @@
             const totalSteps = job.totalSteps || 0;
             const pct = totalSteps ? Math.round((job.completedSteps / totalSteps) * 100) : 0;
             let statusLine;
-            if (job.currentPhase === 'generating') {
+            if (job.currentPhase === 'generating' || job.currentPhase === 'lineup') {
                 statusLine =
-                    `Generate all: ${job.currentChannelName || '…'} · generating lineup, then playout day 1/${job.totalDays || 14} · ` +
-                    `next day, then next channel · ${job.completedSteps}/${totalSteps || '?'} steps (${pct}%)`;
+                    `Generate all: ${job.currentChannelName || '…'} · generating lineup · ` +
+                    `${job.completedSteps}/${totalSteps || '?'} steps (${pct}%)`;
+            } else if (job.currentPhase === 'priming' || (job.currentPhase || '').startsWith('priming')) {
+                statusLine =
+                    `Generate all: ${job.currentChannelName || '…'} · priming page ${job.page || 1}/${job.totalPages || '?'} · ` +
+                    `${job.completedSteps}/${totalSteps || '?'} steps (${pct}%)`;
+            } else if (job.currentPhase === 'queuing') {
+                statusLine = `Generate all: queuing channels…`;
             } else if (job.currentPhase === 'horizon-full') {
                 statusLine =
                     `Generate all: ${job.currentChannelName || '…'} · 14-day guide already filled (next day at midnight) · ` +
@@ -4172,7 +4187,7 @@
                 <div class="row-top">
                     <div>
                         <strong>${escapeHtml(ch.number)} · ${escapeHtml(ch.name)}</strong>
-                        <div class="meta">${escapeHtml(ch.libraryTag || 'no tag')} · ${ch.filledSlots}/48 slots filled</div>
+                        <div class="meta">${escapeHtml(ch.libraryTag || 'no tag')} · ${ch.filledSlots}/48 slots filled · ${ch.poolCount || 0} in AI pool</div>
                     </div>
                     <div class="row-actions">
                         <label class="field" style="margin:0">
@@ -4190,6 +4205,8 @@
                         </label>
                         <button type="button" class="emby-button ai-action ai-save-channel" data-channel="${ch.id}">Save</button>
                         <button type="button" class="emby-button ai-action ai-generate-channel" data-channel="${ch.id}">Generate</button>
+                        <button type="button" class="emby-button ai-action ai-clear-pool" data-channel="${ch.id}">Clear AI pool</button>
+                        <button type="button" class="emby-button ai-action ai-clear-playout" data-channel="${ch.id}">Clear playout</button>
                     </div>
                 </div>
                 ${ch.aiRuleBrief ? `<p class="hint">${escapeHtml(ch.aiRuleBrief)}</p>` : ''}
@@ -4207,6 +4224,12 @@
         });
         list.querySelectorAll('.ai-generate-channel').forEach((btn) => {
             btn.onclick = () => generateAiLineup(btn.dataset.channel);
+        });
+        list.querySelectorAll('.ai-clear-pool').forEach((btn) => {
+            btn.onclick = () => clearAiChannelPool(btn.dataset.channel);
+        });
+        list.querySelectorAll('.ai-clear-playout').forEach((btn) => {
+            btn.onclick = () => clearAiChannelPlayout(btn.dataset.channel);
         });
         updateAiUiState();
     }
@@ -4423,10 +4446,14 @@
         try {
             const start = await api('/ai/channels/' + channelId + '/generate', { method: 'POST', body: '{}' });
             if (start.alreadyRunning) {
-                toast('AI lineup generation is already running for this channel…', 'info');
+                toast('AI lineup generation is already queued for this channel…', 'info');
             } else {
-                toast('AI lineup generation started…', 'info');
+                toast('AI lineup generation queued…', 'info');
             }
+            beginLibraryTaskPopup('ai-generate', 'AI lineup generator', {
+                isRunning: true,
+                message: 'Queuing…'
+            });
 
             const status = await waitForChannelGenerate(channelId);
             aiPreview = status.preview;
@@ -4509,8 +4536,213 @@
         if ($('ai-preview-grid')) $('ai-preview-grid').innerHTML = '';
     }
 
+    async function clearAiChannelPool(channelId) {
+        if (!confirm('Clear this channel’s AI pool? Next Generate will re-page the live catalog.')) {
+            return;
+        }
+
+        await api('/ai/channels/' + channelId + '/pool', { method: 'DELETE' });
+        toast('AI pool cleared. Next Generate will rebuild it.', 'success');
+        await loadAi();
+    }
+
+    async function clearAiChannelPlayout(channelId) {
+        if (!confirm('Clear this channel’s Live TV playout? The guide goes empty and the channel goes Off Air until you Generate or Rebuild Playout. The lineup is kept.')) {
+            return;
+        }
+
+        const data = await api('/lineups/' + channelId + '/clear-playout', { method: 'POST', body: '{}' });
+        const count = Number(data.cleared || 0);
+        const name = data.channelName || 'channel';
+        toast(`Cleared ${count} playout item(s) for ${name}. Channel is Off Air until Generate or Rebuild.`, 'success');
+        refreshGuide().catch(() => {});
+    }
+
+    function primetimeChannels() {
+        return (aiChannels || []).filter((ch) => ch.primetimeAssignment);
+    }
+
+    function applyAiPage() {
+        document.querySelectorAll('#ai-inner-tabs .inner-tab').forEach((tab) => {
+            const on = tab.dataset.aiPage === aiPage;
+            tab.classList.toggle('active', on);
+            tab.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        document.querySelectorAll('#tab-ai .ai-page').forEach((page) => {
+            const on = page.id === 'ai-page-' + aiPage;
+            page.classList.toggle('hidden', !on);
+            page.hidden = !on;
+        });
+        if (aiPage === 'primetime') {
+            loadPrimetimeEditor().catch((err) => toast(err.message, 'error'));
+        }
+    }
+
+    function populatePrimetimeChannelSelect() {
+        const select = $('ai-primetime-channel');
+        if (!select) {
+            return;
+        }
+
+        const channels = primetimeChannels();
+        const previous = select.value;
+        select.innerHTML = channels.map((ch) =>
+            `<option value="${escapeHtml(ch.id)}">${escapeHtml(ch.number)} · ${escapeHtml(ch.name)}</option>`
+        ).join('');
+        if (channels.some((ch) => ch.id === previous)) {
+            select.value = previous;
+        }
+        const empty = $('ai-primetime-empty');
+        const editor = $('ai-primetime-editor');
+        if (empty) {
+            empty.classList.toggle('hidden', channels.length > 0);
+        }
+        if (editor) {
+            editor.classList.toggle('hidden', channels.length === 0);
+        }
+    }
+
+    async function loadPrimetimeEditor() {
+        populatePrimetimeChannelSelect();
+        const channelId = $('ai-primetime-channel')?.value;
+        if (!channelId) {
+            primetimeShows = [];
+            primetimeSlots = [];
+            renderPrimetimeEditor();
+            return;
+        }
+
+        const [showsRes, slotsRes] = await Promise.all([
+            api('/ai/channels/' + channelId + '/primetime-shows'),
+            api('/ai/channels/' + channelId + '/primetime')
+        ]);
+        primetimeShows = showsRes.shows || [];
+        primetimeSlots = (slotsRes.slots || []).map((slot) => ({
+            slotIndex: slot.slotIndex,
+            label: slot.label,
+            candidates: (slot.candidates || []).map((c) => ({
+                id: c.id,
+                title: c.title
+            }))
+        }));
+        if (!primetimeSlots.some((s) => s.slotIndex === primetimeSelectedSlot)) {
+            primetimeSelectedSlot = primetimeSlots[0]?.slotIndex ?? 36;
+        }
+        renderPrimetimeEditor();
+    }
+
+    function renderPrimetimeEditor() {
+        const list = $('ai-primetime-shows');
+        const slotsEl = $('ai-primetime-slots');
+        if (!list || !slotsEl) {
+            return;
+        }
+
+        const query = (primetimeSearch || '').trim().toLowerCase();
+        const filtered = primetimeShows.filter((show) => {
+            if (!query) {
+                return true;
+            }
+            const title = String(show.title || '').toLowerCase();
+            const year = show.year != null ? String(show.year) : '';
+            return title.includes(query) || year.includes(query);
+        });
+        list.innerHTML = filtered.length
+            ? filtered.map((show) => {
+                const year = show.year ? ` (${show.year})` : '';
+                return `<button type="button" class="primetime-show" data-series="${escapeHtml(show.id)}">${escapeHtml(show.title)}${escapeHtml(year)}</button>`;
+            }).join('')
+            : '<div class="empty-state">No matching shows for this channel.</div>';
+        list.querySelectorAll('.primetime-show').forEach((btn) => {
+            btn.onclick = () => addShowToPrimetimeSlot(btn.dataset.series);
+        });
+
+        slotsEl.innerHTML = primetimeSlots.map((slot) => {
+            const chips = (slot.candidates || []).map((c) =>
+                `<span class="primetime-chip">${escapeHtml(c.title)}<button type="button" data-slot="${slot.slotIndex}" data-series="${escapeHtml(c.id)}" aria-label="Remove">&times;</button></span>`
+            ).join('');
+            const active = slot.slotIndex === primetimeSelectedSlot ? ' active' : '';
+            return `<div class="primetime-slot${active}" data-slot="${slot.slotIndex}">
+                <div class="primetime-slot-label">${escapeHtml(slot.label)}</div>
+                <div class="primetime-chips">${chips || '<span class="hint">No shows yet</span>'}</div>
+            </div>`;
+        }).join('');
+        slotsEl.querySelectorAll('.primetime-slot').forEach((el) => {
+            el.onclick = (event) => {
+                if (event.target.closest('button')) {
+                    return;
+                }
+                primetimeSelectedSlot = Number(el.dataset.slot);
+                renderPrimetimeEditor();
+            };
+        });
+        slotsEl.querySelectorAll('.primetime-chip button').forEach((btn) => {
+            btn.onclick = (event) => {
+                event.stopPropagation();
+                removeShowFromPrimetimeSlot(Number(btn.dataset.slot), btn.dataset.series);
+            };
+        });
+    }
+
+    function addShowToPrimetimeSlot(seriesId) {
+        const show = primetimeShows.find((s) => s.id === seriesId);
+        const slot = primetimeSlots.find((s) => s.slotIndex === primetimeSelectedSlot);
+        if (!show || !slot) {
+            return;
+        }
+        if (slot.candidates.some((c) => c.id === show.id)) {
+            return;
+        }
+        slot.candidates.push({ id: show.id, title: show.title });
+        renderPrimetimeEditor();
+    }
+
+    function removeShowFromPrimetimeSlot(slotIndex, seriesId) {
+        const slot = primetimeSlots.find((s) => s.slotIndex === slotIndex);
+        if (!slot) {
+            return;
+        }
+        slot.candidates = slot.candidates.filter((c) => c.id !== seriesId);
+        renderPrimetimeEditor();
+    }
+
+    async function savePrimetimeAssignments() {
+        const channelId = $('ai-primetime-channel')?.value;
+        if (!channelId) {
+            toast('Pick a prime-TV channel first.', 'info');
+            return;
+        }
+
+        const payload = {
+            slots: primetimeSlots.map((slot) => ({
+                slotIndex: slot.slotIndex,
+                candidates: slot.candidates.map((c) => ({
+                    seriesId: c.id,
+                    title: c.title
+                }))
+            }))
+        };
+        const saved = await api('/ai/channels/' + channelId + '/primetime', {
+            method: 'PUT',
+            body: JSON.stringify(payload)
+        });
+        primetimeSlots = (saved.slots || primetimeSlots);
+        toast('Primetime assignments saved. Generate to rebuild the guide.', 'success');
+        renderPrimetimeEditor();
+    }
+
+    async function clearAllAiPools() {
+        if (!confirm('Clear every channel’s AI pool? Next Generate will re-page the live catalog for each channel.')) {
+            return;
+        }
+
+        await api('/ai/pools', { method: 'DELETE' });
+        toast('AI pool cleared. Next Generate will rebuild it.', 'success');
+        await loadAi();
+    }
+
     async function generateAllAiLineups() {
-        if (!confirm('Generate AI lineups for all channels that are short of 14 days? Each of those channels gets a lineup, then playout is built one day at a time. Channels that already have 14 days are skipped; at midnight the next day is added. This runs in the background.')) return;
+        if (!confirm('Queue AI lineups for all eligible channels? Clicks stack into one batch. Two or more channels build day 1 for every channel, then day 2. This runs in the background.')) return;
         const btn = $('btn-ai-generate-all');
         const originalLabel = btn ? btn.textContent : '';
         try {
@@ -4523,12 +4755,14 @@
                 toast('Generate all is already running.', 'info');
                 renderGenerateAllStatus(data.job);
                 startGenerateAllPolling();
+                beginLibraryTaskPopup('ai-generate', 'AI lineup generator', mapAiGenerateTask(data.job));
                 return;
             }
             if (data.queued) {
-                toast('Generate all queued. Channels with a 14-day guide are skipped; the next day is built at midnight.', 'success');
+                toast('Generate all queued.', 'success');
                 renderGenerateAllStatus(data.job);
                 startGenerateAllPolling();
+                beginLibraryTaskPopup('ai-generate', 'AI lineup generator', mapAiGenerateTask(data.job) || { isRunning: true, message: 'Queuing…' });
                 return;
             }
             const failed = (data.results || []).filter((r) => !r.ok && !r.skipped);
@@ -6332,9 +6566,161 @@
         try {
             await ensureFinTvLists(true);
             renderListsTable();
+            if (listPage !== 'lists') {
+                await loadMusicVideoListPage();
+            }
         } catch (err) {
             reportApiError(err, 'Could not load ChannelFlow lists.');
         }
+    }
+
+    let listPage = 'lists';
+
+    function applyListPage() {
+        document.querySelectorAll('#list-inner-tabs .inner-tab').forEach((tab) => {
+            const on = tab.dataset.listPage === listPage;
+            tab.classList.toggle('active', on);
+            tab.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        document.querySelectorAll('#tab-list .list-page').forEach((page) => {
+            const on = page.id === 'list-page-' + listPage;
+            page.classList.toggle('hidden', !on);
+            page.hidden = !on;
+        });
+        if (listPage !== 'lists') {
+            loadMusicVideoListPage().catch((err) => toast(err.message, 'error'));
+        }
+    }
+
+    async function loadMusicVideoListPage() {
+        const channels = await api('/lists/music-video-channels') || [];
+        if (listPage === 'artists') {
+            await renderMusicVideoArtists(channels);
+        } else if (listPage === 'youtube') {
+            await renderMusicVideoYoutube(channels);
+        }
+    }
+
+    async function renderMusicVideoArtists(channels) {
+        const el = $('mv-artists-panels');
+        if (!el) {
+            return;
+        }
+
+        if (!channels.length) {
+            el.innerHTML = '<div class="empty-state">No music-video channels found.</div>';
+            return;
+        }
+
+        const blocks = await Promise.all(channels.map(async (ch) => {
+            const artists = await api('/lists/music-video-channels/' + ch.id + '/artists') || [];
+            const hint = ch.libraryTag === 'channelflow-music-video' && !artists.length
+                ? '<p class="hint">Empty: plays every catalog artist not listed on The Parody Channel or Rap On Tap.</p>'
+                : '';
+            const rows = artists.length
+                ? artists.map((row) => `<div class="list-card"><div><strong>${escapeHtml(row.artistName)}</strong></div><div class="row-actions"><button type="button" data-mv-del-artist="${row.id}" data-channel="${ch.id}">Remove</button></div></div>`).join('')
+                : '<div class="empty-state">No artists added yet.</div>';
+            return `<div class="card section-card" data-mv-channel="${ch.id}">
+                <h4>${escapeHtml(ch.name)}</h4>
+                ${hint}
+                <div class="actions">
+                    <input class="emby-input mv-artist-input" data-channel="${ch.id}" placeholder="Artist name">
+                    <button type="button" class="emby-button" data-mv-add-artist="${ch.id}">Add artist</button>
+                </div>
+                ${rows}
+            </div>`;
+        }));
+        el.innerHTML = blocks.join('');
+        el.querySelectorAll('[data-mv-add-artist]').forEach((btn) => {
+            btn.onclick = () => addMusicVideoArtist(btn.dataset.mvAddArtist);
+        });
+        el.querySelectorAll('[data-mv-del-artist]').forEach((btn) => {
+            btn.onclick = () => deleteMusicVideoArtist(btn.dataset.channel, btn.dataset.mvDelArtist);
+        });
+    }
+
+    async function addMusicVideoArtist(channelId) {
+        const input = q(`[data-mv-channel="${channelId}"] .mv-artist-input`);
+        const name = (input?.value || '').trim();
+        if (!name) {
+            toast('Enter an artist name.', 'info');
+            return;
+        }
+
+        await api('/lists/music-video-channels/' + channelId + '/artists', {
+            method: 'POST',
+            body: JSON.stringify({ artistName: name })
+        });
+        if (input) {
+            input.value = '';
+        }
+        toast('Artist added.', 'success');
+        await loadMusicVideoListPage();
+    }
+
+    async function deleteMusicVideoArtist(channelId, artistId) {
+        await api('/lists/music-video-channels/' + channelId + '/artists/' + artistId, { method: 'DELETE' });
+        toast('Artist removed.', 'success');
+        await loadMusicVideoListPage();
+    }
+
+    async function renderMusicVideoYoutube(channels) {
+        const el = $('mv-youtube-panels');
+        if (!el) {
+            return;
+        }
+
+        if (!channels.length) {
+            el.innerHTML = '<div class="empty-state">No music-video channels found.</div>';
+            return;
+        }
+
+        const blocks = await Promise.all(channels.map(async (ch) => {
+            const sources = await api('/lists/music-video-channels/' + ch.id + '/youtube') || [];
+            const rows = sources.length
+                ? sources.map((row) => `<div class="list-card"><div><strong>${escapeHtml(row.title || row.sourceUrl)}</strong><div class="meta">${escapeHtml(row.sourceUrl)}${row.isPlaylist ? ' · playlist' : ''}</div></div><div class="row-actions"><button type="button" data-mv-del-yt="${row.id}" data-channel="${ch.id}">Remove</button></div></div>`).join('')
+                : '<div class="empty-state">No YouTube sources yet.</div>';
+            return `<div class="card section-card" data-mv-yt-channel="${ch.id}">
+                <h4>${escapeHtml(ch.name)}</h4>
+                <div class="actions">
+                    <input class="emby-input mv-yt-input" data-channel="${ch.id}" placeholder="https://www.youtube.com/playlist?list=… or a video URL">
+                    <button type="button" class="emby-button" data-mv-add-yt="${ch.id}">Import</button>
+                </div>
+                ${rows}
+            </div>`;
+        }));
+        el.innerHTML = blocks.join('');
+        el.querySelectorAll('[data-mv-add-yt]').forEach((btn) => {
+            btn.onclick = () => addMusicVideoYoutube(btn.dataset.mvAddYt);
+        });
+        el.querySelectorAll('[data-mv-del-yt]').forEach((btn) => {
+            btn.onclick = () => deleteMusicVideoYoutube(btn.dataset.channel, btn.dataset.mvDelYt);
+        });
+    }
+
+    async function addMusicVideoYoutube(channelId) {
+        const input = q(`[data-mv-yt-channel="${channelId}"] .mv-yt-input`);
+        const url = (input?.value || '').trim();
+        if (!url) {
+            toast('Paste a YouTube video or playlist URL.', 'info');
+            return;
+        }
+
+        await api('/lists/music-video-channels/' + channelId + '/youtube', {
+            method: 'POST',
+            body: JSON.stringify({ url })
+        });
+        if (input) {
+            input.value = '';
+        }
+        toast('YouTube source imported.', 'success');
+        await loadMusicVideoListPage();
+    }
+
+    async function deleteMusicVideoYoutube(channelId, sourceId) {
+        await api('/lists/music-video-channels/' + channelId + '/youtube/' + sourceId, { method: 'DELETE' });
+        toast('YouTube source removed.', 'success');
+        await loadMusicVideoListPage();
     }
 
     function selectedLibraryIds(containerId) {
@@ -6939,6 +7325,42 @@
         };
     }
 
+    function mapAiGenerateTask(job) {
+        if (!job) {
+            return null;
+        }
+
+        const phase = job.currentPhase || job.phase || '';
+        let message = job.message || '';
+        if (!message) {
+            if (phase === 'priming' || String(phase).startsWith('priming')) {
+                message = 'Priming ' + (job.currentChannelName || '') + ' page ' + (job.page || 1) + '/' + (job.totalPages || '?');
+            } else if (phase === 'lineup' || phase === 'generating') {
+                message = 'Lineup for ' + (job.currentChannelName || '…');
+            } else if (phase === 'playout') {
+                message = 'Playout day ' + (job.currentDay || 1) + '/' + (job.totalDays || 14) + ' · ' + (job.currentChannelName || '');
+            } else if (phase === 'queuing') {
+                message = 'Queuing channels…';
+            } else {
+                message = phase;
+            }
+        }
+
+        return {
+            isRunning: !!job.isRunning,
+            lastStartedAt: job.startedAt,
+            lastCompletedAt: job.completedAt,
+            lastError: job.lastError,
+            processed: job.completedSteps,
+            total: job.totalSteps,
+            percent: job.totalSteps
+                ? Math.max(0, Math.min(100, Math.round(100 * (job.completedSteps || 0) / job.totalSteps)))
+                : null,
+            message,
+            finishedAt: job.completedAt
+        };
+    }
+
     async function fetchTaskStatus(path) {
         try {
             return await api(path);
@@ -6953,16 +7375,19 @@
         cached.forEach((snap) => {
             cachedByKind[snap.kind] = snap;
         });
-        const [ffprobe, aspect, cleanupRaw] = await Promise.all([
+        const [ffprobe, aspect, cleanupRaw, aiRaw] = await Promise.all([
             fetchTaskStatus('/tasks/ffprobe'),
             fetchTaskStatus('/tasks/true-aspect'),
-            fetchTaskStatus('/tasks/catalog-cleanup')
+            fetchTaskStatus('/tasks/catalog-cleanup'),
+            fetchTaskStatus('/ai/generate-all/status')
         ]);
         const cleanup = cleanupRaw ? mapCleanupTask(cleanupRaw) : null;
+        const aiGenerate = mapAiGenerateTask(aiRaw);
         const candidates = [
             { kind: 'true-aspect', kicker: 'True aspect ratio', title: 'True aspect ratio', status: aspect || cachedByKind['true-aspect']?.status || null },
             { kind: 'ffprobe', kicker: 'ffprobe chapters', title: 'ffprobe chapters', status: ffprobe || cachedByKind.ffprobe?.status || null },
-            { kind: 'cleanup', kicker: 'Catalog cleanup', title: 'Catalog cleanup', status: cleanup || cachedByKind.cleanup?.status || null }
+            { kind: 'cleanup', kicker: 'Catalog cleanup', title: 'Catalog cleanup', status: cleanup || cachedByKind.cleanup?.status || null },
+            { kind: 'ai-generate', kicker: 'AI lineup generator', title: 'AI lineup generator', status: aiGenerate || cachedByKind['ai-generate']?.status || null }
         ];
 
         return candidates.filter((row) => {
@@ -8874,7 +9299,7 @@
         channels: 'Manage Live TV channels',
         presets: 'Create the Binarygeek119 ready-made lineup',
         lineups: 'Edit 24-hour schedules and playout',
-        list: 'Register Jellyfin playlists as ChannelFlow lists',
+        list: 'Jellyfin playlists, music-video artists, and YouTube playlist imports',
         jellyfin: 'Media servers, libraries, remaps, and removed items',
         special: 'Recurring blocks that override the normal lineup',
         commercials: 'Jellyfin commercials, saved playlists, and channel mapping',
@@ -9202,6 +9627,29 @@
         click('btn-preview-lineup', previewLineup);
         click('btn-add-override', openOverrideForm);
         click('btn-add-list', () => openListForm().catch((e) => toast(e.message, 'error')));
+        document.querySelectorAll('#list-inner-tabs .inner-tab').forEach((tab) => {
+            tab.addEventListener('click', () => {
+                listPage = tab.dataset.listPage || 'lists';
+                applyListPage();
+            });
+        });
+        document.querySelectorAll('#ai-inner-tabs .inner-tab').forEach((tab) => {
+            tab.addEventListener('click', () => {
+                aiPage = tab.dataset.aiPage || 'lineups';
+                applyAiPage();
+            });
+        });
+        change('ai-primetime-channel', () => {
+            loadPrimetimeEditor().catch((err) => toast(err.message, 'error'));
+        });
+        const primetimeSearchEl = $('ai-primetime-search');
+        if (primetimeSearchEl) {
+            primetimeSearchEl.oninput = () => {
+                primetimeSearch = primetimeSearchEl.value || '';
+                renderPrimetimeEditor();
+            };
+        }
+        click('btn-ai-primetime-save', () => savePrimetimeAssignments().catch((err) => toast(err.message, 'error')));
         click('btn-add-media-server', () => addMediaServer().catch((e) => toast(e.message, 'error')));
         change('ms-kind', toggleMediaServerAddFields);
         document.getElementById('library-inner-tabs')?.querySelectorAll('.inner-tab').forEach((tab) => {
@@ -9312,6 +9760,7 @@
         click('btn-test-ai', () => { void testAiConnection(); });
         bindAiApiKeyFields();
         click('btn-ai-generate-all', () => generateAllAiLineups().catch((e) => toast(e.message, 'error')));
+        click('btn-ai-clear-all-pools', () => clearAllAiPools().catch((e) => toast(e.message, 'error')));
         click('btn-ai-cancel-generate-all', () => cancelGenerateAll().catch((e) => toast(e.message, 'error')));
         click('btn-weather-guide-cache-generate', () => generateWeatherGuideCache().catch((e) => toast(e.message, 'error')));
         click('btn-weather-guide-cache-clear', () => clearWeatherGuideCache().catch((e) => toast(e.message, 'error')));
