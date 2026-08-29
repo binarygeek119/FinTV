@@ -1,3 +1,6 @@
 [submodule "src/ChannelFlow.CommercialDetect"]
 	path = src/ChannelFlow.CommercialDetect
 	url = https://github.com/binarygeek119/ChannelFlow-CommercialDetect.git
+[submodule "src/ChannelFlow.CommercialSpotTester"]
+	path = src/ChannelFlow.CommercialSpotTester
+	url = https://github.com/binarygeek119/ChannelFlow-CommercialSpotTester.git
