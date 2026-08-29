@@ -9,4 +9,3 @@ paths:
 
 paths-ignore:
   - vendor
-  - legacy

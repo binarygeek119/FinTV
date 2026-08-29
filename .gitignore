@@ -52,10 +52,6 @@ msbuild.wrn
 vendor/**/node_modules/
 __pycache__/
 
-# Leftover Jellyfin plugin (not built)
-legacy/Jellyfin.Plugin.FinTV/Assets/logos/
-legacy/Jellyfin.Plugin.FinTV/Assets/tools/yt-dlp/
-
 release-artifact/
 artifacts/
 tools/ffmpeg

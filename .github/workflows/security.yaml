@@ -122,7 +122,7 @@ jobs:
           scan-ref: .
           severity: CRITICAL,HIGH
           ignore-unfixed: true
-          skip-dirs: vendor,legacy
+          skip-dirs: vendor
           format: sarif
           output: trivy-results.sarif
           exit-code: "1"
