@@ -110,6 +110,9 @@ public class LineupGeneratorService
         var exclusivePrimeSeries = await ExpandSeriesIdsAsync(
             ChannelPrimetimeService.ExclusiveSeriesIds(assignedPrime),
             cancellationToken);
+        var catalogPoolIds = SeriesEpisodeBlocks.AppliesTo(channel)
+            ? await LoadCatalogPoolIdsAsync(channel.Id, cancellationToken)
+            : [];
         var primetimeFilledDates = new HashSet<int>();
         var cursor = startUtc;
         var steps = 0;
@@ -339,7 +342,8 @@ public class LineupGeneratorService
                 cancellationToken,
                 assignmentChannel && exclusivePrimeSeries.Count > 0
                     ? exclusivePrimeSeries
-                    : null);
+                    : null,
+                catalogPoolIds);
 
             if (picked is null)
             {
@@ -670,7 +674,8 @@ public class LineupGeneratorService
         DateOnly date,
         PlayoutAnchorState anchor,
         CancellationToken cancellationToken,
-        IReadOnlySet<Guid>? excludeSeriesIds = null)
+        IReadOnlySet<Guid>? excludeSeriesIds = null,
+        IReadOnlyList<Guid>? catalogPoolIds = null)
     {
         if (!SeriesEpisodeBlocks.AppliesTo(channel))
         {
@@ -712,27 +717,37 @@ public class LineupGeneratorService
             SeriesEpisodeBlocks.FinishBlock(anchor, continueId);
         }
 
-        if (excludeSeriesIds is { Count: > 0 }
-            && slot.Candidates.All(c =>
-                c.Kind == SlotCandidateKind.FilterQuery || c.JellyfinItemId is null))
-        {
-            return null;
-        }
-
         var exclude = new HashSet<Guid>(SeriesEpisodeBlocks.CooldownSeries(anchor, date));
         if (excludeSeriesIds is { Count: > 0 })
         {
             exclude.UnionWith(excludeSeriesIds);
         }
 
-        var fallback = CreateFilterFallbackSlot(channel, slotIndex);
-        var picked = await _smartSelection.PickCandidateAsync(
-            channel,
-            fallback,
-            date,
-            anchor,
-            cancellationToken,
-            excludeSeriesIds: exclude);
+        ResolvedCandidate? picked = null;
+        var namedSlot = NamedCandidatesOnly(slot);
+        if (namedSlot is not null)
+        {
+            picked = await _smartSelection.PickCandidateAsync(
+                channel,
+                namedSlot,
+                date,
+                anchor,
+                cancellationToken,
+                excludeSeriesIds: exclude);
+        }
+
+        if (picked is null)
+        {
+            picked = await PickFromCatalogPoolAsync(
+                channel,
+                date,
+                anchor,
+                slotIndex,
+                catalogPoolIds ?? [],
+                exclude,
+                cancellationToken);
+        }
+
         if (picked is null && anchor.RecentSeriesIds.Count > 0)
         {
             var oldest = anchor.RecentSeriesIds.FirstOrDefault(id => !exclude.Contains(id));
@@ -749,6 +764,10 @@ public class LineupGeneratorService
 
         if (picked is null)
         {
+            _logger.LogWarning(
+                "No named title or AI pool pick for {ChannelName} slot {SlotIndex}; scanning the channel filter",
+                channel.Name,
+                slotIndex);
             picked = await PickWithFilterFallbackAsync(
                 channel,
                 slot,
@@ -842,6 +861,101 @@ public class LineupGeneratorService
         }
 
         return picked;
+    }
+
+    private async Task<List<Guid>> LoadCatalogPoolIdsAsync(Guid channelId, CancellationToken cancellationToken)
+    {
+        var rows = await _db.ChannelCatalogPool.AsNoTracking()
+            .Where(row => row.ChannelId == channelId)
+            .Select(row => new { row.JellyfinItemId, row.Kind })
+            .ToListAsync(cancellationToken);
+        return rows
+            .OrderBy(row => string.Equals(row.Kind, "Movie", StringComparison.OrdinalIgnoreCase) ? 1 : 0)
+            .Select(row => row.JellyfinItemId)
+            .Distinct()
+            .ToList();
+    }
+
+    private static LineupSlot? NamedCandidatesOnly(LineupSlot slot)
+    {
+        var named = slot.Candidates
+            .Where(candidate => candidate.Kind != SlotCandidateKind.FilterQuery)
+            .ToList();
+        if (named.Count == 0)
+        {
+            return null;
+        }
+
+        return new LineupSlot
+        {
+            SlotIndex = slot.SlotIndex,
+            SpanSlots = slot.SpanSlots,
+            IsRerunSlot = slot.IsRerunSlot,
+            Candidates = named
+        };
+    }
+
+    private async Task<ResolvedCandidate?> PickFromCatalogPoolAsync(
+        Channel channel,
+        DateOnly date,
+        PlayoutAnchorState anchor,
+        int slotIndex,
+        IReadOnlyList<Guid> catalogPoolIds,
+        IReadOnlySet<Guid> exclude,
+        CancellationToken cancellationToken)
+    {
+        if (catalogPoolIds.Count == 0)
+        {
+            return null;
+        }
+
+        var cooldown = SeriesEpisodeBlocks.CooldownSeries(anchor, date);
+        var order = catalogPoolIds.Where(id => !exclude.Contains(id) && !cooldown.Contains(id)).ToList();
+        if (order.Count == 0)
+        {
+            order = catalogPoolIds.Where(id => !exclude.Contains(id)).ToList();
+        }
+
+        if (order.Count == 0)
+        {
+            return null;
+        }
+
+        var rng = new Random(HashCode.Combine(channel.PlayoutSeed, date.DayNumber, slotIndex, 7919));
+        for (var i = order.Count - 1; i > 0; i--)
+        {
+            var swap = rng.Next(i + 1);
+            (order[i], order[swap]) = (order[swap], order[i]);
+        }
+
+        var attempts = Math.Min(order.Count, 12);
+        for (var i = 0; i < attempts; i++)
+        {
+            var next = await _smartSelection.PickSeriesEpisodeAsync(
+                channel,
+                order[i],
+                date,
+                anchor,
+                cancellationToken);
+            if (next is null)
+            {
+                continue;
+            }
+
+            if (next.SeriesId is Guid seriesId && seriesId != Guid.Empty && exclude.Contains(seriesId))
+            {
+                continue;
+            }
+
+            _logger.LogInformation(
+                "Picked {Title} from the AI pool for {ChannelName} slot {SlotIndex}",
+                next.Title,
+                channel.Name,
+                slotIndex);
+            return next;
+        }
+
+        return null;
     }
 
     private static LineupSlot CreatePastTenseNewsSlot(Channel channel, int slotIndex)
