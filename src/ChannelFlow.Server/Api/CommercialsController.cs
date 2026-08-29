@@ -16,22 +16,22 @@ public class CommercialsController : ControllerBase
 {
     private readonly CommercialService _commercials;
     private readonly CommercialBrainzSyncService _commercialBrainz;
-    private readonly BlackframeChapterTask _blackframeTask;
+    private readonly CatalogCommercialBreakScanService _blackframeScan;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="CommercialsController"/> class.
     /// </summary>
     /// <param name="commercials">Commercial service.</param>
     /// <param name="commercialBrainz">CommercialBrainz sync service.</param>
-    /// <param name="blackframeTask">Blackframe detection task.</param>
+    /// <param name="blackframeScan">Commercial-break scan service.</param>
     public CommercialsController(
         CommercialService commercials,
         CommercialBrainzSyncService commercialBrainz,
-        BlackframeChapterTask blackframeTask)
+        CatalogCommercialBreakScanService blackframeScan)
     {
         _commercials = commercials;
         _commercialBrainz = commercialBrainz;
-        _blackframeTask = blackframeTask;
+        _blackframeScan = blackframeScan;
     }
 
     /// <summary>
@@ -172,25 +172,41 @@ public class CommercialsController : ControllerBase
     }
 
     /// <summary>
-    /// Runs FFmpeg blackframe detection on all commercial items.
+    /// Runs FFmpeg blackdetect+silencedetect commercial-break scan (same as Tasks → Commercial breaks).
     /// </summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Accepted with current task state.</returns>
     [HttpPost("scan-blackframes")]
-    public async Task<IActionResult> ScanBlackframes(CancellationToken cancellationToken)
+    public IActionResult ScanBlackframes(CancellationToken cancellationToken)
     {
-        await _blackframeTask.ExecuteAsync(new Progress<double>(), cancellationToken);
-        return Accepted(new { FinTvRuntime.Current?.Configuration.BlackframeTaskState });
+        _ = cancellationToken;
+        if (!_blackframeScan.TryBegin())
+        {
+            return Ok(new { queued = false, alreadyRunning = true, status = _blackframeScan.Describe() });
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _blackframeScan.RunMissingAsync(begin: false, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+            }
+        });
+
+        return Accepted(new { queued = true, status = _blackframeScan.Describe() });
     }
 
     /// <summary>
-    /// Gets the current blackframe scan task status.
+    /// Gets the current commercial-break scan task status.
     /// </summary>
     /// <returns>Task progress state.</returns>
     [HttpGet("scan-status")]
     public ActionResult<object> ScanStatus()
     {
-        return Ok(FinTvRuntime.Current?.Configuration.BlackframeTaskState);
+        return Ok(_blackframeScan.Describe());
     }
 
     [HttpGet("search-playlists")]

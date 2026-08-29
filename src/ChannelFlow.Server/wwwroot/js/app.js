@@ -3856,6 +3856,7 @@
             renderGenerateAllStatus(job);
             if (job.isRunning) {
                 startGenerateAllPolling();
+                refreshAiGeneratePopup(job);
             }
             await loadWeatherGuideCacheStatus();
             if (aiPage === 'primetime') {
@@ -4108,6 +4109,9 @@
             }
 
             renderGenerateAllStatus(job);
+            if (job.isRunning || job.completedAt) {
+                refreshAiGeneratePopup(job);
+            }
             if (job.isRunning) {
                 if (isGuideTabVisible()) {
                     loadGuide({ quiet: true }).catch(() => {});
@@ -4404,6 +4408,7 @@
         while (Date.now() - started < timeoutMs) {
             const status = await api('/ai/channels/' + channelId + '/generate/status');
             renderChannelGenerateStatus(channelId, status);
+            refreshAiGeneratePopup(status);
             if (status.applied && status.isRunning && !lineupSavedToast) {
                 lineupSavedToast = true;
                 toast('AI lineup saved. Building the TV guide one day at a time…', 'info');
@@ -4450,9 +4455,9 @@
             } else {
                 toast('AI lineup generation queued…', 'info');
             }
-            beginLibraryTaskPopup('ai-generate', 'AI lineup generator', {
+            beginLibraryTaskPopup('ai-generate', 'AI lineup generator', mapAiGenerateTask(start.job) || {
                 isRunning: true,
-                message: 'Queuing…'
+                message: 'Queued…'
             });
 
             const status = await waitForChannelGenerate(channelId);
@@ -5996,6 +6001,199 @@
         await loadTrueAspectScan();
     }
 
+    let commercialBreakScanPollTimer = null;
+    let commercialBreakSettings = null;
+
+    function commercialBreakSettingsFromForm() {
+        const current = commercialBreakSettings || {};
+        return {
+            scanEnabled: !!($('commercial-breaks-scan-enabled') && $('commercial-breaks-scan-enabled').checked),
+            writeChaptersToFiles: !!($('commercial-breaks-write-files') && $('commercial-breaks-write-files').checked),
+            silenceDb: Number(($('cb-silence-db') && $('cb-silence-db').value) || current.silenceDb || -40),
+            silenceMinSeconds: Number(($('cb-silence-min') && $('cb-silence-min').value) || current.silenceMinSeconds || 0.3),
+            blackPixThreshold: Number(($('cb-black-pix') && $('cb-black-pix').value) || current.blackPixThreshold || 0.10),
+            blackPictureRatio: Number(($('cb-black-ratio') && $('cb-black-ratio').value) || current.blackPictureRatio || 0.95),
+            blackMinFrames: Number(($('cb-black-frames') && $('cb-black-frames').value) || current.blackMinFrames || 6),
+            confidencePercent: Number(($('cb-confidence') && $('cb-confidence').value) || current.confidencePercent || 70)
+        };
+    }
+
+    function applyCommercialBreakSwitches(settings) {
+        commercialBreakSettings = settings || commercialBreakSettings;
+        const scan = $('commercial-breaks-scan-enabled');
+        const write = $('commercial-breaks-write-files');
+        if (scan && commercialBreakSettings) {
+            scan.checked = !!commercialBreakSettings.scanEnabled;
+        }
+        if (write && commercialBreakSettings) {
+            write.checked = !!commercialBreakSettings.writeChaptersToFiles;
+        }
+        decorateCheckboxes();
+    }
+
+    function renderCommercialBreakScanStatus(status) {
+        const el = $('commercial-breaks-scan-status');
+        const runBtn = $('btn-run-commercial-breaks-scan');
+        if (!el || !status) {
+            return;
+        }
+
+        if (runBtn) {
+            const enabled = !!(status.scanEnabled || (commercialBreakSettings && commercialBreakSettings.scanEnabled));
+            runBtn.disabled = !!status.isRunning || !enabled;
+            runBtn.textContent = status.isRunning ? 'Scanning…' : 'Run now';
+        }
+
+        const next = status.nextRunAt ? new Date(status.nextRunAt).toLocaleString() : 'midnight';
+        if (status.isRunning) {
+            el.textContent = status.message || 'ffmpeg is scanning videos for commercial-break spots…';
+            return;
+        }
+
+        if (status.lastError) {
+            el.textContent =
+                `Last run failed: ${status.lastError}` +
+                (status.lastCompletedAt ? ` · finished ${new Date(status.lastCompletedAt).toLocaleString()}` : '') +
+                ` · next ${next}`;
+            return;
+        }
+
+        if (status.lastCompletedAt) {
+            el.textContent = `${status.message || 'Finished.'} Next midnight scan at ${next}.`;
+            return;
+        }
+
+        el.textContent = status.message || `Next commercial-break scan at ${next}.`;
+    }
+
+    async function loadCommercialBreakScan() {
+        try {
+            const [status, settings] = await Promise.all([
+                api('/tasks/commercial-breaks'),
+                commercialBreakSettings ? Promise.resolve(commercialBreakSettings) : api('/tasks/commercial-breaks/settings')
+            ]);
+            if (settings && !commercialBreakSettings) {
+                applyCommercialBreakSwitches(settings);
+            }
+            renderCommercialBreakScanStatus(status);
+            if (status && status.isRunning) {
+                startCommercialBreakScanPolling();
+            } else {
+                stopCommercialBreakScanPolling();
+            }
+        } catch (ignore) {
+            const el = $('commercial-breaks-scan-status');
+            if (el) {
+                el.textContent = 'Could not load commercial-break scan status.';
+            }
+        }
+    }
+
+    function startCommercialBreakScanPolling() {
+        if (commercialBreakScanPollTimer) {
+            return;
+        }
+
+        commercialBreakScanPollTimer = setInterval(() => {
+            loadCommercialBreakScan().catch(() => {});
+        }, 3000);
+    }
+
+    function stopCommercialBreakScanPolling() {
+        if (commercialBreakScanPollTimer) {
+            clearInterval(commercialBreakScanPollTimer);
+            commercialBreakScanPollTimer = null;
+        }
+    }
+
+    async function saveCommercialBreakSettings(partial) {
+        if (!commercialBreakSettings) {
+            try {
+                commercialBreakSettings = await api('/tasks/commercial-breaks/settings');
+            } catch (ignore) {
+                commercialBreakSettings = {};
+            }
+        }
+        const next = Object.assign({}, commercialBreakSettings || {}, commercialBreakSettingsFromForm(), partial || {});
+        const saved = await api('/tasks/commercial-breaks/settings', { method: 'PUT', body: JSON.stringify(next) });
+        commercialBreakSettings = saved;
+        applyCommercialBreakSwitches(saved);
+        await loadCommercialBreakScan();
+        return saved;
+    }
+
+    async function runCommercialBreakScan() {
+        const result = await api('/tasks/commercial-breaks', { method: 'POST' });
+        if (result.disabled) {
+            toast('Turn on Scan commercial breaks first.', 'info');
+            if (result.status) {
+                renderCommercialBreakScanStatus(result.status);
+            }
+            return;
+        }
+        if (result.alreadyRunning) {
+            toast('A commercial-break scan is already running.', 'info');
+        } else {
+            toast('Commercial-break scan started.', 'success');
+        }
+        if (result.status) {
+            renderCommercialBreakScanStatus(result.status);
+        }
+        startCommercialBreakScanPolling();
+        beginLibraryTaskPopup('commercial-breaks', 'Commercial breaks', result.status);
+        await loadCommercialBreakScan();
+    }
+
+    function openCommercialBreakSettings() {
+        const s = commercialBreakSettings || {};
+        openModal('Commercial break settings', `
+            <p class="hint">Tune blackdetect and silencedetect. Isolated black or silence scores about 45% and is dropped at the default 70% confidence. Overlapping black+silence scores about 90–100%.</p>
+            <label class="field">
+                <span>How quiet (dB)</span>
+                <input id="cb-silence-db" type="number" min="-90" max="0" step="1" value="${escapeHtml(String(s.silenceDb ?? -40))}" class="emby-input">
+            </label>
+            <p class="hint">Noise floor for silencedetect. Typical: −40.</p>
+            <label class="field">
+                <span>How long silence must last (seconds)</span>
+                <input id="cb-silence-min" type="number" min="0.05" max="5" step="0.05" value="${escapeHtml(String(s.silenceMinSeconds ?? 0.3))}" class="emby-input">
+            </label>
+            <label class="field">
+                <span>Darkness (pix_th)</span>
+                <input id="cb-black-pix" type="number" min="0.01" max="0.5" step="0.01" value="${escapeHtml(String(s.blackPixThreshold ?? 0.10))}" class="emby-input">
+            </label>
+            <p class="hint">How dark a pixel must be (0–1).</p>
+            <label class="field">
+                <span>Picture ratio (pic_th)</span>
+                <input id="cb-black-ratio" type="number" min="0.5" max="1" step="0.01" value="${escapeHtml(String(s.blackPictureRatio ?? 0.95))}" class="emby-input">
+            </label>
+            <p class="hint">Fraction of the frame that must be that dark.</p>
+            <label class="field">
+                <span>Min black frames</span>
+                <input id="cb-black-frames" type="number" min="1" max="120" step="1" value="${escapeHtml(String(s.blackMinFrames ?? 6))}" class="emby-input">
+            </label>
+            <label class="field">
+                <span>Confidence threshold (%)</span>
+                <input id="cb-confidence" type="number" min="1" max="100" step="1" value="${escapeHtml(String(s.confidencePercent ?? 70))}" class="emby-input">
+            </label>
+        `, `
+            <button type="button" class="emby-button" id="cb-settings-cancel">Cancel</button>
+            <button type="button" class="raised button-submit emby-button" id="cb-settings-save">Save</button>
+        `);
+        const cancel = $('cb-settings-cancel');
+        const save = $('cb-settings-save');
+        if (cancel) {
+            cancel.addEventListener('click', closeModal);
+        }
+        if (save) {
+            save.addEventListener('click', () => {
+                saveCommercialBreakSettings().then(() => {
+                    closeModal();
+                    toast('Commercial-break settings saved.', 'success');
+                }).catch((e) => toast(e.message, 'error'));
+            });
+        }
+    }
+
     function renderAboutDl(elementId, rows) {
         const el = $(elementId);
         if (!el) {
@@ -7325,40 +7523,87 @@
         };
     }
 
+    function describeAiGeneratePhase(job) {
+        const phase = job.currentPhase || job.phase || '';
+        const name = job.currentChannelName || job.channelName || '';
+        const who = name || '…';
+        const day = job.currentDay || 1;
+        const totalDays = job.totalDays || 14;
+        const page = job.page || 0;
+        const totalPages = job.totalPages || 0;
+        if (phase === 'priming' || String(phase).startsWith('priming')) {
+            if (page) {
+                return 'Priming ' + who + ' · page ' + page + '/' + (totalPages || '?');
+            }
+            return phase.indexOf('page') >= 0 ? who + ' · ' + phase : 'Priming catalog for ' + who;
+        }
+        if (phase === 'lineup' || phase === 'generating') {
+            return 'Generating weekly lineup for ' + who;
+        }
+        if (phase === 'playout') {
+            return 'Playout day ' + day + '/' + totalDays + ' · ' + who;
+        }
+        if (phase === 'horizon-full') {
+            return who + ' already has a ' + totalDays + ' day guide';
+        }
+        if (phase === 'queuing' || phase === 'queued') {
+            return name ? 'Queued ' + name : (job.message || 'Queued…');
+        }
+        if (phase === 'starting') {
+            return 'Starting…';
+        }
+        if (job.message) {
+            return job.message;
+        }
+        return phase ? who + ' · ' + phase : (name || 'Working…');
+    }
+
     function mapAiGenerateTask(job) {
         if (!job) {
             return null;
         }
 
-        const phase = job.currentPhase || job.phase || '';
-        let message = job.message || '';
-        if (!message) {
-            if (phase === 'priming' || String(phase).startsWith('priming')) {
-                message = 'Priming ' + (job.currentChannelName || '') + ' page ' + (job.page || 1) + '/' + (job.totalPages || '?');
-            } else if (phase === 'lineup' || phase === 'generating') {
-                message = 'Lineup for ' + (job.currentChannelName || '…');
-            } else if (phase === 'playout') {
-                message = 'Playout day ' + (job.currentDay || 1) + '/' + (job.totalDays || 14) + ' · ' + (job.currentChannelName || '');
-            } else if (phase === 'queuing') {
-                message = 'Queuing channels…';
-            } else {
-                message = phase;
-            }
+        const running = !!job.isRunning;
+        if (!running && !job.completedAt && !job.startedAt && !job.phase && !job.currentPhase) {
+            return null;
         }
 
+        const totalSteps = job.totalSteps || job.totalDays || 0;
+        const completedSteps = job.completedSteps != null ? job.completedSteps : (job.currentDay || 0);
         return {
-            isRunning: !!job.isRunning,
+            isRunning: running,
             lastStartedAt: job.startedAt,
             lastCompletedAt: job.completedAt,
-            lastError: job.lastError,
-            processed: job.completedSteps,
-            total: job.totalSteps,
-            percent: job.totalSteps
-                ? Math.max(0, Math.min(100, Math.round(100 * (job.completedSteps || 0) / job.totalSteps)))
+            lastError: job.lastError || job.error,
+            processed: completedSteps,
+            total: totalSteps,
+            percent: totalSteps
+                ? Math.max(0, Math.min(100, Math.round(100 * (completedSteps || 0) / totalSteps)))
                 : null,
-            message,
+            message: running
+                ? describeAiGeneratePhase(job)
+                : (job.lastError || job.error || job.message || (job.wasCancelled ? 'Cancelled.' : 'Finished.')),
             finishedAt: job.completedAt
         };
+    }
+
+    function refreshAiGeneratePopup(job) {
+        const mapped = mapAiGenerateTask(job);
+        if (!mapped) {
+            return;
+        }
+
+        const snap = {
+            kind: 'ai-generate',
+            kicker: 'AI lineup generator',
+            title: 'AI lineup generator',
+            phase: mapped.isRunning ? 'running' : (mapped.lastError ? 'error' : 'done'),
+            status: mapped
+        };
+        const snaps = readLibraryTaskSnaps().filter((row) => row.kind !== 'ai-generate');
+        snaps.push(snap);
+        writeLibraryTaskSnaps(snaps);
+        renderLibraryTaskPopup(snap);
     }
 
     async function fetchTaskStatus(path) {
@@ -7375,9 +7620,10 @@
         cached.forEach((snap) => {
             cachedByKind[snap.kind] = snap;
         });
-        const [ffprobe, aspect, cleanupRaw, aiRaw] = await Promise.all([
+        const [ffprobe, aspect, breaks, cleanupRaw, aiRaw] = await Promise.all([
             fetchTaskStatus('/tasks/ffprobe'),
             fetchTaskStatus('/tasks/true-aspect'),
+            fetchTaskStatus('/tasks/commercial-breaks'),
             fetchTaskStatus('/tasks/catalog-cleanup'),
             fetchTaskStatus('/ai/generate-all/status')
         ]);
@@ -7386,8 +7632,9 @@
         const candidates = [
             { kind: 'true-aspect', kicker: 'True aspect ratio', title: 'True aspect ratio', status: aspect || cachedByKind['true-aspect']?.status || null },
             { kind: 'ffprobe', kicker: 'ffprobe chapters', title: 'ffprobe chapters', status: ffprobe || cachedByKind.ffprobe?.status || null },
+            { kind: 'commercial-breaks', kicker: 'Commercial breaks', title: 'Commercial breaks', status: breaks || cachedByKind['commercial-breaks']?.status || null },
             { kind: 'cleanup', kicker: 'Catalog cleanup', title: 'Catalog cleanup', status: cleanup || cachedByKind.cleanup?.status || null },
-            { kind: 'ai-generate', kicker: 'AI lineup generator', title: 'AI lineup generator', status: aiGenerate || cachedByKind['ai-generate']?.status || null }
+            { kind: 'ai-generate', kicker: 'AI lineup generator', title: 'AI lineup generator', status: (aiGenerate && (aiGenerate.isRunning || aiGenerate.lastCompletedAt)) ? aiGenerate : (aiGenerate || cachedByKind['ai-generate']?.status || null) }
         ];
 
         return candidates.filter((row) => {
@@ -9478,6 +9725,7 @@
             loadLibraryScan();
             loadFfprobeScan();
             loadTrueAspectScan();
+            loadCommercialBreakScan();
             api('/news/settings').then((settings) => renderNewsBulletinStatus(settings.bulletin)).catch(() => {});
         }
         if (name === 'special') loadSpecialPresentations();
@@ -9726,6 +9974,32 @@
         click('btn-run-library-scan', () => runLibraryScan().catch((e) => toast(e.message, 'error')));
         click('btn-run-ffprobe-scan', () => runFfprobeScan().catch((e) => toast(e.message, 'error')));
         click('btn-run-true-aspect-scan', () => runTrueAspectScan().catch((e) => toast(e.message, 'error')));
+        click('btn-run-commercial-breaks-scan', () => runCommercialBreakScan().catch((e) => toast(e.message, 'error')));
+        click('btn-commercial-breaks-settings', () => {
+            const open = () => openCommercialBreakSettings();
+            if (commercialBreakSettings) {
+                open();
+                return;
+            }
+            api('/tasks/commercial-breaks/settings').then((settings) => {
+                applyCommercialBreakSwitches(settings);
+                open();
+            }).catch((e) => toast(e.message, 'error'));
+        });
+        const commercialScanSwitch = $('commercial-breaks-scan-enabled');
+        if (commercialScanSwitch) {
+            commercialScanSwitch.addEventListener('change', () => {
+                saveCommercialBreakSettings({ scanEnabled: commercialScanSwitch.checked })
+                    .catch((e) => toast(e.message, 'error'));
+            });
+        }
+        const commercialWriteSwitch = $('commercial-breaks-write-files');
+        if (commercialWriteSwitch) {
+            commercialWriteSwitch.addEventListener('change', () => {
+                saveCommercialBreakSettings({ writeChaptersToFiles: commercialWriteSwitch.checked })
+                    .catch((e) => toast(e.message, 'error'));
+            });
+        }
 
         click('btn-copy-m3u', () => copySetupUrl('m3u'));
         click('btn-copy-xmltv', () => copySetupUrl('xmltv'));

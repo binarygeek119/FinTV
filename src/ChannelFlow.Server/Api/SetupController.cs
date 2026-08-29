@@ -1,3 +1,4 @@
+using ChannelFlow.CommercialDetect;
 using FinTv;
 using FinTv.Auth;
 using FinTv.Configuration;
@@ -247,6 +248,7 @@ public class TasksController : ControllerBase
     private readonly CatalogLibraryScanService _libraryScan;
     private readonly CatalogFfprobeScanService _ffprobeScan;
     private readonly CatalogTrueAspectScanService _trueAspectScan;
+    private readonly CatalogCommercialBreakScanService _commercialBreakScan;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="TasksController"/> class.
@@ -258,6 +260,7 @@ public class TasksController : ControllerBase
         CatalogLibraryScanService libraryScan,
         CatalogFfprobeScanService ffprobeScan,
         CatalogTrueAspectScanService trueAspectScan,
+        CatalogCommercialBreakScanService commercialBreakScan,
         NewsBulletinService newsBulletins,
         StreamService streams,
         CommercialService commercials,
@@ -269,6 +272,7 @@ public class TasksController : ControllerBase
         _libraryScan = libraryScan;
         _ffprobeScan = ffprobeScan;
         _trueAspectScan = trueAspectScan;
+        _commercialBreakScan = commercialBreakScan;
         _newsBulletins = newsBulletins;
         _streams = streams;
         _commercials = commercials;
@@ -588,6 +592,88 @@ public class TasksController : ControllerBase
         });
 
         return Accepted(new { queued = true, status = _trueAspectScan.Describe() });
+    }
+
+    /// <summary>
+    /// Gets commercial-break scan status and detector settings.
+    /// </summary>
+    [HttpGet("commercial-breaks")]
+    public ActionResult<object> GetCommercialBreakScan()
+        => Ok(_commercialBreakScan.Describe());
+
+    /// <summary>
+    /// Queues a blackdetect+silencedetect pass over videos that still have no commercial-break scan.
+    /// </summary>
+    [HttpPost("commercial-breaks")]
+    public ActionResult<object> RunCommercialBreakScan()
+    {
+        var settings = FinTvRuntime.Current?.Configuration.CommercialBreakScan;
+        if (settings is null || !settings.ScanEnabled)
+        {
+            return Ok(new
+            {
+                queued = false,
+                disabled = true,
+                status = _commercialBreakScan.Describe()
+            });
+        }
+
+        if (!_commercialBreakScan.TryBegin())
+        {
+            return Ok(new { queued = false, alreadyRunning = true, status = _commercialBreakScan.Describe() });
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _commercialBreakScan.RunMissingAsync(begin: false, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception)
+            {
+                // Admin polls status for errors.
+            }
+        });
+
+        return Accepted(new { queued = true, status = _commercialBreakScan.Describe() });
+    }
+
+    [HttpGet("commercial-breaks/settings")]
+    public ActionResult<CommercialBreakScanSettings> GetCommercialBreakSettings()
+        => Ok(CloneSettings(FinTvRuntime.Current?.Configuration.CommercialBreakScan));
+
+    [HttpPut("commercial-breaks/settings")]
+    public ActionResult<CommercialBreakScanSettings> UpdateCommercialBreakSettings(
+        [FromBody] CommercialBreakScanSettings? request)
+    {
+        var plugin = FinTvRuntime.Current;
+        if (plugin is null)
+        {
+            return NotFound();
+        }
+
+        var next = request ?? new CommercialBreakScanSettings();
+        next.Clamp();
+        plugin.Configuration.CommercialBreakScan = next;
+        plugin.SaveConfiguration();
+        return Ok(CloneSettings(next));
+    }
+
+    private static CommercialBreakScanSettings CloneSettings(CommercialBreakScanSettings? source)
+    {
+        var settings = source ?? new CommercialBreakScanSettings();
+        settings.Clamp();
+        return new CommercialBreakScanSettings
+        {
+            ScanEnabled = settings.ScanEnabled,
+            WriteChaptersToFiles = settings.WriteChaptersToFiles,
+            SilenceDb = settings.SilenceDb,
+            SilenceMinSeconds = settings.SilenceMinSeconds,
+            BlackPixThreshold = settings.BlackPixThreshold,
+            BlackPictureRatio = settings.BlackPictureRatio,
+            BlackMinFrames = settings.BlackMinFrames,
+            ConfidencePercent = settings.ConfidencePercent
+        };
     }
 }
 

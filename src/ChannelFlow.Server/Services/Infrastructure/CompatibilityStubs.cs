@@ -3,18 +3,27 @@ using FinTv.Configuration;
 namespace FinTv.Services;
 
 /// <summary>
-/// Blackframe scanning lives on the Jellyfin plugin. This keeps the admin API shape.
+/// Starts the Tasks-tab commercial-break scan (legacy commercials API).
 /// </summary>
 public sealed class BlackframeChapterTask
 {
-    public Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    private readonly CatalogCommercialBreakScanService _scan;
+
+    public BlackframeChapterTask(CatalogCommercialBreakScanService scan)
     {
-        _ = cancellationToken;
-        var state = FinTvRuntime.Current?.Configuration.BlackframeTaskState ?? new BlackframeTaskState();
-        state.LastError = "Blackframe scan runs in the ChannelFlow Jellyfin plugin.";
-        FinTvRuntime.Current?.SaveConfiguration();
+        _scan = scan;
+    }
+
+    public async Task ExecuteAsync(IProgress<double> progress, CancellationToken cancellationToken)
+    {
+        if (!_scan.TryBegin())
+        {
+            progress.Report(100);
+            return;
+        }
+
+        await _scan.RunMissingAsync(begin: false, cancellationToken).ConfigureAwait(false);
         progress.Report(100);
-        return Task.CompletedTask;
     }
 }
 

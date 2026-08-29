@@ -1465,7 +1465,12 @@ public sealed class MediaServerService
             return string.IsNullOrWhiteSpace(collectionType) ? "homevideos" : collectionType;
         }
 
-        return collectionType ?? "";
+        if (string.IsNullOrWhiteSpace(collectionType))
+        {
+            return JellyfinLibraryNaming.GuessCollectionType(name) ?? "";
+        }
+
+        return collectionType;
     }
 
     public static string LibraryGroup(string? collectionType)
@@ -1479,28 +1484,7 @@ public sealed class MediaServerService
             return "news";
         }
 
-        var value = collectionType?.Trim().ToLowerInvariant() ?? "";
-        if (value is "tvshows" or "tv" or "series")
-        {
-            return "tv";
-        }
-
-        if (value is "movies" or "movie")
-        {
-            return "movies";
-        }
-
-        if (value is "musicvideos" or "musicvideo")
-        {
-            return "musicvideos";
-        }
-
-        if (value is "music")
-        {
-            return "music";
-        }
-
-        return "other";
+        return JellyfinLibraryNaming.GroupFromLibrary(collectionType, name) ?? "other";
     }
 }
 

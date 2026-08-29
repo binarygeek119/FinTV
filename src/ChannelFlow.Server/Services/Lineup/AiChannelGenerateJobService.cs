@@ -75,6 +75,20 @@ public sealed class AiChannelGenerateJobService
             {
                 Pending.Add(channelId);
             }
+
+            if (Volatile.Read(ref WorkerActive) == 0 && !Snapshot.IsRunning)
+            {
+                Snapshot.Phase = "queued";
+                Snapshot.Message = Pending.Count == 1
+                    ? "Queued…"
+                    : $"Queued {Pending.Count} channels…";
+                Snapshot.CompletedAt = null;
+                Snapshot.WasCancelled = false;
+                Snapshot.LastError = null;
+                Snapshot.CurrentDay = 0;
+                Snapshot.CurrentChannelIndex = 0;
+                Snapshot.ChannelName = null;
+            }
         }
 
         _logger.LogInformation("Queued AI lineup generation for channel {ChannelId}", channelId);
@@ -237,9 +251,12 @@ public sealed class AiChannelGenerateJobService
             var totalChannels = Math.Max(Snapshot.ChannelIds.Count, Pending.Count);
             var totalDays = Snapshot.TotalDays > 0 ? Snapshot.TotalDays : PlayoutScheduleHelper.GetPlayoutDaysToBuild();
             var totalSteps = Math.Max(1, totalChannels * totalDays);
+            var channelIndex = Math.Max(Snapshot.CurrentChannelIndex, string.IsNullOrWhiteSpace(Snapshot.ChannelName) ? 0 : 1);
             var completedSteps = Snapshot.Phase is "done" or "cancelled" or "error"
                 ? totalSteps
-                : Math.Max(0, ((Snapshot.CurrentDay <= 1 ? 0 : Snapshot.CurrentDay - 1) * totalChannels) + Math.Max(0, Snapshot.CurrentChannelIndex - 1));
+                : Snapshot.CurrentDay > 0
+                    ? ((Snapshot.CurrentDay - 1) * totalChannels) + Math.Max(channelIndex, 1)
+                    : 0;
             return new
             {
                 isRunning = Snapshot.IsRunning || Pending.Count > 0 || Volatile.Read(ref WorkerActive) > 0,
@@ -486,6 +503,55 @@ public sealed class AiChannelGenerateJobService
                 job.Applied = true;
             }
         }
+
+        SetSnapshot(s =>
+        {
+            s.Phase = progress.Phase;
+            s.ChannelName = progress.ChannelName;
+            s.CurrentDay = progress.CurrentDay;
+            if (progress.TotalDays > 0)
+            {
+                s.TotalDays = progress.TotalDays;
+            }
+
+            s.Message = FormatProgressMessage(progress);
+            s.CompletedAt = null;
+        });
+    }
+
+    private static string FormatProgressMessage(AiChannelBuildProgress progress)
+    {
+        var name = string.IsNullOrWhiteSpace(progress.ChannelName) ? "channel" : progress.ChannelName;
+        var phase = progress.Phase ?? "";
+        if (phase.StartsWith("priming", StringComparison.OrdinalIgnoreCase))
+        {
+            return phase.Contains("page", StringComparison.OrdinalIgnoreCase)
+                ? $"{name} · {phase}"
+                : $"Priming catalog for {name}";
+        }
+
+        if (phase is "generating" or "lineup")
+        {
+            return $"Generating weekly lineup for {name}";
+        }
+
+        if (phase == "playout")
+        {
+            var total = progress.TotalDays > 0 ? progress.TotalDays : PlayoutScheduleHelper.GetPlayoutDaysToBuild();
+            return $"Playout day {Math.Max(1, progress.CurrentDay)}/{total} · {name}";
+        }
+
+        if (phase == "horizon-full")
+        {
+            return $"{name} already has a {progress.TotalDays}-day guide";
+        }
+
+        if (phase is "queued" or "queuing")
+        {
+            return $"Queued {name}";
+        }
+
+        return string.IsNullOrWhiteSpace(phase) ? name : $"{name} · {phase}";
     }
 
     private void UpdateJobResult(Guid channelId, AiAutoApplyChannelResult result)

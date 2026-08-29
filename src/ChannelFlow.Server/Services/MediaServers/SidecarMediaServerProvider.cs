@@ -410,35 +410,5 @@ public sealed class SidecarMediaServerProvider : MediaServerProviderBase
     }
 
     private static string GuessCollectionType(string name)
-    {
-        if (PastTenseNewsCatalog.MatchesLibraryName(name))
-        {
-            return "homevideos";
-        }
-
-        if (name.Contains("tv", StringComparison.OrdinalIgnoreCase)
-            || name.Contains("show", StringComparison.OrdinalIgnoreCase)
-            || name.Contains("series", StringComparison.OrdinalIgnoreCase))
-        {
-            return "tvshows";
-        }
-
-        if (name.Contains("movie", StringComparison.OrdinalIgnoreCase)
-            || name.Contains("film", StringComparison.OrdinalIgnoreCase))
-        {
-            return "movies";
-        }
-
-        if (name.Contains("music video", StringComparison.OrdinalIgnoreCase))
-        {
-            return "musicvideos";
-        }
-
-        if (name.Contains("music", StringComparison.OrdinalIgnoreCase))
-        {
-            return "music";
-        }
-
-        return "mixed";
-    }
+        => JellyfinLibraryNaming.GuessCollectionType(name) ?? "mixed";
 }

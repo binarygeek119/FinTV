@@ -1,5 +1,7 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/ChannelFlow.CommercialDetect/ChannelFlow.CommercialDetect.csproj" />
+    <Project Path="src/ChannelFlow.CommercialSpotTester/ChannelFlow.CommercialSpotTester.csproj" />
     <Project Path="src/ChannelFlow.Server/ChannelFlow.Server.csproj" />
   </Folder>
 </Solution>

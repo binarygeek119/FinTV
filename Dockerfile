@@ -1,6 +1,7 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0-noble-amd64 AS build
 WORKDIR /src
 COPY global.json ./
+COPY src/ChannelFlow.CommercialDetect/ src/ChannelFlow.CommercialDetect/
 COPY src/ChannelFlow.Server/ src/ChannelFlow.Server/
 COPY logo.png logo-plane.png ./
 COPY logo.png src/ChannelFlow.Server/wwwroot/logo.png

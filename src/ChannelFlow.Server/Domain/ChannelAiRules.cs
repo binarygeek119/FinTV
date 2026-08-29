@@ -171,15 +171,6 @@ public static class ChannelAiRules
                 "satire", "slapstick", "rom-com", "romcom"
             }
         },
-        ["channelflow-funny"] = new ChannelCatalogGenreConstraints
-        {
-            RequiredGenreKeywords = new[] { "Comedy" },
-            RequiredPlotKeywords = new[]
-            {
-                "comedy", "comedic", "comedian", "stand-up", "standup", "sitcom",
-                "sketch comedy", "late night", "funny", "humor", "humour"
-            }
-        },
         ["channelflow-game-shows"] = new ChannelCatalogGenreConstraints
         {
             RequiredStudioKeywords = new[] { "Game Show Network", "GSN" },
@@ -254,7 +245,13 @@ public static class ChannelAiRules
         ["channelflow-funny"] = new ChannelCatalogLibraryConstraints
         {
             LibraryName = "Stand-Up Comedies Movies",
-            AlternateLibraryNames = ["Stand-Up Comedies TV Shows", "Stand-Up Comedies Movie", "Stand Up Comedies Movies"]
+            AlternateLibraryNames =
+            [
+                "Stand-Up Comedies TV Shows",
+                "Stand-Up Comedies TV Show",
+                "Stand-Up Comedies Movie",
+                "Stand Up Comedies Movies"
+            ]
         }
     };
 
@@ -917,4 +914,8 @@ public class ChannelCatalogLibraryConstraints
             .Where(name => !string.IsNullOrWhiteSpace(name))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+    public bool Matches(string? libraryName)
+        => !string.IsNullOrWhiteSpace(libraryName)
+            && AllLibraryNames().Any(name => name.Equals(libraryName.Trim(), StringComparison.OrdinalIgnoreCase));
 }

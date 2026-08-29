@@ -1,0 +1,76 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="ChannelFlow.CommercialSpotTester.MainWindow"
+        Title="Commercial Spot Tester"
+        Width="1100"
+        Height="760"
+        MinWidth="860"
+        MinHeight="560">
+    <DockPanel Margin="16">
+        <TextBlock DockPanel.Dock="Top"
+                   Text="Requires ffmpeg and ffprobe on PATH. Settings JSON matches ChannelFlow Tasks → Commercial breaks."
+                   Opacity="0.75"
+                   TextWrapping="Wrap"
+                   Margin="0,0,0,12" />
+
+        <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,8">
+            <TextBlock VerticalAlignment="Center" Text="Video" Margin="0,0,8,0" />
+            <TextBox Grid.Column="1" Name="VideoPathBox" Watermark="/path/to/episode.mkv" />
+            <Button Grid.Column="2" Name="BrowseButton" Content="Browse…" Margin="8,0,0,0" Click="OnBrowse" />
+        </Grid>
+
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8" Margin="0,0,0,12">
+            <Button Name="RunButton" Content="Scan" Click="OnScan" />
+            <Button Content="Load settings JSON" Click="OnLoadSettings" />
+            <Button Content="Save settings JSON" Click="OnSaveSettings" />
+            <TextBlock Name="StatusText" VerticalAlignment="Center" TextWrapping="Wrap" />
+        </StackPanel>
+
+        <Border DockPanel.Dock="Top" Padding="12" Margin="0,0,0,12" Background="#22FFFFFF" CornerRadius="8">
+            <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto,Auto">
+                <StackPanel Margin="0,0,16,8">
+                    <TextBlock Text="How quiet (dB)" />
+                    <NumericUpDown Name="SilenceDb" Minimum="-90" Maximum="0" Increment="1" FormatString="0" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Margin="0,0,0,8">
+                    <TextBlock Text="Silence length (seconds)" />
+                    <NumericUpDown Name="SilenceMin" Minimum="0.05" Maximum="5" Increment="0.05" FormatString="0.00" />
+                </StackPanel>
+                <StackPanel Grid.Row="1" Margin="0,0,16,8">
+                    <TextBlock Text="Darkness (pix_th)" />
+                    <NumericUpDown Name="BlackPix" Minimum="0.01" Maximum="0.5" Increment="0.01" FormatString="0.00" />
+                </StackPanel>
+                <StackPanel Grid.Row="1" Grid.Column="1" Margin="0,0,0,8">
+                    <TextBlock Text="Picture ratio (pic_th)" />
+                    <NumericUpDown Name="BlackRatio" Minimum="0.5" Maximum="1" Increment="0.01" FormatString="0.00" />
+                </StackPanel>
+                <StackPanel Grid.Row="2" Margin="0,0,16,8">
+                    <TextBlock Text="Min black frames" />
+                    <NumericUpDown Name="BlackFrames" Minimum="1" Maximum="120" Increment="1" FormatString="0" />
+                </StackPanel>
+                <StackPanel Grid.Row="2" Grid.Column="1" Margin="0,0,0,8">
+                    <TextBlock Text="Confidence threshold (%)" />
+                    <NumericUpDown Name="Confidence" Minimum="1" Maximum="100" Increment="1" FormatString="0" />
+                </StackPanel>
+                <TextBlock Grid.Row="3" Grid.ColumnSpan="2" Name="WindowsText" Opacity="0.8" TextWrapping="Wrap" />
+            </Grid>
+        </Border>
+
+        <DataGrid Name="ResultsGrid"
+                  IsReadOnly="true"
+                  CanUserResizeColumns="true"
+                  CanUserSortColumns="true"
+                  HeadersVisibility="Column"
+                  AutoGenerateColumns="False">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="90" />
+                <DataGridTextColumn Header="At" Binding="{Binding At}" Width="110" />
+                <DataGridTextColumn Header="Black" Binding="{Binding Black}" Width="170" />
+                <DataGridTextColumn Header="Silence" Binding="{Binding Silence}" Width="170" />
+                <DataGridTextColumn Header="Confidence" Binding="{Binding Confidence}" Width="110" />
+                <DataGridTextColumn Header="Window" Binding="{Binding Window}" Width="90" />
+                <DataGridTextColumn Header="Result" Binding="{Binding Result}" Width="90" />
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
+</Window>

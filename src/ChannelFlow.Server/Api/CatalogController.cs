@@ -329,7 +329,8 @@ public class CatalogController : ControllerBase
         {
             if (string.IsNullOrWhiteSpace(library.CollectionType))
             {
-                library.CollectionType = InferCollectionType(library.Kinds);
+                library.CollectionType = JellyfinLibraryNaming.GuessCollectionType(library.Name)
+                    ?? InferCollectionType(library.Kinds);
             }
 
             library.MemberIds.Add(library.Id);
@@ -338,7 +339,7 @@ public class CatalogController : ControllerBase
         return libraries.Values
             .Select(library =>
             {
-                var groups = LibraryGroupsFor(library.CollectionType, library.Kinds);
+                var groups = LibraryGroupsFor(library.CollectionType, library.Kinds, library.Name);
                 return new { library, groups };
             })
             .Where(row => row.groups.Length > 0 && !IsPlaceholderName(row.library.Name))
@@ -372,7 +373,7 @@ public class CatalogController : ControllerBase
             .Where(library => library.Id != Guid.Empty && !IsPlaceholderName(library.Name))
             .Select(library =>
             {
-                var groups = LibraryGroupsFor(library.CollectionType, []);
+                var groups = LibraryGroupsFor(library.CollectionType, [], library.Name);
                 countById.TryGetValue(library.Id, out var itemCount);
                 return new
                 {
@@ -487,23 +488,12 @@ public class CatalogController : ControllerBase
     private static bool IsKnownLibraryType(string? collectionType)
         => LibraryGroupForType(collectionType) is not null;
 
-    private static string? LibraryGroupForType(string? collectionType)
-    {
-        var type = (collectionType ?? string.Empty).Trim().ToLowerInvariant().Replace(" ", string.Empty);
-        return type switch
-        {
-            "tvshows" or "tvshow" or "tv" or "series" or "shows" => "tv",
-            "movies" or "movie" => "movies",
-            "music" or "audio" => "music",
-            "musicvideos" or "musicvideo" => "musicvideos",
-            "homevideos" or "homevideo" or "homemovies" or "homemovie" or "news" => "news",
-            _ => null
-        };
-    }
+    private static string? LibraryGroupForType(string? collectionType, string? name = null)
+        => JellyfinLibraryNaming.GroupFromLibrary(collectionType, name);
 
-    private static string[] LibraryGroupsFor(string? collectionType, HashSet<BaseItemKind> kinds)
+    private static string[] LibraryGroupsFor(string? collectionType, HashSet<BaseItemKind> kinds, string? name = null)
     {
-        var fromType = LibraryGroupForType(collectionType);
+        var fromType = LibraryGroupForType(collectionType, name);
         if (fromType is not null)
         {
             return [fromType];

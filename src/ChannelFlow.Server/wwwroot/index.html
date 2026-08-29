@@ -13,7 +13,7 @@
   <link rel="manifest" href="site.webmanifest?v=3d08b8f1">
   <meta name="theme-color" content="#101010">
   <link rel="stylesheet" href="css/legacy-admin.css">
-  <link rel="stylesheet" href="css/app.css?v=assets31">
+  <link rel="stylesheet" href="css/app.css?v=assets33">
 </head>
 <body>
   <div id="login-screen" class="auth-screen hidden">
@@ -1282,6 +1282,25 @@
                         <button type="button" id="btn-run-true-aspect-scan" class="raised button-submit emby-button">Scan Missing True Aspect</button>
                     </div>
                 </div>
+                <div class="card section-card">
+                    <h2>Commercial breaks</h2>
+                    <p class="hint">Finds black+silence spots and adds numbered <code>break</code> / <code>break 2</code> chapters in gaps after intro/preview/recap and before outro. Files with other chapter names are skipped. Off by default so Unraid does not start a long ffmpeg job until you enable it.</p>
+                    <label class="field checkbox-field">
+                        <input id="commercial-breaks-scan-enabled" type="checkbox">
+                        <span class="channelflow-check-box" aria-hidden="true"></span>
+                        <span>Scan commercial breaks</span>
+                    </label>
+                    <label class="field checkbox-field">
+                        <input id="commercial-breaks-write-files" type="checkbox">
+                        <span class="channelflow-check-box" aria-hidden="true"></span>
+                        <span>Write chapters to files (MKV / MP4)</span>
+                    </label>
+                    <p id="commercial-breaks-scan-status" class="hint">Loading commercial-break scan status…</p>
+                    <div class="actions">
+                        <button type="button" id="btn-commercial-breaks-settings" class="emby-button">Settings</button>
+                        <button type="button" id="btn-run-commercial-breaks-scan" class="raised button-submit emby-button">Run now</button>
+                    </div>
+                </div>
             </section>
             <section id="tab-about" class="tab-panel hidden" hidden>
                 <div class="card section-card">
@@ -1491,7 +1510,7 @@
     <p class="catalog-sync-meta" id="catalog-sync-meta"></p>
   </div>
   </div>
-  <script src="js/app.js?v=assets31"></script>
+  <script src="js/app.js?v=assets33"></script>
   <script src="js/shell.js?v=library5"></script>
 </body>
 </html>

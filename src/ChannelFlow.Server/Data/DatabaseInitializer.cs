@@ -342,10 +342,12 @@ public class DatabaseInitializer : IHostedService
             """ALTER TABLE "MediaItems" ADD COLUMN IF NOT EXISTS "FfprobeChaptersAt" timestamp with time zone NULL""",
             """ALTER TABLE "MediaItems" ADD COLUMN IF NOT EXISTS "TrueAspectRatio" text NULL""",
             """ALTER TABLE "MediaItems" ADD COLUMN IF NOT EXISTS "TrueAspectProbedAt" timestamp with time zone NULL""",
+            """ALTER TABLE "MediaItems" ADD COLUMN IF NOT EXISTS "CommercialBreaksProbedAt" timestamp with time zone NULL""",
             """CREATE INDEX IF NOT EXISTS "IX_MediaItems_AspectRatio" ON "MediaItems" ("AspectRatio")""",
             """CREATE INDEX IF NOT EXISTS "IX_MediaItems_FfprobeChaptersAt" ON "MediaItems" ("FfprobeChaptersAt")""",
             """CREATE INDEX IF NOT EXISTS "IX_MediaItems_TrueAspectRatio" ON "MediaItems" ("TrueAspectRatio")""",
             """CREATE INDEX IF NOT EXISTS "IX_MediaItems_TrueAspectProbedAt" ON "MediaItems" ("TrueAspectProbedAt")""",
+            """CREATE INDEX IF NOT EXISTS "IX_MediaItems_CommercialBreaksProbedAt" ON "MediaItems" ("CommercialBreaksProbedAt")""",
             """CREATE INDEX IF NOT EXISTS "IX_MediaItems_CatalogScope" ON "MediaItems" ("SourceConnectionId", "Kind", "IsMissing", "SeriesId")"""
         };
 

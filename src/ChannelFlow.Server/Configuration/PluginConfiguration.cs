@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using ChannelFlow.CommercialDetect;
 using FinTv.Domain;
 
 namespace FinTv.Configuration;
@@ -95,7 +96,7 @@ public class PluginConfiguration
     /// </summary>
     public int WeatherAlertCutInDurationSeconds { get; set; } = 20;
 
-    public BlackframeTaskState BlackframeTaskState { get; set; } = new();
+    public CommercialBreakScanSettings CommercialBreakScan { get; set; } = new();
 
     public CommercialBrainzSettings CommercialBrainz { get; set; } = new();
 

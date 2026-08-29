@@ -5,6 +5,8 @@ queries:
 
 paths:
   - src/ChannelFlow.Server
+  - src/ChannelFlow.CommercialDetect
+  - src/ChannelFlow.CommercialSpotTester
   - .github/workflows
 
 paths-ignore:

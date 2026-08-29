@@ -446,6 +446,7 @@ public class JellyfinCatalogService
     {
         var yearConstraints = ChannelAiRules.GetYearConstraints(channel);
         var genreConstraints = ChannelAiRules.GetGenreConstraints(channel);
+        var libraryConstraints = ChannelAiRules.GetLibraryConstraints(channel);
         HolidayDefinition? holiday = null;
         if (_holidays.IsHolidayChannel(channel))
         {
@@ -453,7 +454,8 @@ public class JellyfinCatalogService
             holiday = _holidays.GetActiveHoliday(date);
         }
 
-        if (yearConstraints is null && genreConstraints is null && holiday is null && !_holidays.IsHolidayChannel(channel)
+        if (yearConstraints is null && genreConstraints is null && libraryConstraints is null && holiday is null
+            && !_holidays.IsHolidayChannel(channel)
             && !PastTenseNewsCatalog.IsPastTenseNewsChannel(channel))
         {
             return items;
@@ -461,6 +463,10 @@ public class JellyfinCatalogService
 
         return items.Where(item =>
         {
+            if (libraryConstraints is not null && !libraryConstraints.Matches(item.LibraryName))
+            {
+                return false;
+            }
             if (PastTenseNewsCatalog.IsPastTenseNewsChannel(channel)
                 && !PastTenseNewsCatalog.IsHomeMovieItem(
                     item.LibraryName,
@@ -1041,24 +1047,43 @@ public class JellyfinCatalogService
             return false;
         }
 
-        var folder = ResolveScopedLibraryFolder(channel, libraryConstraint);
-        if (folder is null)
-        {
-            return false;
-        }
+        var folders = ResolveMatchingLibraryFolders(libraryConstraint);
+        query.Tags = Array.Empty<string>();
+        query.Genres = Array.Empty<string>();
 
         var selectedHomeVideo = FinTvRuntime.Current?.Configuration.JellyfinLibraries.HomeVideoLibraryIds ?? [];
         if (PastTenseNewsCatalog.IsPastTenseNewsChannel(channel) && selectedHomeVideo.Count > 1)
         {
-            query.Tags = Array.Empty<string>();
-            query.Genres = Array.Empty<string>();
             return true;
         }
 
-        query.ParentId = folder.Id;
-        query.Tags = Array.Empty<string>();
-        query.Genres = Array.Empty<string>();
+        if (folders.Count == 1 && libraryConstraint.AllLibraryNames().Count == 1)
+        {
+            query.ParentId = folders[0].Id;
+        }
+
         return true;
+    }
+
+    private List<CollectionFolder> ResolveMatchingLibraryFolders(ChannelCatalogLibraryConstraints constraint)
+    {
+        var names = constraint.AllLibraryNames().ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var found = new List<CollectionFolder>();
+        var root = _libraryManager.GetUserRootFolder();
+        if (root?.Children is null)
+        {
+            return found;
+        }
+
+        foreach (var child in root.Children)
+        {
+            if (child is CollectionFolder folder && names.Contains(folder.Name))
+            {
+                found.Add(folder);
+            }
+        }
+
+        return found;
     }
 
     private CollectionFolder? ResolveScopedLibraryFolder(Channel channel, ChannelCatalogLibraryConstraints constraint)
@@ -1095,7 +1120,7 @@ public class JellyfinCatalogService
             return homeVideoFallback;
         }
 
-        return ResolveLibraryFolder(constraint.LibraryName);
+        return ResolveMatchingLibraryFolders(constraint).FirstOrDefault();
     }
 
     private CollectionFolder? ResolveLibraryFolder(string libraryName)

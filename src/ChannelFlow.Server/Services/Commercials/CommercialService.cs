@@ -1,3 +1,4 @@
+using ChannelFlow.CommercialDetect;
 using FinTv.Configuration;
 using FinTv.Data;
 using FinTv.Domain;
@@ -43,7 +44,8 @@ public class CommercialService
 
     /// <summary>
     /// Lays out a show/movie with start commercials, chapter mid-breaks, and end-of-slot padding.
-    /// Mid-breaks take clock time (the program is split at chapters) so they help fill the timeslot.
+        /// Mid-breaks take clock time (the program is split at chapters) so they help fill the timeslot.
+        /// Jellyfin introskip <c>intro</c>, <c>preview</c>, <c>recap</c>, and <c>outro</c> are never mid-roll points.
     /// </summary>
     public async Task<ScheduledProgramResult> ScheduleProgramWithBreaksAsync(
         Channel channel,
@@ -704,6 +706,7 @@ public class CommercialService
         {
             var chapters = _chapterManager.GetChapters(itemId)
                 .OrderBy(chapter => chapter.StartPositionTicks)
+                .Where(chapter => !IntroSkipLayout.IsOpeningOrOutroName(chapter.Name))
                 .ToList();
             var namedCommercials = chapters
                 .Where(chapter => IsCommercialChapterName(chapter.Name))

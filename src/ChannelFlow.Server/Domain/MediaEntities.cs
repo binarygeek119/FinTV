@@ -107,6 +107,11 @@ public class MediaItem
     public DateTime? MissingSince { get; set; }
 
     /// <summary>
+    /// UTC time the commercial-break black+silence scan last ran. Null means never scanned.
+    /// </summary>
+    public DateTime? CommercialBreaksProbedAt { get; set; }
+
+    /// <summary>
     /// UTC time ffprobe last read chapter metadata from the local file. Null means never probed.
     /// </summary>
     public DateTime? FfprobeChaptersAt { get; set; }

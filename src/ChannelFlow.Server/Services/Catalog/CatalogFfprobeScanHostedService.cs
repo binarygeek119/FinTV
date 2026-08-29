@@ -9,17 +9,20 @@ public sealed class CatalogFfprobeScanHostedService : BackgroundService
 {
     private readonly CatalogFfprobeScanService _scan;
     private readonly CatalogTrueAspectScanService _trueAspect;
+    private readonly CatalogCommercialBreakScanService _commercialBreaks;
     private readonly DatabaseInitializer _database;
     private readonly ILogger<CatalogFfprobeScanHostedService> _logger;
 
     public CatalogFfprobeScanHostedService(
         CatalogFfprobeScanService scan,
         CatalogTrueAspectScanService trueAspect,
+        CatalogCommercialBreakScanService commercialBreaks,
         DatabaseInitializer database,
         ILogger<CatalogFfprobeScanHostedService> logger)
     {
         _scan = scan;
         _trueAspect = trueAspect;
+        _commercialBreaks = commercialBreaks;
         _database = database;
         _logger = logger;
     }
@@ -44,7 +47,7 @@ public sealed class CatalogFfprobeScanHostedService : BackgroundService
                 delay = TimeSpan.Zero;
             }
 
-            _logger.LogInformation("Next midnight chapter and true-aspect scans at {When} (in {Delay})", next, delay);
+            _logger.LogInformation("Next midnight chapter, true-aspect, and commercial-break scans at {When} (in {Delay})", next, delay);
             try
             {
                 await Task.Delay(delay, stoppingToken);
@@ -78,6 +81,19 @@ public sealed class CatalogFfprobeScanHostedService : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Scheduled true-aspect scan failed");
+            }
+
+            try
+            {
+                await _commercialBreaks.RunMissingAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Scheduled commercial-break scan failed");
             }
         }
     }
