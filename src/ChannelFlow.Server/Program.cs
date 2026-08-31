@@ -215,6 +215,7 @@ builder.Services.AddScoped<WeatherStarChannelService>();
 builder.Services.AddScoped<NewsChannelService>();
 builder.Services.AddSingleton<CatalogSyncProgress>();
 builder.Services.AddSingleton<QuickPinService>();
+builder.Services.AddSingleton<ClientLogStore>();
 builder.Services.AddSingleton<JellyfinMediaServerProvider>();
 builder.Services.AddSingleton<SidecarMediaServerProvider>();
 builder.Services.AddSingleton<IMediaServerProvider>(sp => sp.GetRequiredService<JellyfinMediaServerProvider>());

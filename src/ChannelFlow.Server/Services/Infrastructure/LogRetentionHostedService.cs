@@ -10,16 +10,22 @@ namespace FinTv.Services;
 public sealed class LogRetentionHostedService : BackgroundService
 {
     private readonly IWebHostEnvironment _env;
+    private readonly ClientLogStore _clientLogs;
     private readonly ILogger<LogRetentionHostedService> _logger;
 
-    public LogRetentionHostedService(IWebHostEnvironment env, ILogger<LogRetentionHostedService> logger)
+    public LogRetentionHostedService(
+        IWebHostEnvironment env,
+        ClientLogStore clientLogs,
+        ILogger<LogRetentionHostedService> logger)
     {
         _env = env;
+        _clientLogs = clientLogs;
         _logger = logger;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        TryPurge();
         while (!stoppingToken.IsCancellationRequested)
         {
             var delay = DelayUntilNextPurge(DateTime.Now);
@@ -32,23 +38,37 @@ public sealed class LogRetentionHostedService : BackgroundService
                 break;
             }
 
-            try
+            TryPurge();
+        }
+    }
+
+    private void TryPurge()
+    {
+        try
+        {
+            var logsDir = FileLogging.ResolveDirectory(_env.ContentRootPath);
+            var purged = FileLogging.PurgeExpiredLogs(logsDir, DateTime.Today);
+            var purgedClients = _clientLogs.PurgeExpired(DateTime.Today);
+            if (purged > 0)
             {
-                var logsDir = FileLogging.ResolveDirectory(_env.ContentRootPath);
-                var purged = FileLogging.PurgeExpiredLogs(logsDir, DateTime.Today);
-                if (purged > 0)
-                {
-                    _logger.LogInformation(
-                        "Removed {Count} ChannelFlow log file(s) older than {Days} days from {LogDirectory}",
-                        purged,
-                        FileLogging.KeptPreviousCalendarDays,
-                        logsDir);
-                }
+                _logger.LogInformation(
+                    "Removed {Count} ChannelFlow log file(s) older than {Days} days from {LogDirectory}",
+                    purged,
+                    FileLogging.KeptPreviousCalendarDays,
+                    logsDir);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+
+            if (purgedClients > 0)
             {
-                _logger.LogWarning(ex, "ChannelFlow log retention purge failed");
+                _logger.LogInformation(
+                    "Removed {Count} ChannelFlow client log file(s) older than {Days} days",
+                    purgedClients,
+                    FileLogging.KeptPreviousCalendarDays);
             }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "ChannelFlow log retention purge failed");
         }
     }
 

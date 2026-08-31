@@ -6749,6 +6749,7 @@
             if ($('general-public-url')) {
                 $('general-public-url').value = settings.publicBaseUrl || '';
             }
+            await loadClientLogList();
         } catch (err) {
             reportApiError(err, 'Could not load general settings.');
         }
@@ -6778,6 +6779,123 @@
             await loadGeneral();
         } catch (err) {
             toast(err.message, 'error');
+        }
+    }
+
+    let clientLogDevices = [];
+
+    function selectedClientLogDeviceId() {
+        return $('client-logs-device')?.value || '';
+    }
+
+    function selectedClientLogFile() {
+        return $('client-logs-file')?.value || '';
+    }
+
+    function fillClientLogDevices(devices, keepId) {
+        const select = $('client-logs-device');
+        if (!select) {
+            return;
+        }
+
+        const preferred = keepId || select.value;
+        select.innerHTML = '';
+        if (!devices.length) {
+            const empty = document.createElement('option');
+            empty.value = '';
+            empty.textContent = 'No clients yet';
+            select.appendChild(empty);
+            return;
+        }
+
+        devices.forEach((device) => {
+            const option = document.createElement('option');
+            option.value = device.deviceId;
+            const label = device.deviceName || device.deviceId;
+            const extra = [device.appVersion, device.osVersion].filter(Boolean).join(' · ');
+            option.textContent = extra ? `${label} (${extra})` : label;
+            select.appendChild(option);
+        });
+
+        if (preferred && devices.some((device) => device.deviceId === preferred)) {
+            select.value = preferred;
+        }
+    }
+
+    function fillClientLogFiles(files, keepName) {
+        const select = $('client-logs-file');
+        if (!select) {
+            return;
+        }
+
+        const preferred = keepName || select.value;
+        select.innerHTML = '';
+        if (!files.length) {
+            const empty = document.createElement('option');
+            empty.value = '';
+            empty.textContent = 'No log files';
+            select.appendChild(empty);
+            return;
+        }
+
+        files.forEach((file) => {
+            const option = document.createElement('option');
+            option.value = file.name;
+            option.textContent = file.name;
+            select.appendChild(option);
+        });
+
+        if (preferred && files.some((file) => file.name === preferred)) {
+            select.value = preferred;
+        }
+    }
+
+    async function loadClientLogList() {
+        const view = $('client-logs-view');
+        try {
+            const payload = await api('/client-logs');
+            clientLogDevices = Array.isArray(payload?.devices) ? payload.devices : [];
+            fillClientLogDevices(clientLogDevices);
+            if (!clientLogDevices.length) {
+                fillClientLogFiles([]);
+                if (view) {
+                    view.textContent = 'No ChannelFlow TV clients have sent logs yet.';
+                }
+                return;
+            }
+
+            await loadClientLogContents();
+        } catch (err) {
+            fillClientLogDevices([]);
+            fillClientLogFiles([]);
+            if (view) {
+                view.textContent = err.message || 'Could not load client logs.';
+            }
+        }
+    }
+
+    async function loadClientLogContents() {
+        const view = $('client-logs-view');
+        const deviceId = selectedClientLogDeviceId();
+        if (!deviceId) {
+            fillClientLogFiles([]);
+            if (view) {
+                view.textContent = 'No ChannelFlow TV clients have sent logs yet.';
+            }
+            return;
+        }
+
+        const params = new URLSearchParams();
+        const file = selectedClientLogFile();
+        if (file) {
+            params.set('file', file);
+        }
+        const query = params.toString();
+        const detail = await api('/client-logs/' + encodeURIComponent(deviceId) + (query ? '?' + query : ''));
+        fillClientLogFiles(Array.isArray(detail?.files) ? detail.files : [], detail?.file);
+        if (view) {
+            view.textContent = detail?.content || 'This file is empty.';
+            view.scrollTop = view.scrollHeight;
         }
     }
 
@@ -10057,6 +10175,23 @@
         click('btn-copy-m3u', () => copySetupUrl('m3u'));
         click('btn-copy-xmltv', () => copySetupUrl('xmltv'));
         click('btn-save-general', saveGeneralSettings);
+        click('btn-refresh-client-logs', () => loadClientLogList().catch((e) => toast(e.message, 'error')));
+        const clientLogDevice = $('client-logs-device');
+        if (clientLogDevice) {
+            clientLogDevice.addEventListener('change', () => {
+                const fileSelect = $('client-logs-file');
+                if (fileSelect) {
+                    fileSelect.innerHTML = '';
+                }
+                loadClientLogContents().catch((e) => toast(e.message, 'error'));
+            });
+        }
+        const clientLogFile = $('client-logs-file');
+        if (clientLogFile) {
+            clientLogFile.addEventListener('change', () => {
+                loadClientLogContents().catch((e) => toast(e.message, 'error'));
+            });
+        }
         click('btn-quick-pin-connect', () => redeemQuickPin().catch((e) => toast(e.message, 'error')));
         const quickPinInput = $('quick-pin-input');
         if (quickPinInput) {

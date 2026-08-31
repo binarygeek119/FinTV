@@ -1198,6 +1198,22 @@
                         <button type="button" id="btn-save-general" class="raised button-submit emby-button">Save General Settings</button>
                     </div>
                 </div>
+                <div class="card section-card">
+                    <h2>Client logs</h2>
+                    <p class="hint">Paired ChannelFlow TV apps send Timber logs here with the same API key used for Live TV. Files live under the server log folder and are deleted with the same 8-day retention.</p>
+                    <label class="field">
+                        <span>Device</span>
+                        <select id="client-logs-device" class="emby-select"></select>
+                    </label>
+                    <label class="field">
+                        <span>Log file</span>
+                        <select id="client-logs-file" class="emby-select"></select>
+                    </label>
+                    <div class="actions">
+                        <button type="button" id="btn-refresh-client-logs" class="emby-button">Refresh</button>
+                    </div>
+                    <pre id="client-logs-view" class="client-log-viewer" aria-live="polite">No ChannelFlow TV clients have sent logs yet.</pre>
+                </div>
             </section>
 
             <section id="tab-quickpin" class="tab-panel hidden" hidden>

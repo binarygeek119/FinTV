@@ -4,6 +4,7 @@ using FinTv.Domain;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -253,9 +254,12 @@ public sealed class ApiKeyMiddleware
         var path = context.Request.Path.Value ?? string.Empty;
         // Programme posters are <img> URLs in XMLTV; the browser cannot send the IPTV API key.
         var isIptvPoster = path.StartsWith("/iptv/poster/", StringComparison.OrdinalIgnoreCase);
+        var isClientLogIngest = HttpMethods.IsPost(context.Request.Method)
+            && path.StartsWith("/api/client-logs", StringComparison.OrdinalIgnoreCase);
         var needsApiKey = !isIptvPoster
             && (path.StartsWith("/iptv", StringComparison.OrdinalIgnoreCase)
-                || path.StartsWith("/api/plugin", StringComparison.OrdinalIgnoreCase));
+                || path.StartsWith("/api/plugin", StringComparison.OrdinalIgnoreCase)
+                || isClientLogIngest);
 
         if (needsApiKey)
         {

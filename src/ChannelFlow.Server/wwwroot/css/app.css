@@ -812,6 +812,22 @@ table.data-table tbody tr.selected {
     line-height: 1.35;
     resize: vertical;
 }
+.client-log-viewer {
+    width: 100%;
+    min-height: 18rem;
+    max-height: 28rem;
+    overflow: auto;
+    margin: 0.85rem 0 0;
+    padding: 0.75rem 0.85rem;
+    border-radius: var(--radius);
+    background: #101010;
+    border: 1px solid var(--border);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.75rem;
+    line-height: 1.4;
+    white-space: pre;
+    color: var(--text);
+}
 .checkbox-grid {
     display: grid;
     gap: 0.45rem 0.85rem;
