@@ -494,13 +494,9 @@ public sealed class ChannelCatalogPoolService
         }
 
         var library = ChannelAiRules.GetLibraryConstraints(channel);
-        if (library is not null)
+        if (library is not null && !library.Matches(entry.LibraryName))
         {
-            var names = library.AllLibraryNames();
-            if (!names.Any(name => string.Equals(name, entry.LibraryName, StringComparison.OrdinalIgnoreCase)))
-            {
-                return false;
-            }
+            return false;
         }
 
         var filter = FilterDefinition.Parse(channel.FilterJson);

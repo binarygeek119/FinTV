@@ -132,7 +132,7 @@ public sealed class JellyfinMediaServerProvider : MediaServerProviderBase
             }
 
             folderByName.TryGetValue(name, out var folder);
-            var externalId = string.IsNullOrWhiteSpace(folder?.ItemId) ? viewId : folder.ItemId;
+            var externalId = IsUsableItemId(folder?.ItemId) ? folder!.ItemId : viewId;
             if (!seen.Add(externalId))
             {
                 continue;
@@ -151,7 +151,7 @@ public sealed class JellyfinMediaServerProvider : MediaServerProviderBase
 
         foreach (var (name, folder) in folderByName)
         {
-            if (string.IsNullOrWhiteSpace(folder.ItemId) || !seen.Add(folder.ItemId))
+            if (!IsUsableItemId(folder.ItemId) || !seen.Add(folder.ItemId))
             {
                 continue;
             }
@@ -270,6 +270,22 @@ public sealed class JellyfinMediaServerProvider : MediaServerProviderBase
             return 0;
         }
 
+        if (query.WalkChildren)
+        {
+            return await ImportByWalkingAsync(
+                client,
+                root,
+                token,
+                userId,
+                connectionId,
+                library,
+                libraryIndex,
+                libraryCount,
+                query,
+                onBatch,
+                cancellationToken);
+        }
+
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -297,7 +313,7 @@ public sealed class JellyfinMediaServerProvider : MediaServerProviderBase
             {
                 rawCount++;
                 var item = MapItem(raw, library, connectionId);
-                if (item is not null)
+                if (item is not null && PathIsUnder(item.Path, query.PathPrefixes))
                 {
                     mapped.Add(item);
                 }
@@ -331,24 +347,12 @@ public sealed class JellyfinMediaServerProvider : MediaServerProviderBase
         MediaServerLibrary library,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(library.ExternalId))
-        {
-            _logger.LogWarning("Skipping Jellyfin library {Library}: no folder id", library.Name);
-            return null;
-        }
-
+        var folders = await LoadVirtualFoldersByNameAsync(client, root, token, cancellationToken);
+        folders.TryGetValue(library.Name, out var folder);
         var parentIds = new List<string>();
-        var folderId = await TryResolveCollectionFolderIdAsync(client, root, token, library.Name, cancellationToken);
-        if (!string.IsNullOrWhiteSpace(folderId))
-        {
-            parentIds.Add(folderId.Trim());
-        }
-
-        var storedId = library.ExternalId.Trim();
-        if (parentIds.TrueForAll(id => !id.Equals(storedId, StringComparison.OrdinalIgnoreCase)))
-        {
-            parentIds.Add(storedId);
-        }
+        AddParentId(parentIds, folder?.ItemId);
+        AddParentId(parentIds, await TryResolveViewIdAsync(client, root, token, userId, library.Name, cancellationToken));
+        AddParentId(parentIds, library.ExternalId);
 
         var homeVideo = IsHomeVideoLibrary(library);
         var attempts = new List<JellyfinItemsQuery>();
@@ -358,9 +362,11 @@ public sealed class JellyfinMediaServerProvider : MediaServerProviderBase
             {
                 attempts.Add(new JellyfinItemsQuery(parentId, "Video", SlimItemFields, true));
                 attempts.Add(new JellyfinItemsQuery(parentId, "Video", SlimItemFields, false));
-                attempts.Add(new JellyfinItemsQuery(parentId, "Video", FullItemFields, true));
+                attempts.Add(new JellyfinItemsQuery(parentId, "Movie,Video", SlimItemFields, true));
                 attempts.Add(new JellyfinItemsQuery(parentId, null, SlimItemFields, true));
                 attempts.Add(new JellyfinItemsQuery(parentId, null, null, false));
+                attempts.Add(new JellyfinItemsQuery(parentId, null, SlimItemFields, true, Recursive: false, WalkChildren: true));
+                attempts.Add(new JellyfinItemsQuery(parentId, null, null, false, Recursive: false, WalkChildren: true));
             }
             else
             {
@@ -368,6 +374,13 @@ public sealed class JellyfinMediaServerProvider : MediaServerProviderBase
                 attempts.Add(new JellyfinItemsQuery(parentId, "Movie,Series,Episode,Audio,MusicVideo,Video", SlimItemFields, true));
                 attempts.Add(new JellyfinItemsQuery(parentId, "Movie,Series,Episode,Audio,MusicVideo,Video", SlimItemFields, false));
             }
+        }
+
+        if (homeVideo && folder?.Locations is { Count: > 0 } locations)
+        {
+            attempts.Add(new JellyfinItemsQuery(null, "Video", SlimItemFields, true, PathPrefixes: locations));
+            attempts.Add(new JellyfinItemsQuery(null, "Movie,Video", SlimItemFields, true, PathPrefixes: locations));
+            attempts.Add(new JellyfinItemsQuery(null, "Video", SlimItemFields, false, PathPrefixes: locations));
         }
 
         string? lastError = null;
@@ -380,11 +393,13 @@ public sealed class JellyfinMediaServerProvider : MediaServerProviderBase
                 if (probe != attempts[0])
                 {
                     _logger.LogInformation(
-                        "Jellyfin library {Library} syncing with ParentId={ParentId} IncludeItemTypes={Types} userScoped={UserScoped}",
+                        "Jellyfin library {Library} syncing with ParentId={ParentId} IncludeItemTypes={Types} recursive={Recursive} userScoped={UserScoped} pathFilter={PathFilter}",
                         library.Name,
-                        probe.ParentId,
+                        probe.ParentId ?? "(none)",
                         probe.IncludeItemTypes ?? "(all)",
-                        probe.UserScoped);
+                        probe.Recursive,
+                        probe.UserScoped,
+                        probe.PathPrefixes is { Count: > 0 });
                 }
 
                 return probe;
@@ -406,15 +421,136 @@ public sealed class JellyfinMediaServerProvider : MediaServerProviderBase
         return null;
     }
 
-    private async Task<string?> TryResolveCollectionFolderIdAsync(
+    private async Task<int> ImportByWalkingAsync(
         HttpClient client,
         string root,
         string? token,
+        string userId,
+        Guid connectionId,
+        MediaServerLibrary library,
+        int libraryIndex,
+        int libraryCount,
+        JellyfinItemsQuery query,
+        Func<IReadOnlyList<CatalogItemDto>, CancellationToken, Task> onBatch,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(query.ParentId))
+        {
+            return 0;
+        }
+
+        var imported = 0;
+        var pending = new Queue<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        pending.Enqueue(query.ParentId);
+        seen.Add(query.ParentId);
+        var walk = query with { IncludeItemTypes = null, Recursive = false, WalkChildren = false };
+
+        while (pending.Count > 0)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var parentId = pending.Dequeue();
+            var folderQuery = walk with { ParentId = parentId };
+            var start = 0;
+            const int page = 200;
+            while (true)
+            {
+                _progress.Fetching(library.Name, libraryIndex, libraryCount, imported, 0);
+                var url = BuildItemsUrl(root, userId, folderQuery, start, page);
+                using var response = await GetAsync(client, url, token, cancellationToken);
+                if (!response.IsSuccessStatusCode)
+                {
+                    break;
+                }
+
+                using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+                if (!doc.RootElement.TryGetProperty("Items", out var pageItems) || pageItems.ValueKind != JsonValueKind.Array)
+                {
+                    break;
+                }
+
+                var rawCount = 0;
+                var mapped = new List<CatalogItemDto>();
+                foreach (var raw in pageItems.EnumerateArray())
+                {
+                    rawCount++;
+                    var childId = GetString(raw, "Id");
+                    if (IsFolderItem(raw) && IsUsableItemId(childId) && seen.Add(childId!))
+                    {
+                        pending.Enqueue(childId!);
+                        continue;
+                    }
+
+                    var item = MapItem(raw, library, connectionId);
+                    if (item is not null)
+                    {
+                        mapped.Add(item);
+                    }
+                }
+
+                if (mapped.Count > 0)
+                {
+                    await onBatch(mapped, cancellationToken);
+                    imported += mapped.Count;
+                }
+
+                start += rawCount;
+                var total = doc.RootElement.TryGetProperty("TotalRecordCount", out var totalEl) && totalEl.TryGetInt32(out var t)
+                    ? t
+                    : start;
+                if (rawCount == 0 || start >= total)
+                {
+                    break;
+                }
+            }
+        }
+
+        return imported;
+    }
+
+    private async Task<string?> TryResolveViewIdAsync(
+        HttpClient client,
+        string root,
+        string? token,
+        string userId,
         string libraryName,
         CancellationToken cancellationToken)
     {
-        var folders = await LoadVirtualFoldersByNameAsync(client, root, token, cancellationToken);
-        return folders.TryGetValue(libraryName, out var folder) ? folder.ItemId : null;
+        try
+        {
+            using var response = await GetAsync(
+                client,
+                root + "/Users/" + Uri.EscapeDataString(userId) + "/Views",
+                token,
+                cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+            if (!doc.RootElement.TryGetProperty("Items", out var items) || items.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+
+            foreach (var item in items.EnumerateArray())
+            {
+                if (!string.Equals(GetString(item, "Name"), libraryName, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var id = GetString(item, "Id");
+                return IsUsableItemId(id) ? id : null;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "Could not list Jellyfin views");
+        }
+
+        return null;
     }
 
     private async Task<Dictionary<string, JellyfinVirtualFolder>> LoadVirtualFoldersByNameAsync(
@@ -451,7 +587,8 @@ public sealed class JellyfinMediaServerProvider : MediaServerProviderBase
                 {
                     ItemId = id,
                     CollectionType = GetString(folder, "CollectionType"),
-                    ItemCount = folder.TryGetProperty("ItemCount", out var count) && count.TryGetInt32(out var n) ? n : null
+                    ItemCount = folder.TryGetProperty("ItemCount", out var count) && count.TryGetInt32(out var n) ? n : null,
+                    Locations = ReadLocations(folder)
                 };
             }
         }
@@ -478,9 +615,14 @@ public sealed class JellyfinMediaServerProvider : MediaServerProviderBase
             ? root + "/Users/" + Uri.EscapeDataString(userId) + "/Items"
             : root + "/Items";
         var url = path
-            + "?ParentId=" + Uri.EscapeDataString(query.ParentId)
-            + "&Recursive=true&EnableTotalRecordCount=true&EnableImages=false&EnableUserData=false"
+            + "?Recursive=" + (query.Recursive ? "true" : "false")
+            + "&EnableTotalRecordCount=true&EnableImages=false&EnableUserData=false"
             + "&StartIndex=" + startIndex + "&Limit=" + limit;
+        if (!string.IsNullOrWhiteSpace(query.ParentId))
+        {
+            url += "&ParentId=" + Uri.EscapeDataString(query.ParentId);
+        }
+
         if (!string.IsNullOrWhiteSpace(query.IncludeItemTypes))
         {
             url += "&IncludeItemTypes=" + query.IncludeItemTypes;
@@ -494,7 +636,14 @@ public sealed class JellyfinMediaServerProvider : MediaServerProviderBase
         return url;
     }
 
-    private sealed record JellyfinItemsQuery(string ParentId, string? IncludeItemTypes, string? Fields, bool UserScoped);
+    private sealed record JellyfinItemsQuery(
+        string? ParentId,
+        string? IncludeItemTypes,
+        string? Fields,
+        bool UserScoped,
+        bool Recursive = true,
+        bool WalkChildren = false,
+        IReadOnlyList<string>? PathPrefixes = null);
 
     private sealed class JellyfinVirtualFolder
     {
@@ -503,6 +652,79 @@ public sealed class JellyfinMediaServerProvider : MediaServerProviderBase
         public string? CollectionType { get; set; }
 
         public int? ItemCount { get; set; }
+
+        public IReadOnlyList<string> Locations { get; set; } = [];
+    }
+
+    private static void AddParentId(List<string> parentIds, string? id)
+    {
+        if (!IsUsableItemId(id))
+        {
+            return;
+        }
+
+        if (parentIds.Exists(existing => existing.Equals(id, StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        parentIds.Add(id!.Trim());
+    }
+
+    private static bool IsUsableItemId(string? id)
+        => Guid.TryParse(id, out var guid) && guid != Guid.Empty;
+
+    private static bool IsFolderItem(JsonElement raw)
+    {
+        if (raw.TryGetProperty("IsFolder", out var flag) && flag.ValueKind == JsonValueKind.True)
+        {
+            return true;
+        }
+
+        var type = GetString(raw, "Type") ?? "";
+        return type.Equals("Folder", StringComparison.OrdinalIgnoreCase)
+            || type.Equals("CollectionFolder", StringComparison.OrdinalIgnoreCase)
+            || type.Equals("UserView", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyList<string> ReadLocations(JsonElement folder)
+    {
+        if (!folder.TryGetProperty("Locations", out var locations) || locations.ValueKind != JsonValueKind.Array)
+        {
+            return [];
+        }
+
+        return locations.EnumerateArray()
+            .Select(item => item.ValueKind == JsonValueKind.String ? item.GetString() : null)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(path => path!.TrimEnd('/', '\\'))
+            .ToList();
+    }
+
+    private static bool PathIsUnder(string? path, IReadOnlyList<string>? prefixes)
+    {
+        if (prefixes is null || prefixes.Count == 0)
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        var normalized = path.Replace('\\', '/');
+        foreach (var prefix in prefixes)
+        {
+            var root = prefix.Replace('\\', '/');
+            if (normalized.StartsWith(root, StringComparison.OrdinalIgnoreCase)
+                && (normalized.Length == root.Length || normalized[root.Length] == '/'))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string TruncateJellyfinError(string? body)

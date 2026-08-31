@@ -1077,7 +1077,8 @@ public class JellyfinCatalogService
 
         foreach (var child in root.Children)
         {
-            if (child is CollectionFolder folder && names.Contains(folder.Name))
+            if (child is CollectionFolder folder
+                && (names.Contains(folder.Name) || constraint.Matches(folder.Name)))
             {
                 found.Add(folder);
             }

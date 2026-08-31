@@ -916,6 +916,19 @@ public class ChannelCatalogLibraryConstraints
             .ToList();
 
     public bool Matches(string? libraryName)
-        => !string.IsNullOrWhiteSpace(libraryName)
-            && AllLibraryNames().Any(name => name.Equals(libraryName.Trim(), StringComparison.OrdinalIgnoreCase));
+    {
+        if (string.IsNullOrWhiteSpace(libraryName))
+        {
+            return false;
+        }
+
+        var trimmed = libraryName.Trim();
+        if (AllLibraryNames().Any(name => name.Equals(trimmed, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        return AllLibraryNames().Any(PastTenseNewsCatalog.MatchesLibraryName)
+            && PastTenseNewsCatalog.MatchesLibraryName(trimmed);
+    }
 }
