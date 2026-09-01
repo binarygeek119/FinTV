@@ -5017,6 +5017,33 @@
         }
     }
 
+    function armWeatherAlertTickerLoop(preview) {
+        if (!preview) {
+            return;
+        }
+        preview.querySelectorAll('.weather-alert-ticker-track').forEach((track) => {
+            const img = track.querySelector('img');
+            const apply = (width) => {
+                if (!width || width < 8) {
+                    return;
+                }
+                // Match the TV overlay: 90px/s across one full copy of the seamless strip.
+                track.style.animationDuration = Math.max(12, width / 90) + 's';
+            };
+            if (img) {
+                const measure = () => apply(img.getBoundingClientRect().width);
+                if (img.complete && img.naturalWidth) {
+                    measure();
+                } else {
+                    img.addEventListener('load', measure, { once: true });
+                }
+                return;
+            }
+            const text = track.querySelector('span');
+            apply(text ? text.getBoundingClientRect().width : 0);
+        });
+    }
+
     function hideWeatherAlertTestPreview() {
         const preview = $('weather-alert-test-preview');
         const hint = $('weather-alert-test-hint');
@@ -5057,13 +5084,17 @@
                     + '</div>';
             }
             if (!png || !data.tickerHasText) {
-                inner += '<span>' + text + '</span>';
+                inner += '<div class="weather-alert-ticker-track">'
+                    + '<span>' + text + '</span>'
+                    + '<span>' + text + '</span>'
+                    + '</div>';
             }
             parts.push('<div class="weather-alert-ticker-preview' + (png ? ' weather-alert-ticker-preview-graphic' : '') + '" role="img" aria-label="Sample scrolling weather alert">' + inner + '</div>');
         }
         preview.innerHTML = parts.join('');
         preview.hidden = parts.length === 0;
         preview.classList.toggle('hidden', parts.length === 0);
+        armWeatherAlertTickerLoop(preview);
         if (hint) {
             hint.textContent = data?.message || '';
             hint.hidden = !data?.message;
