@@ -7,7 +7,8 @@
 Simulated live TV for [Jellyfin](https://jellyfin.org). This repository is **ChannelFlow-Server** — a .NET 10 app with a red Jellyfin-style Web UI, PostgreSQL, local library playback, WeatherStar, and news.
 
 Home: [github.com/binarygeek119/ChannelFlow](https://github.com/binarygeek119/ChannelFlow)  
-Client: [github.com/binarygeek119/ChannelFlow-TV-Client](https://github.com/binarygeek119/ChannelFlow-TV-Client)  
+TV client: [github.com/binarygeek119/ChannelFlow-TV-Client](https://github.com/binarygeek119/ChannelFlow-TV-Client)  
+Mobile client: [github.com/binarygeek119/ChannelFlow-Mobile-Client](https://github.com/binarygeek119/ChannelFlow-Mobile-Client)  
 Commercial detect: [github.com/binarygeek119/ChannelFlow-CommercialDetect](https://github.com/binarygeek119/ChannelFlow-CommercialDetect)  
 Commercial Spot Tester: [github.com/binarygeek119/ChannelFlow-CommercialSpotTester](https://github.com/binarygeek119/ChannelFlow-CommercialSpotTester)  
 Discord: [discord.gg/w7GK7Zufts](https://discord.gg/w7GK7Zufts)
