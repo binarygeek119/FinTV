@@ -681,7 +681,7 @@ public class EpgService
         return ms.ToArray();
     }
 
-    public async Task<string> GenerateM3uAsync(string baseUrl, CancellationToken cancellationToken = default)
+    public async Task<string> GenerateM3uAsync(string baseUrl, string? apiKey, CancellationToken cancellationToken = default)
     {
         var channels = await _db.Channels.Where(c => c.Enabled).OrderBy(c => c.Number).AsNoTracking().ToListAsync(cancellationToken);
         var sb = new StringBuilder();
@@ -700,7 +700,7 @@ public class EpgService
                 .Append("\",")
                 .AppendLine(channel.Name);
 
-            var streamUrl = PluginApiKey.AppendQuery($"{baseUrl.TrimEnd('/')}/iptv/stream/{channel.Id:N}");
+            var streamUrl = PluginApiKey.AppendQuery($"{baseUrl.TrimEnd('/')}/iptv/stream/{channel.Id:N}", apiKey);
             sb.AppendLine(streamUrl);
         }
 

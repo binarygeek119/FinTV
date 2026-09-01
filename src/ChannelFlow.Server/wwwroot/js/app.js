@@ -6782,6 +6782,64 @@
         }
     }
 
+    function formatClientWhen(value) {
+        if (!value) {
+            return 'Never';
+        }
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+            return String(value);
+        }
+        return date.toLocaleString();
+    }
+
+    async function loadPairedClients() {
+        const el = $('clients-table');
+        if (!el) {
+            return;
+        }
+
+        try {
+            const data = await api('/clients');
+            const clients = Array.isArray(data?.clients) ? data.clients : [];
+            if (!clients.length) {
+                el.innerHTML = '<p class="hint">No ChannelFlow TV apps are paired yet. Connect one from Quick Pin.</p>';
+                return;
+            }
+
+            el.innerHTML = `<table class="data-table">
+                <thead><tr><th>Name</th><th>App</th><th>Last seen</th><th>Paired</th><th>Key</th><th></th></tr></thead>
+                <tbody>${clients.map((client) => {
+                    const name = escapeHtml(client.deviceName || client.deviceId || 'ChannelFlow TV');
+                    const app = escapeHtml([client.appVersion, client.osVersion].filter(Boolean).join(' · ') || '—');
+                    return `<tr>
+                        <td>${name}</td>
+                        <td>${app}</td>
+                        <td>${escapeHtml(formatClientWhen(client.lastSeenAt))}</td>
+                        <td>${escapeHtml(formatClientWhen(client.createdAt))}</td>
+                        <td><code>${escapeHtml(client.keyHint || '••••')}</code></td>
+                        <td><button type="button" class="btn-danger" data-remove-client="${escapeHtml(client.id)}">Remove</button></td>
+                    </tr>`;
+                }).join('')}</tbody>
+            </table>`;
+        } catch (err) {
+            reportApiError(err, 'Could not load paired clients.');
+        }
+    }
+
+    async function removePairedClient(id) {
+        if (!id) {
+            return;
+        }
+        if (!confirm('Remove this ChannelFlow TV client? Its API key is destroyed. The next time that TV tries to connect, it cannot, and it will drop this server from its list.')) {
+            return;
+        }
+
+        await api('/clients/' + encodeURIComponent(id), { method: 'DELETE' });
+        toast('Client removed.', 'success');
+        await loadPairedClients();
+    }
+
     let clientLogDevices = [];
 
     function selectedClientLogDeviceId() {
@@ -9683,6 +9741,7 @@
         transcode: '/transcode',
         general: '/general',
         quickpin: '/quick-pin',
+        clients: '/clients',
         tasks: '/tasks',
         about: '/about',
         credits: '/credits'
@@ -9707,6 +9766,7 @@
         transcode: 'Transcode',
         general: 'General',
         quickpin: 'Quick Pin',
+        clients: 'Clients',
         tasks: 'Tasks',
         about: 'About',
         credits: 'Credits'
@@ -9731,6 +9791,7 @@
         transcode: 'Format and encoder for the live MPEG-TS pipeline',
         general: 'Server-wide ChannelFlow-Server settings',
         quickpin: 'Connect ChannelFlow TV with the pin it shows',
+        clients: 'Paired ChannelFlow TV apps and their API keys',
         tasks: 'Rebuild playouts, clear the guide, and maintenance',
         about: 'Version, system, and transcode information',
         credits: 'People and projects ChannelFlow builds on'
@@ -9874,6 +9935,7 @@
             loadGuide({ scrollToNow: isGuideViewingToday() });
         }
         if (name === 'general') loadGeneral();
+        if (name === 'clients') loadPairedClients();
         if (name === 'ebs') loadEbs();
         if (name === 'emergency') loadWeather();
         if (name === 'ai') loadAi();
@@ -10175,6 +10237,17 @@
         click('btn-copy-m3u', () => copySetupUrl('m3u'));
         click('btn-copy-xmltv', () => copySetupUrl('xmltv'));
         click('btn-save-general', saveGeneralSettings);
+        click('btn-refresh-clients', () => loadPairedClients().catch((e) => toast(e.message, 'error')));
+        const clientsTable = $('clients-table');
+        if (clientsTable) {
+            clientsTable.addEventListener('click', (event) => {
+                const button = event.target.closest('[data-remove-client]');
+                if (!button) {
+                    return;
+                }
+                removePairedClient(button.getAttribute('data-remove-client')).catch((e) => toast(e.message, 'error'));
+            });
+        }
         click('btn-refresh-client-logs', () => loadClientLogList().catch((e) => toast(e.message, 'error')));
         const clientLogDevice = $('client-logs-device');
         if (clientLogDevice) {

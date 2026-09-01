@@ -16,11 +16,13 @@ public class QuickPinController : ControllerBase
 {
     private readonly QuickPinService _quickPins;
     private readonly IPublicBaseUrl _appHost;
+    private readonly PairedTvClientStore _clients;
 
-    public QuickPinController(QuickPinService quickPins, IPublicBaseUrl appHost)
+    public QuickPinController(QuickPinService quickPins, IPublicBaseUrl appHost, PairedTvClientStore clients)
     {
         _quickPins = quickPins;
         _appHost = appHost;
+        _clients = clients;
     }
 
     /// <summary>
@@ -30,8 +32,14 @@ public class QuickPinController : ControllerBase
     public async Task<ActionResult> Redeem([FromBody] QuickPinRedeemRequest? request, CancellationToken cancellationToken)
     {
         var baseUrl = EpgService.GetPublicBaseUrl(Request, _appHost);
-        var (m3u, xmltv) = PluginApiKey.BuildLiveTvUrls(baseUrl);
+        var client = _clients.Issue();
+        var (m3u, xmltv) = PluginApiKey.BuildLiveTvUrls(baseUrl, client.ApiKey);
         var result = await _quickPins.RedeemAsync(request?.Pin, m3u, xmltv, cancellationToken).ConfigureAwait(false);
+        if (!result.Ok)
+        {
+            _clients.Remove(client.Id);
+        }
+
         return StatusCode(result.StatusCode, new { ok = result.Ok, message = result.Message });
     }
 }

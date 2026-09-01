@@ -1,10 +1,11 @@
 using System.Security.Cryptography;
+using System.Text;
 
 namespace FinTv.Auth;
 
 /// <summary>
-/// Shared secret used by the Jellyfin plugin and IPTV URLs.
-/// Created at startup when missing and managed from the General page.
+/// Shared secret used by the Jellyfin plugin and generic IPTV URLs.
+/// ChannelFlow TV apps receive a unique key from <see cref="FinTv.Services.PairedTvClientStore"/> instead.
 /// </summary>
 public static class PluginApiKey
 {
@@ -20,31 +21,40 @@ public static class PluginApiKey
     }
 
     public static string AppendQuery(string url)
+        => AppendQuery(url, Resolve());
+
+    public static string AppendQuery(string url, string? apiKey)
     {
-        var key = Resolve();
-        if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(url))
+        if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(url))
         {
             return url;
         }
 
         var separator = url.Contains('?', StringComparison.Ordinal) ? "&" : "?";
-        return url + separator + "apiKey=" + Uri.EscapeDataString(key);
+        return url + separator + "apiKey=" + Uri.EscapeDataString(apiKey.Trim());
     }
 
     public static (string M3u, string Epg) BuildLiveTvUrls(string baseUrl)
+        => BuildLiveTvUrls(baseUrl, Resolve());
+
+    public static (string M3u, string Epg) BuildLiveTvUrls(string baseUrl, string? apiKey)
     {
         var root = (baseUrl ?? string.Empty).TrimEnd('/');
-        return (AppendQuery($"{root}/iptv/channels.m3u"), AppendQuery($"{root}/iptv/epg.xml"));
+        return (AppendQuery($"{root}/iptv/channels.m3u", apiKey), AppendQuery($"{root}/iptv/epg.xml", apiKey));
     }
 
     public static bool Matches(string? provided)
+        => KeysEqual(provided, Resolve());
+
+    public static bool KeysEqual(string? left, string? right)
     {
-        var expected = Resolve();
-        if (string.IsNullOrWhiteSpace(expected))
+        if (string.IsNullOrEmpty(left) || string.IsNullOrEmpty(right) || left.Length != right.Length)
         {
             return false;
         }
 
-        return string.Equals(provided, expected, StringComparison.Ordinal);
+        return CryptographicOperations.FixedTimeEquals(
+            Encoding.ASCII.GetBytes(left),
+            Encoding.ASCII.GetBytes(right));
     }
 }

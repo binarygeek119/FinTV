@@ -165,6 +165,7 @@
                 <a href="guide" class="tab" data-tab="guide" role="tab">Guide</a>
                 <a href="general" class="tab" data-tab="general" role="tab">General</a>
                 <a href="quick-pin" class="tab" data-tab="quickpin" role="tab">Quick Pin</a>
+                <a href="clients" class="tab" data-tab="clients" role="tab">Clients</a>
                 <a href="channels" class="tab active" data-tab="channels" role="tab">Channels</a>
                 <a href="lineups" class="tab" data-tab="lineups" role="tab">Lineups</a>
                 <a href="presets" class="tab" data-tab="presets" role="tab">Presets</a>
@@ -1231,6 +1232,17 @@
                 </div>
             </section>
 
+            <section id="tab-clients" class="tab-panel hidden" hidden>
+                <div class="card section-card">
+                    <h2>Clients</h2>
+                    <p class="hint">Each ChannelFlow TV app gets its own API key when it pairs. Remove a client to destroy that key. The next time that TV tries to connect, it cannot, and it drops this server from its list.</p>
+                    <div class="actions">
+                        <button type="button" id="btn-refresh-clients" class="emby-button">Refresh</button>
+                    </div>
+                    <div id="clients-table" class="data-table-wrap"></div>
+                </div>
+            </section>
+
             <section id="tab-tasks" class="tab-panel hidden" hidden>
                 <div class="card">
                     <h2>Force commercial</h2>
@@ -1529,7 +1541,7 @@
     <p class="catalog-sync-meta" id="catalog-sync-meta"></p>
   </div>
   </div>
-  <script src="js/app.js?v=assets34"></script>
-  <script src="js/shell.js?v=library5"></script>
+  <script src="js/app.js?v=assets35"></script>
+  <script src="js/shell.js?v=library6"></script>
 </body>
 </html>

@@ -1,3 +1,4 @@
+using FinTv.Auth;
 using FinTv.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -13,22 +14,18 @@ namespace FinTv.Api;
 public class ClientLogsController : ControllerBase
 {
     private readonly ClientLogStore _store;
+    private readonly PairedTvClientStore _clients;
 
-    /// <summary>
-    /// Initializes a new instance of the <see cref="ClientLogsController"/> class.
-    /// </summary>
-    /// <param name="store">Client log store.</param>
-    public ClientLogsController(ClientLogStore store)
+    public ClientLogsController(ClientLogStore store, PairedTvClientStore clients)
     {
         _store = store;
+        _clients = clients;
     }
 
     /// <summary>
     /// Accepts a batch of log lines from a paired ChannelFlow TV client.
     /// Requires the ChannelFlow API key (<c>X-Api-Key</c> or <c>apiKey</c>).
     /// </summary>
-    /// <param name="request">Log batch.</param>
-    /// <returns>How many entries were stored.</returns>
     [HttpPost]
     [AllowAnonymous]
     [RequestSizeLimit(524_288)]
@@ -39,6 +36,14 @@ public class ClientLogsController : ControllerBase
         {
             return BadRequest(new { message = result.Message });
         }
+
+        _clients.Touch(ChannelFlowApiAuth.RequestApiKey(HttpContext), new PairedTvClientPresence
+        {
+            DeviceId = request?.DeviceId,
+            DeviceName = request?.DeviceName,
+            AppVersion = request?.AppVersion,
+            OsVersion = request?.OsVersion
+        });
 
         return Ok(new { accepted = result.Accepted, deviceId = result.DeviceId });
     }

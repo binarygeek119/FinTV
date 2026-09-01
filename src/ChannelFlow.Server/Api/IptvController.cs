@@ -1,5 +1,6 @@
 using FinTv.Domain;
 using FinTv.Services;
+using FinTv.Auth;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -40,7 +41,8 @@ public class IptvController : ControllerBase
     public async Task<IActionResult> GetM3u(CancellationToken cancellationToken)
     {
         var baseUrl = EpgService.GetPublicBaseUrl(Request, _appHost);
-        var content = await _epg.GenerateM3uAsync(baseUrl, cancellationToken);
+        var apiKey = ChannelFlowApiAuth.RequestApiKey(HttpContext) ?? PluginApiKey.Resolve();
+        var content = await _epg.GenerateM3uAsync(baseUrl, apiKey, cancellationToken);
         return Content(content, "audio/x-mpegurl");
     }
 

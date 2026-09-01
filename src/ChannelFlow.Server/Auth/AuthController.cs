@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using FinTv.Data;
 using FinTv.Domain;
+using FinTv.Services;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
@@ -256,20 +257,43 @@ public sealed class ApiKeyMiddleware
         var isIptvPoster = path.StartsWith("/iptv/poster/", StringComparison.OrdinalIgnoreCase);
         var isClientLogIngest = HttpMethods.IsPost(context.Request.Method)
             && path.StartsWith("/api/client-logs", StringComparison.OrdinalIgnoreCase);
+        var isClientSession = HttpMethods.IsPost(context.Request.Method)
+            && path.Equals("/api/clients/session", StringComparison.OrdinalIgnoreCase);
+        var isClientForget = HttpMethods.IsDelete(context.Request.Method)
+            && path.Equals("/api/clients/me", StringComparison.OrdinalIgnoreCase);
         var needsApiKey = !isIptvPoster
             && (path.StartsWith("/iptv", StringComparison.OrdinalIgnoreCase)
                 || path.StartsWith("/api/plugin", StringComparison.OrdinalIgnoreCase)
-                || isClientLogIngest);
+                || isClientLogIngest
+                || isClientSession
+                || isClientForget);
 
         if (needsApiKey)
         {
             var provided = context.Request.Headers["X-Api-Key"].FirstOrDefault()
                 ?? context.Request.Query["apiKey"].FirstOrDefault();
-            if (!PluginApiKey.Matches(provided))
+            var clients = context.RequestServices.GetRequiredService<PairedTvClientStore>();
+            var pluginOk = PluginApiKey.Matches(provided);
+            var paired = pluginOk ? null : clients.FindByApiKey(provided);
+            if (!pluginOk && paired is null)
             {
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                await context.Response.WriteAsJsonAsync(new { message = "Invalid API key." });
+                await context.Response.WriteAsJsonAsync(new
+                {
+                    message = "Invalid API key.",
+                    code = ChannelFlowApiAuth.RevokedCode
+                });
                 return;
+            }
+
+            context.Items[ChannelFlowApiAuth.ApiKeyItem] = provided?.Trim();
+            if (paired is not null)
+            {
+                context.Items[ChannelFlowApiAuth.ClientItem] = paired;
+                if (!path.StartsWith("/iptv/stream", StringComparison.OrdinalIgnoreCase))
+                {
+                    clients.Touch(provided);
+                }
             }
         }
 

@@ -35,6 +35,7 @@
         emergency: svgIcon('<path d="M12 3l9 16H3L12 3z"/><path d="M12 10v4M12 17h.01"/>'),
         ai: svgIcon('<path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="4"/>'),
         transcode: svgIcon('<rect x="2" y="4" width="8" height="7" rx="1.5"/><rect x="14" y="13" width="8" height="7" rx="1.5"/><path d="M10 7.5h2.5a3 3 0 0 1 3 3V13"/>'),
+        clients: svgIcon('<rect x="2" y="4" width="20" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>'),
         tasks: svgIcon('<path d="M9 11l2 2 4-4"/><rect x="3" y="4" width="18" height="16" rx="2"/>'),
         about: svgIcon('<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 8h.01"/>'),
         credits: svgIcon('<path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="10" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>')
@@ -67,6 +68,7 @@
         transcode: 'Transcode',
         general: 'General',
         quickpin: 'Quick Pin',
+        clients: 'Clients',
         tasks: 'Tasks',
         about: 'About',
         credits: 'Credits'
@@ -91,6 +93,7 @@
         transcode: 'Format and encoder for the live MPEG-TS pipeline',
         general: 'Server-wide ChannelFlow-Server settings',
         quickpin: 'Connect ChannelFlow TV with the pin it shows',
+        clients: 'Paired ChannelFlow TV apps and their API keys',
         tasks: 'Rebuild playouts, clear the guide, and maintenance',
         about: 'Version, system, and transcode information',
         credits: 'People and projects ChannelFlow builds on'
