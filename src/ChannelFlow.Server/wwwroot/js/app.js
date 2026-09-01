@@ -5022,25 +5022,12 @@
             return;
         }
         preview.querySelectorAll('.weather-alert-ticker-track').forEach((track) => {
-            const img = track.querySelector('img');
-            const apply = (width) => {
-                if (!width || width < 8) {
-                    return;
-                }
-                // Match the TV overlay: 90px/s across one full copy of the seamless strip.
-                track.style.animationDuration = Math.max(12, width / 90) + 's';
-            };
-            if (img) {
-                const measure = () => apply(img.getBoundingClientRect().width);
-                if (img.complete && img.naturalWidth) {
-                    measure();
-                } else {
-                    img.addEventListener('load', measure, { once: true });
-                }
+            const text = track.querySelector('span');
+            const width = text ? text.getBoundingClientRect().width : 0;
+            if (!width || width < 8) {
                 return;
             }
-            const text = track.querySelector('span');
-            apply(text ? text.getBoundingClientRect().width : 0);
+            track.style.animationDuration = Math.max(12, width / 90) + 's';
         });
     }
 
@@ -5074,22 +5061,14 @@
         }
         if (data?.mode === 'ticker') {
             const text = escapeHtml(data.tickerText || data.headline || 'WEATHER ALERT');
-            const png = data.tickerPng;
-            let inner = '';
-            if (png) {
-                const src = 'data:image/png;base64,' + png;
-                inner += '<div class="weather-alert-ticker-track">'
-                    + '<img alt="" src="' + src + '">'
-                    + '<img alt="" src="' + src + '">'
-                    + '</div>';
-            }
-            if (!png || !data.tickerHasText) {
-                inner += '<div class="weather-alert-ticker-track">'
+            parts.push(
+                '<div class="weather-alert-ticker-preview" role="img" aria-label="Sample scrolling weather alert">'
+                    + '<div class="weather-alert-ticker-track">'
                     + '<span>' + text + '</span>'
                     + '<span>' + text + '</span>'
-                    + '</div>';
-            }
-            parts.push('<div class="weather-alert-ticker-preview' + (png ? ' weather-alert-ticker-preview-graphic' : '') + '" role="img" aria-label="Sample scrolling weather alert">' + inner + '</div>');
+                    + '</div>'
+                + '</div>'
+            );
         }
         preview.innerHTML = parts.join('');
         preview.hidden = parts.length === 0;

@@ -515,47 +515,32 @@ input, select, textarea {
 .weather-alert-ticker-preview {
     position: relative;
     width: 100%;
-    /* Seamless EBS strip is 1920×335; scale the bar to that frame so the whole message loops. */
-    aspect-ratio: 1920 / 335;
-    height: auto;
+    height: 3.25rem;
     overflow: hidden;
-    background: #c41e3a;
     color: #fff;
     font-weight: 700;
-    font-size: clamp(1rem, 3.2vw, 1.85rem);
+    font-size: 0.92rem;
     letter-spacing: 0.03em;
+    background-color: #c41e3a;
+    background-image: url('../images/media/EBS/ebs_strip.png');
+    background-repeat: repeat-x;
+    background-size: auto 100%;
+    background-position: left center;
 }
 .weather-alert-ticker-track {
     display: flex;
-    align-items: stretch;
+    align-items: center;
     height: 100%;
     width: max-content;
     will-change: transform;
     animation: weather-alert-ticker-graphic 22s linear infinite;
 }
-.weather-alert-ticker-preview .weather-alert-ticker-track + .weather-alert-ticker-track {
-    position: absolute;
-    left: 0;
-    top: 0;
-    height: 100%;
-}
-.weather-alert-ticker-preview-graphic img,
-.weather-alert-ticker-track img {
-    display: block;
-    height: 100%;
-    width: auto;
-    max-width: none;
-    flex-shrink: 0;
-    object-fit: fill;
-}
 .weather-alert-ticker-track span {
-    position: static;
     display: flex;
     align-items: center;
     height: 100%;
     white-space: nowrap;
     padding: 0 3rem;
-    animation: none;
     text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
 }
 @keyframes weather-alert-ticker-graphic {
